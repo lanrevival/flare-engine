@@ -189,6 +189,9 @@ Set (FLARE_SOURCES
 	./src/MessageEngine.cpp
 	./src/ModManager.cpp
 	./src/NPC.cpp
+	./src/NullInputState.cpp
+	./src/NullRenderDevice.cpp
+	./src/NullSoundManager.cpp
 	./src/NPCManager.cpp
 	./src/PowerManager.cpp
 	./src/QuestLog.cpp
@@ -307,6 +310,9 @@ Set (FLARE_HEADERS
 	./src/MessageEngine.h
 	./src/ModManager.h
 	./src/NPC.h
+	./src/NullInputState.h
+	./src/NullRenderDevice.h
+	./src/NullSoundManager.h
 	./src/NPCManager.h
 	./src/PowerManager.h
 	./src/QuestLog.h

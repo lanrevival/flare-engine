@@ -126,6 +126,7 @@ private:
 	explicit Image(RenderDevice *device);
 	virtual ~Image();
 	friend class SDLSoftwareImage;
+	friend class NullImage;
 	friend class SDLHardwareImage;
 
 private:
