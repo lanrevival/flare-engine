@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, mp-foundation ]
   pull_request:
-    branches: [ master ]
+    branches: [ master, mp-foundation ]
 
   workflow_dispatch:
 
@@ -40,7 +40,7 @@ jobs:
         env:
           CC: ${{ matrix.compiler.cc }}
           CXX: ${{ matrix.compiler.cxx }}
-        run: cmake . && make
+        run: cmake . && make -j4 flare flare-server
 
       - name: Check Status
         if: steps.build.outcome != 'success'

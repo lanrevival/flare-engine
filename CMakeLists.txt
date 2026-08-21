@@ -357,7 +357,13 @@ IF (WIN32)
 	)
 ENDIF (WIN32)
 
+# The server reuses the whole engine, but swaps the client entry point for a headless one.
+Set (FLARE_SERVER_SOURCES ${FLARE_SOURCES})
+List (REMOVE_ITEM FLARE_SERVER_SOURCES ./src/main.cpp)
+List (APPEND FLARE_SERVER_SOURCES ./src/main_server.cpp)
+
 Add_Executable (flare ${FLARE_SOURCES} ${FLARE_HEADERS})
+Add_Executable (flare-server ${FLARE_SERVER_SOURCES} ${FLARE_HEADERS})
 
 # libSDLMain comes with libSDL if needed on certain platforms
 If (NOT SDL2MAIN_LIBRARY)
@@ -365,6 +371,7 @@ If (NOT SDL2MAIN_LIBRARY)
 EndIf (NOT SDL2MAIN_LIBRARY)
 
 Target_Link_Libraries (flare ${CMAKE_LD_FLAGS} ${SDL2_LIBRARY} ${SDL2IMAGE_LIBRARY} ${SDL2MIXER_LIBRARY} ${SDL2TTF_LIBRARY} ${SDL2MAIN_LIBRARY})
+Target_Link_Libraries (flare-server ${CMAKE_LD_FLAGS} ${SDL2_LIBRARY} ${SDL2IMAGE_LIBRARY} ${SDL2MIXER_LIBRARY} ${SDL2TTF_LIBRARY} ${SDL2MAIN_LIBRARY})
 
 
 # installing to the proper places
