@@ -30,7 +30,9 @@ RenderDevice* getRenderDevice(const std::string& name);
 void createRenderDeviceList(MessageEngine* msg, std::vector<std::string> &rd_name, std::vector<std::string> &rd_desc);
 
 FontEngine* getFontEngine();
-SoundManager* getSoundManager();
-InputState* getInputManager();
+// 'headless' selects the null implementations, used by the dedicated server. The default
+// keeps every existing client call site unchanged.
+SoundManager* getSoundManager(bool headless = false);
+InputState* getInputManager(bool headless = false);
 
 #endif

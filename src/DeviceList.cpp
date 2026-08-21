@@ -26,6 +26,10 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "SDLSoftwareRenderDevice.h"
 #include "SDLHardwareRenderDevice.h"
 
+#include "NullRenderDevice.h"
+#include "NullSoundManager.h"
+#include "NullInputState.h"
+
 #include "SDLFontEngine.h"
 #include "SDLSoundManager.h"
 #include "SDLInputState.h"
@@ -35,6 +39,9 @@ RenderDevice* getRenderDevice(const std::string& name) {
 	if (name != "") {
 		if (name == "sdl") return new SDLSoftwareRenderDevice();
 		else if (name == "sdl_hardware") return new SDLHardwareRenderDevice();
+		// Deliberately absent from createRenderDeviceList(): "null" is for the dedicated
+		// server and must never be offerable to a player in the video options menu.
+		else if (name == "null") return new NullRenderDevice();
 		else {
 			Utils::logError("DeviceList: Render device '%s' not found. Falling back to the default.", name.c_str());
 			return new SDLHardwareRenderDevice();
@@ -63,10 +70,12 @@ FontEngine* getFontEngine() {
 	return new SDLFontEngine();
 }
 
-SoundManager* getSoundManager() {
+SoundManager* getSoundManager(bool headless) {
+	if (headless) return new NullSoundManager();
 	return new SDLSoundManager();
 }
 
-InputState* getInputManager() {
+InputState* getInputManager(bool headless) {
+	if (headless) return new NullInputState();
 	return new SDLInputState();
 }

@@ -16,6 +16,8 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 */
 
 #include "NullRenderDevice.h"
+#include "CursorManager.h"
+#include "IconManager.h"
 #include "Settings.h"
 #include "SharedResources.h"
 #include "Utils.h"
@@ -76,6 +78,16 @@ int NullRenderDevice::createContextInternal() {
 	// createContext() retries with degraded video settings on -1 and calls Utils::Exit(1)
 	// if every attempt fails.
 	is_initialized = true;
+
+	// The SDL devices create these here, and the rest of the engine assumes they exist --
+	// CursorManager::logic() is called every frame by GameSwitcher::logic() and dereferences
+	// 'curs' without a null check. Both load their images through this device, so they cost
+	// nothing here. Mirrors SDLSoftwareRenderDevice.cpp:344-349.
+	delete icons;
+	icons = new IconManager();
+	delete curs;
+	curs = new CursorManager();
+
 	return 0;
 }
 

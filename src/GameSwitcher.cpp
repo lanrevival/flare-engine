@@ -63,13 +63,21 @@ GameSwitcher::GameSwitcher()
 
 	// The initial state is the intro cutscene and then title screen
 	GameStateTitle *title=new GameStateTitle();
-	GameStateCutscene *intro = new GameStateCutscene(title);
 
-	currentState = intro;
-
-	if (!intro->load("cutscenes/intro.txt")) {
-		delete intro;
+	if (settings->headless) {
+		// A dedicated server must not sit through a cutscene in real time. Skip straight
+		// to the title state, which --load-slot then advances through to GameStatePlay.
 		currentState = title;
+	}
+	else {
+		GameStateCutscene *intro = new GameStateCutscene(title);
+
+		currentState = intro;
+
+		if (!intro->load("cutscenes/intro.txt")) {
+			delete intro;
+			currentState = title;
+		}
 	}
 
 	label_fps = new WidgetLabel();

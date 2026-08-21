@@ -180,6 +180,10 @@ public:
 
 	bool no_lock_file;
 
+	// True only for flare-server. Suppresses presentation-only work that a headless
+	// process should never do, such as playing the intro cutscene in real time.
+	bool headless;
+
 private:
 	class ConfigEntry {
 	public:
