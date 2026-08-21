@@ -401,6 +401,9 @@ int main(int argc, char *argv[]) {
 		else if (arg == "safe-video") {
 			settings->safe_video = true;
 		}
+		else if (arg == "no-lock-file") {
+			settings->no_lock_file = true;
+		}
 		else if (arg == "help") {
 			Utils::logInfo("Command line options:\n\
 --help                   Prints this message.\n\
@@ -417,7 +420,9 @@ int main(int argc, char *argv[]) {
 --load-slot=<SLOT>       Loads a save slot by numerical index.\n\
 --load-script=<SCRIPT>   Execute's a script upon loading a saved game.\n\
                          The script path is mod-relative.\n\
---safe-video             Launches with the minimum video settings.");
+--safe-video             Launches with the minimum video settings.\n\
+--no-lock-file           Skips the single-instance check, so that more than one copy\n\
+                         of Flare can be run at once. Intended for testing.");
 			done = true;
 		}
 		else {

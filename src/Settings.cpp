@@ -67,6 +67,7 @@ Settings::Settings()
 	, encounter_dist(0) // set in updateScreenVars()
 	, soft_reset(false)
 	, safe_video(false)
+	, no_lock_file(false)
 {
 	config.resize(55);
 	setConfigDefault(0,  "fullscreen",          &typeid(fullscreen),          "1",             &fullscreen,          "Fullscreen mode | 0 = disable, 1 = enable");

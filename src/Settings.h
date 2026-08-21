@@ -178,6 +178,8 @@ public:
 
 	bool safe_video;
 
+	bool no_lock_file;
+
 private:
 	class ConfigEntry {
 	public:

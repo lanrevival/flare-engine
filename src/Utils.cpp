@@ -809,7 +809,7 @@ char* Utils::strdup(const std::string& str) {
 }
 
 void Utils::lockFileRead() {
-	if (!platform.has_lock_file)
+	if (!platform.has_lock_file || settings->no_lock_file)
 		return;
 
 	std::string lock_file_path = Filesystem::convertSlashes(settings->path_conf + "flare_lock");
@@ -834,7 +834,7 @@ void Utils::lockFileRead() {
 }
 
 void Utils::lockFileWrite(int increment) {
-	if (!platform.has_lock_file)
+	if (!platform.has_lock_file || settings->no_lock_file)
 		return;
 
 	std::string lock_file_path = settings->path_conf + "flare_lock";
@@ -859,7 +859,7 @@ void Utils::lockFileWrite(int increment) {
 }
 
 void Utils::lockFileCheck() {
-	if (!platform.has_lock_file)
+	if (!platform.has_lock_file || settings->no_lock_file)
 		return;
 
 	LOCK_INDEX = 0;
