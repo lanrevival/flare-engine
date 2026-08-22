@@ -193,6 +193,7 @@ Set (FLARE_SOURCES
 	./src/NullRenderDevice.cpp
 	./src/NullSoundManager.cpp
 	./src/NPCManager.cpp
+	./src/PlayerCommand.cpp
 	./src/PowerManager.cpp
 	./src/QuestLog.cpp
 	./src/RenderDevice.cpp
@@ -239,6 +240,7 @@ Set (FLARE_SOURCES
 )
 
 Set (FLARE_HEADERS
+	./src/ActionData.h
 	./src/Animation.h
 	./src/AnimationMedia.h
 	./src/AnimationManager.h
@@ -317,6 +319,7 @@ Set (FLARE_HEADERS
 	./src/NullRenderDevice.h
 	./src/NullSoundManager.h
 	./src/NPCManager.h
+	./src/PlayerCommand.h
 	./src/PowerManager.h
 	./src/QuestLog.h
 	./src/RenderDevice.h

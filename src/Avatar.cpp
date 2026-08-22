@@ -287,7 +287,7 @@ void Avatar::loadStepFX(const std::string& stepname) {
 }
 
 
-bool Avatar::pressing_move() {
+bool Avatar::pressing_move(const PlayerCommand& cmd) {
 	if (!allow_movement || teleport_camera_lock) {
 		return false;
 	}
@@ -298,14 +298,11 @@ bool Avatar::pressing_move() {
 		return mm_is_distant && !isNearMMtarget();
 	}
 	else {
-		return (inpt->pressing[Input::UP] && !inpt->lock[Input::UP]) ||
-			   (inpt->pressing[Input::DOWN] && !inpt->lock[Input::DOWN]) ||
-			   (inpt->pressing[Input::LEFT] && !inpt->lock[Input::LEFT]) ||
-			   (inpt->pressing[Input::RIGHT] && !inpt->lock[Input::RIGHT]);
+		return cmd.move_up || cmd.move_down || cmd.move_left || cmd.move_right;
 	}
 }
 
-void Avatar::set_direction() {
+void Avatar::set_direction(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 	if (teleport_camera_lock || !set_dir_timer.isEnd())
 		return;
 
@@ -314,10 +311,10 @@ void Avatar::set_direction() {
 	// handle direction changes
 	if (settings->mouse_move) {
 		if (mm_is_distant) {
-			if (inpt->pressing[mm_key] && (!inpt->lock[mm_key] || drag_walking)) {
-				FPoint mm_target_test = Utils::screenToMap(inpt->mouse.x, inpt->mouse.y, mapr->cam.pos.x, mapr->cam.pos.y);
+			if (cmd.mm_pressed && (!locks.lock[mm_key] || drag_walking)) {
+				FPoint mm_target_test = cmd.mm_map_target;
 				if (mapr->collider.isValidPosition(mm_target_test.x, mm_target_test.y, stats.movement_type, MapCollision::COLLIDE_TYPE_HERO)) {
-					inpt->lock[mm_key] = true;
+					locks.lock[mm_key] = true;
 					mm_target_desired = mm_target_test;
 				}
 			}
@@ -403,17 +400,17 @@ void Avatar::set_direction() {
 	}
 	else {
 		// movement keys take top priority for setting direction
-		bool press_up = inpt->pressing[Input::UP] && !inpt->lock[Input::UP];
-		bool press_down = inpt->pressing[Input::DOWN] && !inpt->lock[Input::DOWN];
-		bool press_left = inpt->pressing[Input::LEFT] && !inpt->lock[Input::LEFT];
-		bool press_right = inpt->pressing[Input::RIGHT] && !inpt->lock[Input::RIGHT];
+		bool press_up = cmd.move_up;
+		bool press_down = cmd.move_down;
+		bool press_left = cmd.move_left;
+		bool press_right = cmd.move_right;
 
 		// aiming keys can set direction as well
 		if (!press_up && !press_down && !press_left && !press_right) {
-			press_up = inpt->pressing[Input::AIM_UP] && !inpt->lock[Input::AIM_UP];
-			press_down = inpt->pressing[Input::AIM_DOWN] && !inpt->lock[Input::AIM_DOWN];
-			press_left = inpt->pressing[Input::AIM_LEFT] && !inpt->lock[Input::AIM_LEFT];
-			press_right = inpt->pressing[Input::AIM_RIGHT] && !inpt->lock[Input::AIM_RIGHT];
+			press_up = cmd.aim_up;
+			press_down = cmd.aim_down;
+			press_left = cmd.aim_left;
+			press_right = cmd.aim_right;
 		}
 
 		if (press_up && press_left) stats.direction = 1;
@@ -461,10 +458,10 @@ void Avatar::set_direction() {
  * - calculate the next frame of animation
  * - calculate camera position based on avatar position
  */
-void Avatar::logic() {
+void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 	bool restrict_power_use = false;
 	if (settings->mouse_move) {
-		if(inpt->pressing[mm_key] && !inpt->pressing[Input::SHIFT] && !menu->act->isWithinSlots(inpt->mouse) && !menu->act->isWithinMenus(inpt->mouse)) {
+		if(cmd.mm_pressed && !cmd.shift && !menu->act->isWithinSlots(cmd.mouse_screen) && !menu->act->isWithinMenus(cmd.mouse_screen)) {
 			restrict_power_use = true;
 		}
 	}
@@ -546,13 +543,13 @@ void Avatar::logic() {
 
 	// assist mouse movement
 	mm_key = settings->mouse_move_swap ? Input::MAIN2 : Input::MAIN1;
-	if (!inpt->pressing[mm_key]) {
+	if (!cmd.mm_pressed) {
 		drag_walking = false;
 	}
 
 	// block some interactions when attacking/moving
-	using_main1 = inpt->pressing[Input::MAIN1] && !inpt->lock[Input::MAIN1];
-	using_main2 = inpt->pressing[Input::MAIN2] && !inpt->lock[Input::MAIN2];
+	using_main1 = cmd.main1_active;
+	using_main2 = cmd.main2_active;
 
 	// handle animation
 	if (!stats.effects.stun && !stats.hold_state) {
@@ -572,9 +569,9 @@ void Avatar::logic() {
 	}
 
 	if (settings->mouse_move) {
-		if (inpt->pressing[mm_key]) {
+		if (cmd.mm_pressed) {
 			// prevents erratic behavior when mouse move is too close to player
-			FPoint target = Utils::screenToMap(inpt->mouse.x, inpt->mouse.y, mapr->cam.pos.x, mapr->cam.pos.y);
+			FPoint target = cmd.mm_map_target;
 			if (stats.cur_state == StatBlock::ENTITY_MOVE) {
 				mm_is_distant = Utils::calcDist(stats.pos, target) >= eset->misc.mouse_move_deadzone_moving;
 			}
@@ -582,9 +579,9 @@ void Avatar::logic() {
 				mm_is_distant = Utils::calcDist(stats.pos, target) >= eset->misc.mouse_move_deadzone_not_moving;
 			}
 
-			if (!inpt->lock[mm_key]) {
+			if (!locks.lock[mm_key]) {
 				if (settings->mouse_move_attack && cursor_enemy && !cursor_enemy->stats.hero_ally) {
-					inpt->lock[mm_key] = true;
+					locks.lock[mm_key] = true;
 					lock_enemy = cursor_enemy;
 					mm_target_object = MM_TARGET_ENTITY;
 				}
@@ -614,7 +611,7 @@ void Avatar::logic() {
 	}
 
 	set_dir_timer.tick();
-	if (!pressing_move()) {
+	if (!pressing_move(cmd)) {
 		set_dir_timer.reset(Timer::END);
 	}
 
@@ -635,7 +632,7 @@ void Avatar::logic() {
 			if (power->new_state == Power::STATE_INSTANT) {
 				// instant power, so no need to switch animation state
 				FPoint target = action.target;
-				beginPower(replaced_id, &target);
+				beginPower(cmd, replaced_id, &target);
 				powers->activate(replaced_id, &stats, stats.pos, target);
 				power_cooldown_timers[action.power]->setDuration(power->cooldown);
 				power_cooldown_timers[replaced_id]->setDuration(power->cooldown);
@@ -649,7 +646,7 @@ void Avatar::logic() {
 					attack_anim = power->attack_anim;
 
 					stats.cur_state = StatBlock::ENTITY_BLOCK;
-					beginPower(replaced_id, &act_target);
+					beginPower(cmd, replaced_id, &act_target);
 					powers->activate(replaced_id, &stats, stats.pos, act_target);
 					stats.refresh_stats = true;
 				}
@@ -667,7 +664,7 @@ void Avatar::logic() {
 				}
 				else if (power->type == Power::TYPE_BLOCK) {
 					stats.cur_state = StatBlock::ENTITY_BLOCK;
-					beginPower(replaced_id, &act_target);
+					beginPower(cmd, replaced_id, &act_target);
 					powers->activate(replaced_id, &stats, stats.pos, act_target);
 					stats.refresh_stats = true;
 				}
@@ -683,15 +680,15 @@ void Avatar::logic() {
 
 				// allowed to move or use powers?
 				if (settings->mouse_move) {
-					allowed_to_move = restrict_power_use && (!inpt->lock[mm_key] || drag_walking);
+					allowed_to_move = restrict_power_use && (!locks.lock[mm_key] || drag_walking);
 					allowed_to_turn = allowed_to_move;
 
-					if ((inpt->pressing[mm_key] && inpt->pressing[Input::SHIFT])) {
-						inpt->lock[mm_key] = false;
+					if ((cmd.mm_pressed && cmd.shift)) {
+						locks.lock[mm_key] = false;
 					}
 				}
 				else if (!settings->mouse_aim) {
-					allowed_to_move = !inpt->pressing[Input::SHIFT];
+					allowed_to_move = !cmd.shift;
 					allowed_to_turn = true;
 				}
 				else {
@@ -701,11 +698,11 @@ void Avatar::logic() {
 
 				// handle transitions to RUN
 				if (allowed_to_turn)
-					set_direction();
+					set_direction(cmd, locks);
 
-				if (pressing_move() && allowed_to_move) {
+				if (pressing_move(cmd) && allowed_to_move) {
 					if (move()) { // no collision
-						if (settings->mouse_move && inpt->pressing[mm_key]) {
+						if (settings->mouse_move && cmd.mm_pressed) {
 							drag_walking = true;
 						}
 
@@ -729,10 +726,10 @@ void Avatar::logic() {
 				}
 
 				// handle direction changes
-				set_direction();
+				set_direction(cmd, locks);
 
 				// handle transition to STANCE
-				if (!pressing_move()) {
+				if (!pressing_move(cmd)) {
 					stats.cur_state = StatBlock::ENTITY_STANCE;
 					break;
 				}
@@ -743,7 +740,7 @@ void Avatar::logic() {
 					stats.cur_state = StatBlock::ENTITY_STANCE;
 					break;
 				}
-				else if ((settings->mouse_move || !settings->mouse_aim) && inpt->pressing[Input::SHIFT]) {
+				else if ((settings->mouse_move || !settings->mouse_aim) && cmd.shift) {
 					// Shift should stop movement in some cases.
 					// With mouse_move, it allows the player to stop moving and begin attacking.
 					// With mouse_aim disabled, it allows the player to aim their attacks without having to move.
@@ -751,7 +748,7 @@ void Avatar::logic() {
 					break;
 				}
 
-				if (settings->mouse_move && inpt->pressing[mm_key] && (drag_walking || !inpt->lock[mm_key])) {
+				if (settings->mouse_move && cmd.mm_pressed && (drag_walking || !locks.lock[mm_key])) {
 					drag_walking = true;
 				}
 
@@ -777,7 +774,7 @@ void Avatar::logic() {
 					}
 
 					if (activeAnimation->isFirstFrame()) {
-						beginPower(current_power, &act_target);
+						beginPower(cmd, current_power, &act_target);
 						float attack_speed = (stats.effects.getAttackSpeed(attack_anim) * power->attack_speed) / 100.0f;
 						activeAnimation->setSpeed(attack_speed);
 						for (size_t i=0; i<anims.size(); ++i) {
@@ -852,7 +849,7 @@ void Avatar::logic() {
 
 				if (stats.transformed) {
 					stats.transform_duration = 0;
-					untransform();
+					untransform(locks);
 				}
 
 				setAnimation("die");
@@ -890,8 +887,8 @@ void Avatar::logic() {
 					}
 
 					// if the player is attacking, we need to block further input
-					if (inpt->pressing[Input::MAIN1])
-						inpt->lock[Input::MAIN1] = true;
+					if (cmd.main1_pressed)
+						locks.lock[Input::MAIN1] = true;
 				}
 
 				if (!stats.corpse && (activeAnimation->getTimesPlayed() >= 1 || activeAnimation->getName() != "die")) {
@@ -952,7 +949,7 @@ void Avatar::logic() {
 	}
 }
 
-void Avatar::beginPower(PowerID replaced_id, FPoint* target) {
+void Avatar::beginPower(const PlayerCommand& cmd, PowerID replaced_id, FPoint* target) {
 	if (!target)
 		return;
 
@@ -962,7 +959,7 @@ void Avatar::beginPower(PowerID replaced_id, FPoint* target) {
 		stats.blocking = true;
 
 	// automatically target the selected enemy with melee attacks
-	if (inpt->usingMouse() && cursor_enemy && !inpt->pressing[Input::SHIFT]) {
+	if (cmd.using_mouse && cursor_enemy && !cmd.shift) {
 		*target = cursor_enemy->stats.pos;
 	}
 
@@ -995,13 +992,13 @@ void Avatar::beginPower(PowerID replaced_id, FPoint* target) {
 	}
 }
 
-void Avatar::transform() {
+void Avatar::transform(PlayerInputLocks& locks) {
 	// dead players can't transform
 	if (stats.hp <= 0)
 		return;
 
 	// calling a transform power locks the actionbar, so we unlock it here
-	inpt->unlockActionBar();
+	locks.unlockActionBar();
 
 	delete charmed_stats;
 	charmed_stats = NULL;
@@ -1063,9 +1060,9 @@ void Avatar::transform() {
 	transform_map = mapr->getFilename();
 }
 
-void Avatar::untransform() {
+void Avatar::untransform(PlayerInputLocks& locks) {
 	// calling a transform power locks the actionbar, so we unlock it here
-	inpt->unlockActionBar();
+	locks.unlockActionBar();
 
 	// For timed transformations, move the player to the last valid tile when untransforming
 	mapr->collider.unblock(stats.pos.x, stats.pos.y);
@@ -1129,12 +1126,12 @@ void Avatar::untransform() {
 	stats.untransform_on_hit = false;
 }
 
-void Avatar::checkTransform() {
+void Avatar::checkTransform(PlayerInputLocks& locks) {
 	// handle transformation
 	if (stats.transform_type != "" && stats.transform_type != "untransform" && stats.transformed == false)
-		transform();
+		transform(locks);
 	if (stats.transform_type != "" && stats.transform_duration == 0)
-		untransform();
+		untransform(locks);
 }
 
 void Avatar::logMsg(const std::string& str, int type) {

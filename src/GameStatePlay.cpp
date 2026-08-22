@@ -66,6 +66,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "ModManager.h"
 #include "NPC.h"
 #include "NPCManager.h"
+#include "PlayerCommand.h"
 #include "PowerManager.h"
 #include "QuestLog.h"
 #include "RenderDevice.h"
@@ -855,6 +856,14 @@ void GameStatePlay::updateActionBar(unsigned index) {
  * This includes some message passing between child object
  */
 void GameStatePlay::logic() {
+	// Borrow the mouse-click arbitration state for this tick and hand it back at the end.
+	// inpt->lock[] is shared with roughly twenty UI files, and three of Avatar's four writes to
+	// it are conditional on simulation state, so they cannot be resolved at the boundary.
+	// See PlayerCommand.h. logic() has a single exit, so this is safe as a local.
+	PlayerCommand player_cmd;
+	PlayerInputLocks player_locks;
+	player_locks.copyFrom(*inpt);
+
 	if (inpt->window_resized)
 		refreshWidgets();
 
@@ -884,8 +893,12 @@ void GameStatePlay::logic() {
 		}
 		checkTitle();
 
+		// The one place player intent is read out of global input. Screen-to-map conversion
+		// happens here so the simulation never asks where the camera is pointing.
+		PlayerCommandBuilder::build(player_cmd, *inpt, mapr->cam.pos);
 		menu->act->checkAction(pc->action_queue);
-		pc->logic();
+		player_cmd.actions = pc->action_queue;
+		pc->logic(player_cmd, player_locks);
 
 		// transfer hero data to enemies, for AI use
 		if (pc->stats.get(Stats::STEALTH) > 100) entitym->hero_stealth = 100;
@@ -922,7 +935,7 @@ void GameStatePlay::logic() {
 	mapr->enemies_cleared = entitym->isCleared();
 	quests->logic();
 
-	pc->checkTransform();
+	pc->checkTransform(player_locks);
 
 	// change hero powers on transformation
 	if (pc->setPowers) {
@@ -1015,6 +1028,8 @@ void GameStatePlay::logic() {
 		mapr->loadMusic();
 		menu->exit->reload_music = false;
 	}
+
+	player_locks.copyTo(*inpt);
 }
 
 

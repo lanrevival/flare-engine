@@ -28,28 +28,13 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #define AVATAR_H
 
 #include "CommonIncludes.h"
+#include "ActionData.h"
 #include "Entity.h"
+#include "PlayerCommand.h"
 #include "Utils.h"
 
 class Entity;
 class StatBlock;
-
-class ActionData {
-public:
-	PowerID power;
-	unsigned hotkey;
-	bool instant_item;
-	bool activated_from_inventory;
-	FPoint target;
-
-	ActionData()
-		: power(0)
-		, hotkey(0)
-		, instant_item(false)
-		, activated_from_inventory(false)
-		, target(FPoint()) {
-	}
-};
 
 class Avatar : public Entity {
 private:
@@ -63,11 +48,11 @@ private:
 	static const int PATH_FOUND_FAIL_WAIT_SECONDS = 2;
 
 	void loadLayerDefinitions();
-	bool pressing_move();
-	void set_direction();
-	void transform();
-	void untransform();
-	void beginPower(PowerID power_id, FPoint* target);
+	bool pressing_move(const PlayerCommand& cmd);
+	void set_direction(const PlayerCommand& cmd, PlayerInputLocks& locks);
+	void transform(PlayerInputLocks& locks);
+	void untransform(PlayerInputLocks& locks);
+	void beginPower(const PlayerCommand& cmd, PowerID power_id, FPoint* target);
 
 
 	std::vector<Step_sfx> step_def;
@@ -122,9 +107,9 @@ public:
 	void loadGraphics(std::vector<Entity::Layer_gfx> _img_gfx);
 	void loadStepFX(const std::string& stepname);
 
-	void logic();
+	void logic(const PlayerCommand& cmd, PlayerInputLocks& locks);
 
-	void checkTransform();
+	void checkTransform(PlayerInputLocks& locks);
 
 	void logMsg(const std::string& str, int type);
 
