@@ -90,12 +90,19 @@ jobs:
     # that mod data, so a flare-game update moves them and would turn this job red for a change
     # that is not a regression. Bumping the pin means re-recording the goldens in the same commit.
     #
-    # NOT YET VERIFIED IN ACTIONS -- nothing has been pushed at the time of writing. The script and
-    # its negative control were verified locally. Confirm on the first push, and confirm it goes
-    # RED for a deliberate perturbation before trusting a green.
+    # Goldens are PER-PLATFORM AND PER-COMPILER, which is a measured finding, not tidiness: the
+    # same recording gives a different digest on macOS/arm64 than on Linux/x86-64. Running both
+    # gcc and clang here answers the question that decides Phase 3's architecture -- whether the
+    # divergence is the ARCHITECTURE (two compilers on one machine will agree) or CODEGEN (they
+    # will not, and lockstep between differently-built peers is then impossible).
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [ { cc: gcc, cxx: g++ }, { cc: clang, cxx: clang++ } ]
     env:
       FLARE_GAME_COMMIT: af6eee6d339ac98011864bfe89da837fe7769c28
+      FLARE_GOLDEN_SUFFIX: ${{ matrix.compiler.cc }}
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -119,6 +126,9 @@ jobs:
           for d in ../flare-game/mods/*/; do ln -s "$(cd "$d" && pwd)" "/tmp/flaredata/mods/$(basename "$d")"; done
 
       - name: Build server
+        env:
+          CC: ${{ matrix.compiler.cc }}
+          CXX: ${{ matrix.compiler.cxx }}
         run: cmake . && make -j4 flare-server
 
       - name: Run replays
