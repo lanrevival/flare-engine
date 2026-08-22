@@ -1,4 +1,16 @@
-# recording  ticks
-smoke        600
-patrol       2000
-attack       1200
+# recording  ticks  slot  requires
+#
+# slot      which save game in plans/artifacts/P0.5-make-fixture.sh the run boots from.
+#           1 = movement fixture, 2 = combat, 3 = beatdown.
+# requires  simevents counters that must be NON-ZERO for this recording, or '-' for none.
+#           This column exists because P0.5b shipped a recording called 'attack' that never
+#           attacked, and three matching digests could not tell anyone. A digest proves the world
+#           changed; only these say WHICH code ran.
+#
+#           'map_event' is on every row as a canary. It is emitted during map load, so a zero
+#           there means no map loaded at all -- which is exactly the state every Linux CI run was
+#           in until P0.5c, hashing an empty world and passing.
+smoke        600   1  map_event,step
+patrol       2000  1  map_event,step
+melee        2956  2  map_event,attack,hit,die,step,levelup,loot,power
+beatdown     2956  3  map_event,attack,hit,step,power,hazard_hit,lowhp_start,lowhp_stop

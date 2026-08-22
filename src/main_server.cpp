@@ -230,9 +230,23 @@ static float getSecondsElapsed(uint64_t prev_ticks, uint64_t now_ticks) {
 // Mirrors main.cpp. A stall must not become a fast-forward.
 static const int MAX_CATCHUP_TICKS = 5;
 
-static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_every) {
+// How often the trajectory digest samples the world. 30 ticks is twice a second at
+// Settings::SIM_TICK_HZ.
+//
+// A digest of the FINAL state only is not enough, and that is measured rather than assumed:
+// raising the hero's melee damage by one point in engine/stats.txt did not move smoke, patrol or
+// melee, even though melee.rec kills two goblins. The extra damage changed when they died, not
+// whether -- a dead enemy is at hp 0 either way, so the end state converges and the difference
+// disappears. A golden that cannot see a change to weapon damage is not much of a regression
+// test for a combat refactor. Sampling the whole run fixes that; --hash-every is still the tool
+// for finding WHICH tick diverged.
+static const unsigned long TRAJECTORY_SAMPLE_TICKS = 30;
+
+static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_every,
+                                    uint64_t* trajectory) {
 	bool done = false;
 	unsigned long total_ticks = 0;
+	uint64_t traj = WorldHash::init();
 
 	// The server renders nothing, so there is only one rate here: the shared simulation step.
 	// --max-fps is accepted and ignored on purpose; see parseServerArgs().
@@ -287,6 +301,9 @@ static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_
 				       WorldHash::toString(WorldHash::compute(total_ticks)).c_str());
 			}
 
+			if (total_ticks % TRAJECTORY_SAMPLE_TICKS == 0)
+				traj = WorldHash::mixU64(traj, WorldHash::compute(total_ticks));
+
 			done = gswitch->done || shutdown_requested;
 			if (max_ticks > 0 && total_ticks >= max_ticks)
 				done = true;
@@ -320,6 +337,11 @@ static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_
 		}
 		prev_ticks = SDL_GetPerformanceCounter();
 	}
+
+	// Always fold in the final state, whether or not it landed on a sample boundary.
+	traj = WorldHash::mixU64(traj, WorldHash::compute(total_ticks));
+	if (trajectory)
+		*trajectory = traj;
 
 	return total_ticks;
 }
@@ -461,7 +483,8 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	unsigned long ticks = serverMainLoop(args.max_ticks, args.hash_every);
+	uint64_t trajectory = WorldHash::init();
+	unsigned long ticks = serverMainLoop(args.max_ticks, args.hash_every, &trajectory);
 
 	replay->finish();
 
@@ -476,9 +499,28 @@ int main(int argc, char *argv[]) {
 	Utils::logInfo("main_server: sim event queue high water = %lu",
 	               static_cast<unsigned long>(sim_events->getHighWater()));
 
+	// stdout and unconditional, for the same reason the high water is: a coverage claim you have
+	// to remember to ask for is a coverage claim nobody checks. tests/run-replays.sh parses this
+	// line to assert that a recording named 'attack' actually attacks -- P0.5b's did not, and the
+	// digest could not tell anyone. Single line, "name=count" pairs, stable names.
+	{
+		printf("simevents");
+		for (int i = 0; i < SimEvent::TYPE_COUNT; ++i)
+			printf(" %s=%lu", SimEvent::typeName(i), sim_events->getCount(i));
+		printf("\n");
+	}
+
 	// stdout, not the log: golden-file comparison should not have to parse timestamps.
-	if (args.hash_at_exit)
-		printf("%s\n", WorldHash::toString(WorldHash::compute(ticks)).c_str());
+	//
+	// This is the TRAJECTORY digest -- every sample taken during the run folded together, not
+	// just the world as it stands now. See TRAJECTORY_SAMPLE_TICKS for why the end state alone
+	// was not enough. The final-state digest is still printed underneath it for debugging; the
+	// golden files compare the first line, because tests/run-replays.sh greps '^0x'.
+	if (args.hash_at_exit) {
+		printf("%s\n", WorldHash::toString(trajectory).c_str());
+		Utils::logInfo("main_server: final-state digest = %s",
+		               WorldHash::toString(WorldHash::compute(ticks)).c_str());
+	}
 
 	serverCleanup();
 

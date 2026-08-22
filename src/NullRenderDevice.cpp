@@ -88,6 +88,9 @@ int NullRenderDevice::createContextInternal() {
 	delete curs;
 	curs = new CursorManager();
 
+	// The SDL devices do this here too (SDLSoftwareRenderDevice.cpp:337). See windowResize().
+	windowResize();
+
 	return 0;
 }
 
@@ -147,6 +150,18 @@ void NullRenderDevice::commitFrame() {
 }
 
 void NullRenderDevice::windowResize() {
+	// NOT a no-op, and the reason is not graphics.
+	//
+	// windowResizeInternal() is what computes settings->view_w/view_h and their halves, and
+	// Settings::updateScreenVars() derives encounter_dist from them. encounter_dist gates the
+	// ENTITY AI: EntityBehavior::logic() returns immediately for any enemy further away than it
+	// (EntityBehavior.cpp:93). Leave this empty and the server runs with encounter_dist = 0, so
+	// no enemy ever acts unless it is standing on the player's exact position -- which is what
+	// every replay golden recorded before P0.5c was hashing.
+	//
+	// The SDL devices call this from createContextInternal(); so does ours, for the same reason.
+	windowResizeInternal();
+	settings->updateScreenVars();
 }
 
 void NullRenderDevice::setBackgroundColor(Color color) {

@@ -90,11 +90,18 @@ jobs:
     # that mod data, so a flare-game update moves them and would turn this job red for a change
     # that is not a regression. Bumping the pin means re-recording the goldens in the same commit.
     #
-    # Goldens are PER-PLATFORM AND PER-COMPILER, which is a measured finding, not tidiness: the
-    # same recording gives a different digest on macOS/arm64 than on Linux/x86-64. Running both
-    # gcc and clang here answers the question that decides Phase 3's architecture -- whether the
-    # divergence is the ARCHITECTURE (two compilers on one machine will agree) or CODEGEN (they
-    # will not, and lockstep between differently-built peers is then impossible).
+    # Goldens are PER-PLATFORM AND PER-COMPILER. Running both gcc and clang answers the question
+    # that decides Phase 3's architecture -- whether cross-machine divergence is the ARCHITECTURE
+    # (two compilers on one machine will agree) or CODEGEN (they will not, and lockstep between
+    # differently-built peers is then impossible).
+    #
+    # As of P0.5c that question is OPEN AGAIN. It was recorded as answered -- "the divergence is
+    # the architecture" -- but the Linux digests it rested on were produced by runs in which no
+    # save game was ever created, so they hashed an empty world with no map loaded while the macOS
+    # digests hashed a real one. tests/run-replays.sh now creates the fixture itself and fails if
+    # it cannot, and the manifest requires a non-zero map_event on every recording, so a repeat is
+    # a red build rather than a green one. The first Linux goldens recorded after this change are
+    # the first ones worth comparing.
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false

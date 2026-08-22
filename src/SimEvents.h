@@ -67,8 +67,15 @@ public:
 		SFX_LOWHP_STOP,
 
 		// client-local UI, driven by a menu rather than by the tick. Never network these.
-		SFX_NPC_VOX
+		SFX_NPC_VOX,
+
+		TYPE_COUNT
 	};
+
+	/** Stable short name for a type, for logs and for the coverage assertion in
+	 * tests/run-replays.sh. Returns "?" for an out-of-range type rather than indexing past the
+	 * end -- this is called from a reporting path and must never be the thing that crashes. */
+	static const char* typeName(int type);
 
 	SimEvent();
 	explicit SimEvent(int _type);
@@ -126,9 +133,18 @@ public:
 	 */
 	size_t getHighWater() const { return high_water; }
 
+	/** How many events of this type have been pushed since the process started.
+	 *
+	 * This exists because P0.5b's 'attack' recording turned out to contain no attack, and nothing
+	 * in the test suite could tell. A digest proves the world changed; it cannot say WHICH code
+	 * ran. These counters can, and they cost one increment per event. See plans/phase0/P0.5c.
+	 */
+	unsigned long getCount(int type) const;
+
 private:
 	std::vector<SimEvent> queue;
 	size_t high_water;
+	unsigned long counts[SimEvent::TYPE_COUNT];
 };
 
 extern SimEventQueue* sim_events;

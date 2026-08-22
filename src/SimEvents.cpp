@@ -45,15 +45,42 @@ SimEvent::SimEvent(int _type)
 	, cleanup(true) {
 }
 
+namespace {
+	// Index by SimEvent type. Kept adjacent to the enum on purpose: a type added to one and not
+	// the other is caught by the range check in typeName() rather than reading past the end.
+	const char* TYPE_NAMES[] = {
+		"attack", "hit", "die", "critdie", "block", "step", "levelup",
+		"loot", "power", "hazard_hit", "map_event", "lowhp_start", "lowhp_stop", "npc_vox"
+	};
+}
+
+const char* SimEvent::typeName(int type) {
+	if (type < 0 || type >= SimEvent::TYPE_COUNT)
+		return "?";
+	if (static_cast<size_t>(type) >= sizeof(TYPE_NAMES) / sizeof(TYPE_NAMES[0]))
+		return "?";
+	return TYPE_NAMES[type];
+}
+
 SimEventQueue::SimEventQueue()
 	: queue()
 	, high_water(0) {
+	for (int i = 0; i < SimEvent::TYPE_COUNT; ++i)
+		counts[i] = 0;
+}
+
+unsigned long SimEventQueue::getCount(int type) const {
+	if (type < 0 || type >= SimEvent::TYPE_COUNT)
+		return 0;
+	return counts[type];
 }
 
 void SimEventQueue::push(const SimEvent& e) {
 	queue.push_back(e);
 	if (queue.size() > high_water)
 		high_water = queue.size();
+	if (e.type >= 0 && e.type < SimEvent::TYPE_COUNT)
+		counts[e.type]++;
 }
 
 void SimEventQueue::pushSound(int type, SoundID sid, const std::string& channel, const FPoint& pos) {
