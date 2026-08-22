@@ -37,6 +37,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "ItemManager.h"
 #include "MessageEngine.h"
 #include "RenderDevice.h"
+#include "Rng.h"
 #include "SaveLoad.h"
 #include "Settings.h"
 #include "SharedGameResources.h"
@@ -258,7 +259,7 @@ GameStateNew::GameStateNew()
 	if (!eset->hero_classes.list.empty()) {
 		int class_index = 0;
 		if (random_class)
-			class_index = static_cast<int>(rand() % eset->hero_classes.list.size());
+			class_index = static_cast<int>(fx_rng->index(eset->hero_classes.list.size()));
 
 		class_list->select(class_index);
 
@@ -389,7 +390,7 @@ void GameStateNew::setHeroOption(int dir) {
 		// don't change current_option unless required
 		if (std::find(available_options->begin(), available_options->end(), current_option) == available_options->end()) {
 			if (random_option && available_options != &all_options) {
-				size_t rand_index = rand() % available_options->size();
+				size_t rand_index = fx_rng->index(available_options->size());
 				current_option = available_options->at(rand_index);
 			}
 			else {
@@ -423,7 +424,7 @@ void GameStateNew::setHeroOption(int dir) {
 		}
 	}
 	else if (dir == OPTION_RANDOM && !available_options->empty()) {
-		size_t rand_index = rand() % available_options->size();
+		size_t rand_index = fx_rng->index(available_options->size());
 		current_option = available_options->at(rand_index);
 	}
 
@@ -512,7 +513,7 @@ void GameStateNew::logic() {
 
 	if (show_randomize && button_randomize->checkClick()) {
 		if (!eset->hero_classes.list.empty()) {
-			int class_index = static_cast<int>(rand() % eset->hero_classes.list.size());
+			int class_index = static_cast<int>(fx_rng->index(eset->hero_classes.list.size()));
 			class_list->select(class_index);
 
 			if (show_class_tip) {

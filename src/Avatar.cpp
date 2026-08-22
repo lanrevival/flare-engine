@@ -48,6 +48,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "ModManager.h"
 #include "PowerManager.h"
 #include "RenderDevice.h"
+#include "Rng.h"
 #include "SaveLoad.h"
 #include "Settings.h"
 #include "SharedGameResources.h"
@@ -721,7 +722,7 @@ void Avatar::logic() {
 				setAnimation("run");
 
 				if (!sound_steps.empty()) {
-					int stepfx = rand() % static_cast<int>(sound_steps.size());
+					int stepfx = static_cast<int>(fx_rng->index(sound_steps.size()));
 
 					if (activeAnimation->isFirstFrame() || activeAnimation->isActiveFrame())
 						snd->play(sound_steps[stepfx], snd->DEFAULT_CHANNEL, snd->NO_POS, !snd->LOOP);

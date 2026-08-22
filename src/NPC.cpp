@@ -34,6 +34,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "ModManager.h"
 #include "NPC.h"
 #include "RenderDevice.h"
+#include "Rng.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
 #include "SoundManager.h"
@@ -471,7 +472,7 @@ bool NPC::playSoundIntro() {
 	if (vox_intro.empty())
 		return false;
 
-	size_t roll = static_cast<size_t>(rand()) % vox_intro.size();
+	size_t roll = fx_rng->index(vox_intro.size());
 	snd->play(vox_intro[roll], "NPC_VOX", stats.pos, !snd->LOOP);
 	return true;
 }

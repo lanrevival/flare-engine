@@ -26,6 +26,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Camera.h"
 #include "CommonIncludes.h"
 #include "EngineSettings.h"
+#include "Rng.h"
 #include "Settings.h"
 #include "SharedResources.h"
 #include "Utils.h"
@@ -117,8 +118,8 @@ void Camera::logic() {
 		shake.y = pos.y;
 	}
 	else {
-		shake.x = pos.x + static_cast<float>((rand() % (shake_strength * 2)) - shake_strength) * 0.0078125f;
-		shake.y = pos.y + static_cast<float>((rand() % (shake_strength * 2)) - shake_strength) * 0.0078125f;
+		shake.x = pos.x + static_cast<float>(fx_rng->range(-shake_strength, shake_strength - 1)) * 0.0078125f;
+		shake.y = pos.y + static_cast<float>(fx_rng->range(-shake_strength, shake_strength - 1)) * 0.0078125f;
 	}
 }
 

@@ -44,6 +44,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuManager.h"
 #include "MessageEngine.h"
 #include "PowerManager.h"
+#include "Rng.h"
 #include "Settings.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
@@ -1458,7 +1459,7 @@ void PowerManager::initHazard(PowerID power_index, StatBlock *src_stats, const F
 		haz->direction = Utils::calcDirection(origin.x, origin.y, target.x, target.y);
 	}
 	else if (haz->power->visual_random) {
-		haz->direction = static_cast<unsigned short>(rand()) % haz->power->visual_random;
+		haz->direction = static_cast<unsigned short>(fx_rng->index(haz->power->visual_random));
 		haz->direction += haz->power->visual_option;
 	}
 	else if (haz->power->visual_option) {

@@ -42,6 +42,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "InputState.h"
 #include "MessageEngine.h"
 #include "RenderDevice.h"
+#include "Rng.h"
 #include "Settings.h"
 #include "SharedResources.h"
 #include "SoundManager.h"
@@ -140,7 +141,7 @@ void GameSwitcher::loadBackgroundImage() {
 	if (background_filename != "") return;
 
 	// load the background image
-	size_t index = static_cast<size_t>(rand()) % background_list.size();
+	size_t index = fx_rng->index(background_list.size());
 	background_filename = background_list[index];
 	background_image = render_device->loadImage(background_filename, RenderDevice::ERROR_NORMAL);
 	refreshBackground();
