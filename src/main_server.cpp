@@ -28,6 +28,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 #include <csignal>
 #include <cstdio>
+#include <ctime>
 #include <cstdlib>
 
 #include "AnimationManager.h"
@@ -41,6 +42,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MessageEngine.h"
 #include "ModManager.h"
 #include "RenderDevice.h"
+#include "Rng.h"
 #include "SaveLoad.h"
 #include "Settings.h"
 #include "SharedResources.h"
@@ -130,6 +132,14 @@ static void serverInit(const ServerCmdLineArgs& args) {
 	// Audio is off at the source as well as at the device, so nothing even tries to decode.
 	settings->audio = false;
 
+	// The server is the simulation authority, so sim_rng's seed is the one that will eventually
+	// be handed to joining clients (Phase 3). Fixed for now. See Rng.h.
+	sim_rng = new Rng();
+	sim_rng->seed(RNG_DEFAULT_SIM_SEED);
+	fx_rng = new Rng();
+	fx_rng->seed(static_cast<uint64_t>(time(NULL)));
+	Utils::logInfo("main_server: sim_rng seeded with 0x%llx", static_cast<unsigned long long>(sim_rng->getSeed()));
+
 	save_load = new SaveLoad();
 	msg = new MessageEngine();
 	font = getFontEngine();
@@ -180,6 +190,8 @@ static void serverCleanup() {
 	delete snd;
 	delete save_load;
 	delete eset;
+	delete sim_rng;
+	delete fx_rng;
 	delete tooltipm;
 
 	if (render_device)

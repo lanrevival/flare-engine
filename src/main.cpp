@@ -34,6 +34,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MessageEngine.h"
 #include "ModManager.h"
 #include "RenderDevice.h"
+#include "Rng.h"
 #include "SaveLoad.h"
 #include "SDLFontEngine.h"
 #include "Settings.h"
@@ -127,6 +128,16 @@ static void init(const CmdLineArgs& cmd_line_args) {
 
 	settings->loadSettings();
 	settings->logSettings();
+
+	// Two explicit random streams. sim_rng is reproducible and belongs to the simulation;
+	// fx_rng is presentation-only and must never be reproducible. See Rng.h.
+	// Created here rather than at the soft_reset label so a soft reset reseeds them, matching
+	// the surrounding singletons' lifetime.
+	sim_rng = new Rng();
+	sim_rng->seed(RNG_DEFAULT_SIM_SEED);
+	fx_rng = new Rng();
+	fx_rng->seed(static_cast<uint64_t>(time(NULL)));
+	Utils::logInfo("main: sim_rng seeded with 0x%llx", static_cast<unsigned long long>(sim_rng->getSeed()));
 
 	save_load = new SaveLoad();
 	msg = new MessageEngine();
@@ -291,6 +302,8 @@ static void cleanup() {
 	delete snd;
 	delete save_load;
 	delete eset;
+	delete sim_rng;
+	delete fx_rng;
 
 	if (render_device)
 		render_device->destroyContext();

@@ -196,6 +196,7 @@ Set (FLARE_SOURCES
 	./src/PowerManager.cpp
 	./src/QuestLog.cpp
 	./src/RenderDevice.cpp
+	./src/Rng.cpp
 	./src/SaveLoad.cpp
 	./src/SDLInputState.cpp
 	./src/SDLSoftwareRenderDevice.cpp
@@ -317,6 +318,7 @@ Set (FLARE_HEADERS
 	./src/PowerManager.h
 	./src/QuestLog.h
 	./src/RenderDevice.h
+	./src/Rng.h
 	./src/SDLInputState.h
 	./src/SDLSoftwareRenderDevice.h
 	./src/SDLSoundManager.h
