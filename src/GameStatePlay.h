@@ -75,6 +75,7 @@ private:
 	void checkLog();
 	void checkBook();
 	void checkEquipmentChange();
+	void drainSimEvents();
 	void checkTitle();
 	void checkUsedItems();
 	void checkNotifications();

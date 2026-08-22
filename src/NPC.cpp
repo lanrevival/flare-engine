@@ -37,6 +37,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Rng.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
+#include "SimEvents.h"
 #include "SoundManager.h"
 #include "UtilsMath.h"
 #include "UtilsParsing.h"
@@ -472,8 +473,13 @@ bool NPC::playSoundIntro() {
 	if (vox_intro.empty())
 		return false;
 
-	size_t roll = fx_rng->index(vox_intro.size());
-	snd->play(vox_intro[roll], "NPC_VOX", stats.pos, !snd->LOOP);
+	SimEvent e(SimEvent::SFX_NPC_VOX);
+	e.candidates = vox_intro;
+	e.select = true;
+	e.channel = "NPC_VOX";
+	e.pos = stats.pos;
+	e.use_pos = true;
+	sim_events->push(e);
 	return true;
 }
 
@@ -481,7 +487,7 @@ bool NPC::playSoundQuest(int id) {
 	if (id < 0 || id >= static_cast<int>(vox_quests.size()))
 		return false;
 
-	snd->play(vox_quests[id], "NPC_VOX", stats.pos, !snd->LOOP);
+	sim_events->pushSound(SimEvent::SFX_NPC_VOX, vox_quests[id], "NPC_VOX", stats.pos);
 	return true;
 }
 

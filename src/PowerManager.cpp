@@ -48,6 +48,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Settings.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
+#include "SimEvents.h"
 #include "SoundManager.h"
 #include "StatBlock.h"
 #include "Utils.h"
@@ -1558,7 +1559,7 @@ void PowerManager::buff(PowerID power_index, StatBlock *src_stats, const FPoint&
  */
 void PowerManager::playSound(PowerID power_index, const FPoint& sound_pos) {
 	if (powers[power_index]->sfx_index != -1)
-		snd->play(sfx[powers[power_index]->sfx_index], snd->DEFAULT_CHANNEL, sound_pos, !snd->LOOP);
+		sim_events->pushSound(SimEvent::SFX_POWER, sfx[powers[power_index]->sfx_index], "", sound_pos);
 }
 
 bool PowerManager::effect(StatBlock *target_stats, StatBlock *caster_stats, PowerID power_index, int source_type) {

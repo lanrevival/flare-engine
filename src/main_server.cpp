@@ -43,6 +43,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "ModManager.h"
 #include "RenderDevice.h"
 #include "Replay.h"
+#include "SimEvents.h"
 #include "WorldHash.h"
 #include "Rng.h"
 #include "SaveLoad.h"
@@ -145,6 +146,9 @@ static void serverInit(const ServerCmdLineArgs& args) {
 	sim_rng->seed(args.sim_seed);
 	fx_rng = new Rng();
 	fx_rng->seed(static_cast<uint64_t>(time(NULL)));
+
+	// What the simulation did, for the presentation layer to react to. Emptied every tick.
+	sim_events = new SimEventQueue();
 	Utils::logInfo("main_server: sim_rng seeded with 0x%llx", static_cast<unsigned long long>(sim_rng->getSeed()));
 
 	replay = new Replay();
@@ -203,6 +207,8 @@ static void serverCleanup() {
 	replay = NULL;
 	delete sim_rng;
 	delete fx_rng;
+	delete sim_events;
+	sim_events = NULL;
 	delete tooltipm;
 
 	if (render_device)
@@ -462,6 +468,13 @@ int main(int argc, char *argv[]) {
 	if (shutdown_requested)
 		Utils::logInfo("main_server: shutdown requested, stopping.");
 	Utils::logInfo("main_server: simulated %lu logic ticks.", ticks);
+
+	// Reported unconditionally rather than behind a flag: an emit path with no drain is a slow
+	// leak, and a leak you have to remember to ask about is one you find in production. This is
+	// the deepest the queue ever got, not a total -- it should stay small no matter how long the
+	// server ran. See SimEventQueue::getHighWater().
+	Utils::logInfo("main_server: sim event queue high water = %lu",
+	               static_cast<unsigned long>(sim_events->getHighWater()));
 
 	// stdout, not the log: golden-file comparison should not have to parse timestamps.
 	if (args.hash_at_exit)

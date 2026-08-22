@@ -38,6 +38,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Settings.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
+#include "SimEvents.h"
 #include "SoundManager.h"
 #include "Utils.h"
 #include "UtilsFileSystem.h"
@@ -1111,7 +1112,12 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 
 			SoundID sid = snd->load(ec->s, "MapRenderer background soundfx");
 
-			snd->play(sid, snd->DEFAULT_CHANNEL, pos, loop);
+			SimEvent se(SimEvent::SFX_MAP_EVENT);
+			se.candidates.push_back(sid);
+			se.pos = pos;
+			se.use_pos = true;
+			se.loop = loop;
+			sim_events->push(se);
 			mapr->sids.push_back(sid);
 		}
 		else if (ec->type == EventComponent::LOOT) {

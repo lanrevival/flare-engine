@@ -47,6 +47,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Settings.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
+#include "SimEvents.h"
 #include "SoundManager.h"
 #include "Utils.h"
 #include "UtilsFileSystem.h"
@@ -407,7 +408,7 @@ void LootManager::addLoot(ItemStack stack, const FPoint& pos, bool dropped_by_he
 		if (it->stack.item == ld.stack.item && it->pos.x == ld.pos.x && it->pos.y == ld.pos.y) {
 			it->stack.quantity += ld.stack.quantity;
 			it->tip.clear();
-			snd->play(sfx_loot, sfx_loot_channel, pos, false);
+			sim_events->pushSound(SimEvent::SFX_LOOT, sfx_loot, sfx_loot_channel, pos);
 			return;
 		}
 	}
@@ -431,7 +432,7 @@ void LootManager::addLoot(ItemStack stack, const FPoint& pos, bool dropped_by_he
 	}
 
 	loot.push_back(ld);
-	snd->play(sfx_loot, sfx_loot_channel, pos, false);
+	sim_events->pushSound(SimEvent::SFX_LOOT, sfx_loot, sfx_loot_channel, pos);
 }
 
 /**

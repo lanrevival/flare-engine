@@ -39,6 +39,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "SDLFontEngine.h"
 #include "Settings.h"
 #include "SharedResources.h"
+#include "SimEvents.h"
 #include "SoundManager.h"
 #include "Stats.h"
 #include "TooltipManager.h"
@@ -137,6 +138,9 @@ static void init(const CmdLineArgs& cmd_line_args) {
 	sim_rng->seed(RNG_DEFAULT_SIM_SEED);
 	fx_rng = new Rng();
 	fx_rng->seed(static_cast<uint64_t>(time(NULL)));
+
+	// What the simulation did, for the presentation layer to react to. Emptied every tick.
+	sim_events = new SimEventQueue();
 	Utils::logInfo("main: sim_rng seeded with 0x%llx", static_cast<unsigned long long>(sim_rng->getSeed()));
 
 	save_load = new SaveLoad();
@@ -328,6 +332,8 @@ static void cleanup() {
 	delete eset;
 	delete sim_rng;
 	delete fx_rng;
+	delete sim_events;
+	sim_events = NULL;
 
 	if (render_device)
 		render_device->destroyContext();

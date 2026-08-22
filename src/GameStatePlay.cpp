@@ -74,6 +74,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Settings.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
+#include "SimEvents.h"
 #include "SoundManager.h"
 #include "UtilsParsing.h"
 #include "WidgetLabel.h"
@@ -1030,6 +1031,53 @@ void GameStatePlay::logic() {
 	}
 
 	player_locks.copyTo(*inpt);
+
+	// Last thing in the tick, after both the simulation and the menus have had their say.
+	drainSimEvents();
+}
+
+/**
+ * Play everything the simulation reported this tick, then empty the queue.
+ *
+ * A headless server empties it without playing. That is the point of the queue: the simulation no
+ * longer needs a sound manager to be correct, only a client does.
+ *
+ * The queue is cleared on EVERY path, including the headless one. An emit with no drain is a leak
+ * on a server that runs for hours; see SimEventQueue::getHighWater().
+ */
+void GameStatePlay::drainSimEvents() {
+	if (!settings->headless) {
+		const std::vector<SimEvent>& q = sim_events->events();
+		for (size_t i = 0; i < q.size(); ++i) {
+			const SimEvent& e = q[i];
+
+			if (e.stop) {
+				snd->pauseChannel(e.channel);
+				continue;
+			}
+			if (e.candidates.empty())
+				continue;
+
+			// The client chooses the variant, not the simulation. Two players may be running
+			// different sound mods, and which of three grunts you hear is nobody else's business.
+			const size_t pick = e.select ? fx_rng->index(e.candidates.size()) : 0;
+			const SoundID sid = e.candidates[pick];
+
+			std::string channel = e.channel;
+			if (e.channel_by_sound) {
+				std::stringstream ss;
+				ss << e.channel << sid;
+				channel = ss.str();
+			}
+			else if (channel.empty()) {
+				channel = SoundManager::DEFAULT_CHANNEL;
+			}
+
+			snd->play(sid, channel, e.use_pos ? e.pos : SoundManager::NO_POS, e.loop, e.cleanup);
+		}
+	}
+
+	sim_events->clear();
 }
 
 

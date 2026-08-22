@@ -36,6 +36,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Rng.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
+#include "SimEvents.h"
 #include "SoundManager.h"
 #include "Utils.h"
 #include "UtilsMath.h"
@@ -181,7 +182,7 @@ void HazardManager::hitEntity(size_t index, const bool hit) {
 		if (!h[index]->power->complete_animation) h[index]->lifespan = 0;
 	}
 	if (h[index]->power->sfx_hit_enable && !h[index]->sfx_hit_played) {
-		snd->play(h[index]->power->sfx_hit, snd->DEFAULT_CHANNEL, h[index]->pos, !snd->LOOP);
+		sim_events->pushSound(SimEvent::SFX_HAZARD_HIT, h[index]->power->sfx_hit, "", h[index]->pos);
 		h[index]->sfx_hit_played = true;
 	}
 

@@ -53,6 +53,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Settings.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
+#include "SimEvents.h"
 #include "SoundManager.h"
 #include "Utils.h"
 #include "UtilsFileSystem.h"
@@ -496,21 +497,31 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 		// play a sound if set in settings
 		if (isLowHpSoundEnabled() && !playing_lowhp) {
 			// if looping, then do not cleanup
-			snd->play(sound_lowhp, "lowhp", snd->NO_POS, stats.sfx_lowhp_loop, !stats.sfx_lowhp_loop);
+			SimEvent e(SimEvent::SFX_LOWHP_START);
+			e.candidates.push_back(sound_lowhp);
+			e.channel = "lowhp";
+			e.loop = stats.sfx_lowhp_loop;
+			e.cleanup = !stats.sfx_lowhp_loop;
+			sim_events->push(e);
 			playing_lowhp = true;
 		}
 	}
 	// if looping, stop sounds when HP recovered above threshold
 	if (isLowHpSoundEnabled() && !isLowHp() && playing_lowhp && stats.sfx_lowhp_loop) {
-		snd->pauseChannel("lowhp");
+		sim_events->pushStop(SimEvent::SFX_LOWHP_STOP, "lowhp");
 		playing_lowhp = false;
 	}
 	else if (isLowHpSoundEnabled() && isLowHp() && !playing_lowhp && stats.sfx_lowhp_loop) {
-		snd->play(sound_lowhp, "lowhp", snd->NO_POS, stats.sfx_lowhp_loop, !stats.sfx_lowhp_loop);
+		SimEvent e(SimEvent::SFX_LOWHP_START);
+		e.candidates.push_back(sound_lowhp);
+		e.channel = "lowhp";
+		e.loop = stats.sfx_lowhp_loop;
+		e.cleanup = !stats.sfx_lowhp_loop;
+		sim_events->push(e);
 		playing_lowhp = true;
 	}
 	else if (!isLowHpSoundEnabled() && playing_lowhp) {
-		snd->pauseChannel("lowhp");
+		sim_events->pushStop(SimEvent::SFX_LOWHP_STOP, "lowhp");
 		playing_lowhp = false;
 	}
 
@@ -530,7 +541,9 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 			logMsg(msg->get("You may unlock one or more abilities through the Powers Menu."), MSG_NORMAL);
 		}
 		stats.recalc();
-		snd->play(sound_levelup, snd->DEFAULT_CHANNEL, snd->NO_POS, !snd->LOOP);
+		SimEvent e(SimEvent::SFX_LEVELUP);
+		e.candidates.push_back(sound_levelup);
+		sim_events->push(e);
 
 		// if the player managed to level up while dead (e.g. via a bleeding creature), restore to life
 		if (stats.cur_state == StatBlock::ENTITY_DEAD) {
@@ -718,11 +731,11 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 
 				setAnimation("run");
 
-				if (!sound_steps.empty()) {
-					int stepfx = static_cast<int>(fx_rng->index(sound_steps.size()));
-
-					if (activeAnimation->isFirstFrame() || activeAnimation->isActiveFrame())
-						snd->play(sound_steps[stepfx], snd->DEFAULT_CHANNEL, snd->NO_POS, !snd->LOOP);
+				if (!sound_steps.empty() && (activeAnimation->isFirstFrame() || activeAnimation->isActiveFrame())) {
+					SimEvent e(SimEvent::SFX_STEP);
+					e.candidates = sound_steps;
+					e.select = true;
+					sim_events->push(e);
 				}
 
 				// handle direction changes

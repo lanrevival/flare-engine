@@ -206,6 +206,7 @@ Set (FLARE_SOURCES
 	./src/SDLHardwareRenderDevice.cpp
 	./src/SDLFontEngine.cpp
 	./src/Settings.cpp
+	./src/SimEvents.cpp
 	./src/SharedGameResources.cpp
 	./src/SharedResources.cpp
 	./src/SoundManager.cpp
@@ -331,6 +332,7 @@ Set (FLARE_HEADERS
 	./src/SDLHardwareRenderDevice.h
 	./src/SDLFontEngine.h
 	./src/Settings.h
+	./src/SimEvents.h
 	./src/SharedGameResources.h
 	./src/SharedResources.h
 	./src/StatBlock.h
