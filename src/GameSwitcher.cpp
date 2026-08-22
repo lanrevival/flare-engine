@@ -60,7 +60,7 @@ GameSwitcher::GameSwitcher()
 	, last_fps(0)
 {
 	// update the fps counter 4 times per second
-	fps_update.setDuration(settings->max_frames_per_sec / 4);
+	fps_update.setDuration(Settings::SIM_TICK_HZ / 4);
 
 	// The initial state is the intro cutscene and then title screen
 	GameStateTitle *title=new GameStateTitle();

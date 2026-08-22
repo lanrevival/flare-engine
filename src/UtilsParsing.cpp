@@ -250,11 +250,11 @@ int Parse::toDuration(const std::string& s) {
 	if (val == 0)
 		return val;
 	else if (suffix == "s")
-		val *= settings->max_frames_per_sec;
+		val *= Settings::SIM_TICK_HZ;
 	else {
 		if (suffix != "ms")
 			Utils::logError("UtilsParsing: Duration of '%d' does not have a suffix. Assuming 'ms'.", val);
-		val = static_cast<int>(floorf((static_cast<float>(val * settings->max_frames_per_sec) / 1000.f) + 0.5f));
+		val = static_cast<int>(floorf((static_cast<float>(val * Settings::SIM_TICK_HZ) / 1000.f) + 0.5f));
 	}
 
 	// round back up to 1 if we rounded down to 0 for ms

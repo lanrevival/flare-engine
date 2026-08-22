@@ -86,7 +86,7 @@ GameStatePlay::GameStatePlay()
 	, npc_id(-1)
 	, is_first_map_load(true)
 {
-	second_timer.setDuration(settings->max_frames_per_sec);
+	second_timer.setDuration(Settings::SIM_TICK_HZ);
 
 	hasMusic = true;
 	has_background = false;

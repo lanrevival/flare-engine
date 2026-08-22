@@ -63,7 +63,7 @@ void EngineSettings::load() {
 void EngineSettings::Misc::load() {
 	// reset to defaults
 	save_hpmp = false;
-	corpse_timeout = 60 * settings->max_frames_per_sec;
+	corpse_timeout = 60 * Settings::SIM_TICK_HZ;
 	corpse_timeout_enabled = true;
 	sell_without_vendor = true;
 	aim_assist = 0;
@@ -82,7 +82,7 @@ void EngineSettings::Misc::load() {
 	save_oncutscene = true;
 	save_onstash = SAVE_ONSTASH_ALL;
 	save_anywhere = false;
-	camera_speed = 10.f * (static_cast<float>(settings->max_frames_per_sec) / Settings::LOGIC_FPS);
+	camera_speed = 10.f;
 	save_buyback = true;
 	keep_buyback_on_map_change = true;
 	sfx_unable_to_cast = "";
@@ -244,7 +244,7 @@ void EngineSettings::Misc::load() {
 
 	if (corpse_timeout <= 0) {
 		corpse_timeout_enabled = false;
-		corpse_timeout = settings->max_frames_per_sec + 1;
+		corpse_timeout = Settings::SIM_TICK_HZ + 1;
 	}
 }
 

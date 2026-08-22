@@ -134,7 +134,7 @@ StatBlock::StatBlock()
 	, hold_state(false)
 	, prevent_interrupt(false)
 	, waypoints()		// enemy only
-	, waypoint_timer(settings->max_frames_per_sec)	// enemy only
+	, waypoint_timer(Settings::SIM_TICK_HZ)	// enemy only
 	, wander(false)					// enemy only
 	, wander_area()		// enemy only
 	, chance_pursue(0)
@@ -156,8 +156,8 @@ StatBlock::StatBlock()
 	, activated_power(NULL) // enemy only
 	, half_dead_power(false) // enemy only
 	, suppress_hp(false)
-	, flee_timer(settings->max_frames_per_sec) // enemy only
-	, flee_cooldown_timer(settings->max_frames_per_sec) // enemy only
+	, flee_timer(Settings::SIM_TICK_HZ) // enemy only
+	, flee_cooldown_timer(Settings::SIM_TICK_HZ) // enemy only
 	, perfect_accuracy(false)
 	, cooldown_los()
 	, resting_hp_regen_seconds(5.f)
@@ -243,7 +243,7 @@ bool StatBlock::loadCoreStat(FileParser *infile) {
 	if (infile->key == "speed") {
 		// @ATTR speed|float|Movement speed
 		float fvalue = Parse::toFloat(infile->val, 0);
-		speed = speed_default = fvalue / settings->max_frames_per_sec;
+		speed = speed_default = fvalue / Settings::SIM_TICK_HZ;
 		return true;
 	}
 	else if (infile->key == "cooldown") {
@@ -847,7 +847,7 @@ void StatBlock::load(const std::string& filename) {
 		// @ATTR resting_hp_regen_time|duration|When not in combat, this is how much time it will take to regenerate HP from zero to max. Default is 5 seconds. Set to 0 to disable resting HP regen.
 		else if (infile.key == "resting_hp_regen_time") {
 			float t = static_cast<float>(Parse::toDuration(infile.val));
-			resting_hp_regen_seconds = t / settings->max_frames_per_sec;
+			resting_hp_regen_seconds = t / Settings::SIM_TICK_HZ;
 		}
 
 		else if (!valid) {
@@ -1131,11 +1131,11 @@ void StatBlock::logic() {
 		if (!in_combat && !hero_ally && !hero && pc->stats.alive) {
 			if (resting_hp_regen_seconds > 0) {
 				// enemies heal rapidly (full heal in 5 seconds) while not in combat
-				hp_regen_per_frame = get(Stats::HP_MAX) / resting_hp_regen_seconds / settings->max_frames_per_sec;
+				hp_regen_per_frame = get(Stats::HP_MAX) / resting_hp_regen_seconds / Settings::SIM_TICK_HZ;
 			}
 		}
 		else {
-			hp_regen_per_frame = get(Stats::HP_REGEN) / 60.f / settings->max_frames_per_sec;
+			hp_regen_per_frame = get(Stats::HP_REGEN) / 60.f / Settings::SIM_TICK_HZ;
 		}
 		hp += hp_regen_per_frame;
 		hp = std::max(0.0f, std::min(hp, get(Stats::HP_MAX)));
@@ -1143,7 +1143,7 @@ void StatBlock::logic() {
 
 	// MP regen
 	if (mp <= get(Stats::MP_MAX) && hp > 0) {
-		float mp_regen_per_frame = get(Stats::MP_REGEN) / 60.f / settings->max_frames_per_sec;
+		float mp_regen_per_frame = get(Stats::MP_REGEN) / 60.f / Settings::SIM_TICK_HZ;
 		mp += mp_regen_per_frame;
 		mp = std::max(0.0f, std::min(mp, get(Stats::MP_MAX)));
 	}
@@ -1154,7 +1154,7 @@ void StatBlock::logic() {
 		float resource_stat_regen = getResourceStat(i, EngineSettings::ResourceStats::STAT_REGEN);
 
 		if (resource_stats[i] <= resource_stat_max && hp > 0) {
-			float regen_per_frame = resource_stat_regen / 60.f / settings->max_frames_per_sec;
+			float regen_per_frame = resource_stat_regen / 60.f / Settings::SIM_TICK_HZ;
 			resource_stats[i] += regen_per_frame;
 			resource_stats[i] = std::max(0.0f, std::min(resource_stats[i], resource_stat_max));
 		}

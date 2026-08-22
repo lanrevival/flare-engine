@@ -78,7 +78,7 @@ TabList::TabList()
 	, enable_activate(true)
 	, is_inner_tablist(false)
 {
-	scroll_timer.setDuration(settings->max_frames_per_sec / 4);
+	scroll_timer.setDuration(Settings::SIM_TICK_HZ / 4);
 }
 
 TabList::~TabList() {

@@ -38,9 +38,9 @@ MenuRegionTitle::MenuRegionTitle()
 	label.setBasePos(window_area.w/2, window_area.h/2, Utils::ALIGN_TOPLEFT);
 	label.setFont("font_region_title");
 
-	timer.setDuration(settings->max_frames_per_sec * 3);
-	fade_in_timer.setDuration(settings->max_frames_per_sec);
-	fade_out_timer.setDuration(settings->max_frames_per_sec);
+	timer.setDuration(Settings::SIM_TICK_HZ * 3);
+	fade_in_timer.setDuration(Settings::SIM_TICK_HZ);
+	fade_out_timer.setDuration(Settings::SIM_TICK_HZ);
 
 	// Load config settings
 	FileParser infile;

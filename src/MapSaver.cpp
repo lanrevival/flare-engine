@@ -432,10 +432,10 @@ void MapSaver::writeEvents(std::ofstream& map_file) {
 
 		if (event.cooldown.getDuration() > 0) {
 			std::string suffix = "ms";
-			int value = static_cast<int>(1000.f * static_cast<float>(event.cooldown.getDuration()) / settings->max_frames_per_sec);
+			int value = static_cast<int>(1000.f * static_cast<float>(event.cooldown.getDuration()) / Settings::SIM_TICK_HZ);
 			if (value % 1000 == 0)
 			{
-				value = event.cooldown.getDuration() / settings->max_frames_per_sec;
+				value = event.cooldown.getDuration() / Settings::SIM_TICK_HZ;
 				suffix = "s";
 			}
 			map_file << "cooldown=" << value << suffix << std::endl;
@@ -443,10 +443,10 @@ void MapSaver::writeEvents(std::ofstream& map_file) {
 
 		if (event.delay.getDuration() > 0) {
 			std::string suffix = "ms";
-			int value = static_cast<int>(1000.f * static_cast<float>(event.delay.getDuration()) / settings->max_frames_per_sec);
+			int value = static_cast<int>(1000.f * static_cast<float>(event.delay.getDuration()) / Settings::SIM_TICK_HZ);
 			if (value % 1000 == 0)
 			{
-				value = event.delay.getDuration() / settings->max_frames_per_sec;
+				value = event.delay.getDuration() / Settings::SIM_TICK_HZ;
 				suffix = "s";
 			}
 			map_file << "delay=" << value << suffix << std::endl;
@@ -563,10 +563,10 @@ void MapSaver::writeEventComponents(std::ofstream &map_file, int eventID) {
 		}
 		else if (e.type == EventComponent::SHAKYCAM) {
 			std::string suffix = "ms";
-			int value = static_cast<int>(1000.f * e.data[0].Float / settings->max_frames_per_sec);
+			int value = static_cast<int>(1000.f * e.data[0].Float / Settings::SIM_TICK_HZ);
 			if (value % 1000 == 0)
 			{
-				value = e.data[0].Int / settings->max_frames_per_sec;
+				value = e.data[0].Int / Settings::SIM_TICK_HZ;
 				suffix = "s";
 			}
 			map_file << value << suffix << std::endl;

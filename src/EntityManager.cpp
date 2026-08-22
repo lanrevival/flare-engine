@@ -49,7 +49,7 @@ EntityManager::EntityManager()
 	: entities()
 	, hero_stealth(0)
 	, player_blocked(false)
-	, player_blocked_timer(settings->max_frames_per_sec / 6) {
+	, player_blocked_timer(Settings::SIM_TICK_HZ / 6) {
 	handleNewMap();
 }
 

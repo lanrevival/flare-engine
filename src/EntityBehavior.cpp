@@ -73,7 +73,7 @@ EntityBehavior::EntityBehavior(Entity *_e)
 	, replaced_power_id(0)
 {
 	// wait when PATH_FOUND_FAIL_THRESHOLD is exceeded
-	path_found_fail_timer.setDuration(settings->max_frames_per_sec * PATH_FOUND_FAIL_WAIT_SECONDS);
+	path_found_fail_timer.setDuration(Settings::SIM_TICK_HZ * PATH_FOUND_FAIL_WAIT_SECONDS);
 	path_found_fail_timer.reset(Timer::END);
 }
 

@@ -48,7 +48,7 @@ MenuEnemy::MenuEnemy()
 	, enemy(NULL)
 {
 	// disappear after 10 seconds
-	timeout.setDuration(settings->max_frames_per_sec * 10);
+	timeout.setDuration(Settings::SIM_TICK_HZ * 10);
 
 	// Load config settings
 	FileParser infile;

@@ -189,10 +189,18 @@ static float getSecondsElapsed(uint64_t prev_ticks, uint64_t now_ticks) {
 	return (static_cast<float>(now_ticks - prev_ticks) / static_cast<float>(SDL_GetPerformanceFrequency()));
 }
 
+// A stall (map load, minimise, a breakpoint) leaves the accumulator in debt. Catching up is
+// right; catching up without bound turns a five second pause into a five second fast-forward.
+static const int MAX_CATCHUP_TICKS = 5;
+
 static void mainLoop () {
 	bool done = false;
 
-	float seconds_per_frame = 1.f/static_cast<float>(settings->max_frames_per_sec);
+	// Two different rates, deliberately. The simulation step is fixed and shared so that every
+	// peer agrees on what tick N means; the render frame limit is a user preference and
+	// affects nothing but how often we draw.
+	const float seconds_per_sim_tick = 1.f/static_cast<float>(Settings::SIM_TICK_HZ);
+	const float seconds_per_render_frame = 1.f/static_cast<float>(settings->max_frames_per_sec);
 
 	uint64_t prev_ticks = SDL_GetPerformanceCounter();
 	uint64_t logic_ticks = SDL_GetPerformanceCounter();
@@ -203,7 +211,18 @@ static void mainLoop () {
 		int loops = 0;
 		uint64_t now_ticks = SDL_GetPerformanceCounter();
 
-		while (now_ticks >= logic_ticks && loops < settings->max_frames_per_sec) {
+
+		// Bound the accumulated debt. Capping work per iteration is not enough on its own --
+		// the outer loop simply spins until the debt is repaid, so a five second stall still
+		// replays 300 ticks in milliseconds. Clients cannot follow that, so the missed time is
+		// dropped rather than simulated. Measured: without this, a 5s SIGSTOP cost 0s of wall
+		// clock; with it, it costs 5s.
+		const uint64_t max_debt = static_cast<uint64_t>(
+			seconds_per_sim_tick * static_cast<float>(MAX_CATCHUP_TICKS)
+			* static_cast<float>(SDL_GetPerformanceFrequency()));
+		if (now_ticks > logic_ticks + max_debt)
+			logic_ticks = now_ticks - max_debt;
+		while (now_ticks >= logic_ticks && loops < MAX_CATCHUP_TICKS) {
 			// Frames where data loading happens (GameState switching and map loading)
 			// take a long time, so our loop here will think that the game "lagged" and
 			// try to compensate. To prevent this compensation, we mark those frames as
@@ -228,7 +247,7 @@ static void mainLoop () {
 			// Input done means the user closes the window.
 			done = gswitch->done || inpt->done;
 
-			logic_ticks += static_cast<uint64_t>(seconds_per_frame * static_cast<float>(SDL_GetPerformanceFrequency()));
+			logic_ticks += static_cast<uint64_t>(seconds_per_sim_tick * static_cast<float>(SDL_GetPerformanceFrequency()));
 			loops++;
 
 			// When the app is minimized, no logic gets processed.
@@ -261,8 +280,8 @@ static void mainLoop () {
 			// calculate the FPS
 			// if the frame completed quickly, we estimate the delay here
 			float fps_delay;
-			if (getSecondsElapsed(prev_ticks, SDL_GetPerformanceCounter()) < seconds_per_frame) {
-				fps_delay = seconds_per_frame;
+			if (getSecondsElapsed(prev_ticks, SDL_GetPerformanceCounter()) < seconds_per_render_frame) {
+				fps_delay = seconds_per_render_frame;
 			} else {
 				fps_delay = getSecondsElapsed(prev_ticks, SDL_GetPerformanceCounter());
 			}
@@ -275,12 +294,12 @@ static void mainLoop () {
 
 		// delay quick frames
 		// thanks to David Gow: https://davidgow.net/handmadepenguin/ch18.html
-		if (getSecondsElapsed(prev_ticks, SDL_GetPerformanceCounter()) < seconds_per_frame) {
-			int32_t delay_ms = static_cast<int32_t>((seconds_per_frame - getSecondsElapsed(prev_ticks, SDL_GetPerformanceCounter())) * 1000.f);
+		if (getSecondsElapsed(prev_ticks, SDL_GetPerformanceCounter()) < seconds_per_render_frame) {
+			int32_t delay_ms = static_cast<int32_t>((seconds_per_render_frame - getSecondsElapsed(prev_ticks, SDL_GetPerformanceCounter())) * 1000.f);
 			if (delay_ms > 0) {
 				SDL_Delay(delay_ms);
 			}
-			while (getSecondsElapsed(prev_ticks, SDL_GetPerformanceCounter()) < seconds_per_frame) {
+			while (getSecondsElapsed(prev_ticks, SDL_GetPerformanceCounter()) < seconds_per_render_frame) {
 				// Waiting...
 			}
 		}

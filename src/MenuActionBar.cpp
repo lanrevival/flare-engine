@@ -275,7 +275,7 @@ void MenuActionBar::clearSlot(size_t slot) {
 	slot_item_count[slot] = -1;
 	locked[slot] = false;
 	slot_activated[slot] = false;
-	slot_fail_cooldown[slot].setDuration(settings->max_frames_per_sec);
+	slot_fail_cooldown[slot].setDuration(Settings::SIM_TICK_HZ);
 	slot_fail_cooldown[slot].reset(Timer::END);
 
 	if (slots[slot]) {

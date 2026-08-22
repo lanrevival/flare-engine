@@ -160,7 +160,7 @@ void NullRenderDevice::setFullscreen(bool enable_fullscreen) {
 unsigned short NullRenderDevice::getRefreshRate() {
 	// Reported as the logic rate so that anything deriving a frame budget from this gets a
 	// sane number rather than zero.
-	return static_cast<unsigned short>(Settings::LOGIC_FPS);
+	return Settings::SIM_TICK_HZ;
 }
 
 Image *NullRenderDevice::createImage(int width, int height) {

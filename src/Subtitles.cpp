@@ -133,7 +133,7 @@ void Subtitles::setTextByID(unsigned long id) {
 			updateLabelAndBackground();
 
 			// 1 second per 10 letters
-			visible_timer.setDuration(static_cast<int>(current_text.length()) * (settings->max_frames_per_sec / 10));
+			visible_timer.setDuration(static_cast<int>(current_text.length()) * (Settings::SIM_TICK_HZ / 10));
 
 			return;
 		}

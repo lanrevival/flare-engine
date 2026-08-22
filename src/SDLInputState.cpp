@@ -360,7 +360,7 @@ void SDLInputState::handle() {
 				break;
 			case SDL_WINDOWEVENT:
 				if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
-					resize_cooldown.setDuration(settings->max_frames_per_sec / 4);
+					resize_cooldown.setDuration(Settings::SIM_TICK_HZ / 4);
 				}
 				else if (event.window.event == SDL_WINDOWEVENT_MINIMIZED) {
 					if (platform.is_mobile_device) {
@@ -628,13 +628,13 @@ void SDLInputState::handle() {
 		if (slow_repeat[i]) {
 			if (!pressing[i]) {
 				// key not pressed, reset delay
-				repeat_cooldown[i].setDuration(settings->max_frames_per_sec);
+				repeat_cooldown[i].setDuration(Settings::SIM_TICK_HZ);
 			}
 			else if (pressing[i] && !lock[i]) {
 				// lock key and set delay
 				lock[i] = true;
 				int prev_duration = static_cast<int>(repeat_cooldown[i].getDuration());
-				repeat_cooldown[i].setDuration(std::max(settings->max_frames_per_sec / 10, prev_duration - (settings->max_frames_per_sec / 2)));
+				repeat_cooldown[i].setDuration(std::max(Settings::SIM_TICK_HZ / 10, prev_duration - (Settings::SIM_TICK_HZ / 2)));
 			}
 			else if (pressing[i] && lock[i]) {
 				// delay unlocking key

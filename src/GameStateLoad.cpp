@@ -58,7 +58,7 @@ GameSlot::GameSlot()
 	: id(0)
 	, time_played(0)
 	, active_equipment_set(0)
-	, preview_turn_timer(settings->max_frames_per_sec/2)
+	, preview_turn_timer(Settings::SIM_TICK_HZ/2)
 {
 	preview_turn_timer.reset(Timer::BEGIN);
 }

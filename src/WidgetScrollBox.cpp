@@ -190,12 +190,12 @@ void WidgetScrollBox::logic(int x, int y) {
 	}
 
 	if (cursor_target < cursor) {
-		cursor -= (static_cast<float>(pos.h * SCROLL_SPEED_SMOOTH_MOD) + (cursor - cursor_target)) / settings->max_frames_per_sec;
+		cursor -= (static_cast<float>(pos.h * SCROLL_SPEED_SMOOTH_MOD) + (cursor - cursor_target)) / Settings::SIM_TICK_HZ;
 		if (cursor < cursor_target)
 			cursor = cursor_target;
 	}
 	else if (cursor_target > cursor) {
-		cursor += (static_cast<float>(pos.h * SCROLL_SPEED_SMOOTH_MOD) + (cursor_target - cursor)) / settings->max_frames_per_sec;
+		cursor += (static_cast<float>(pos.h * SCROLL_SPEED_SMOOTH_MOD) + (cursor_target - cursor)) / Settings::SIM_TICK_HZ;
 		if (cursor > cursor_target)
 			cursor = cursor_target;
 	}

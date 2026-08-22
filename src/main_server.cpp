@@ -210,11 +210,16 @@ static float getSecondsElapsed(uint64_t prev_ticks, uint64_t now_ticks) {
  * gswitch->render(), no commitFrame(), no FPS counter. The fixed-step logic ticker is kept
  * exactly as-is; pinning the tick rate is P0.4 and must not be done here.
  */
+// Mirrors main.cpp. A stall must not become a fast-forward.
+static const int MAX_CATCHUP_TICKS = 5;
+
 static unsigned long serverMainLoop(unsigned long max_ticks) {
 	bool done = false;
 	unsigned long total_ticks = 0;
 
-	float seconds_per_frame = 1.f/static_cast<float>(settings->max_frames_per_sec);
+	// The server renders nothing, so there is only one rate here: the shared simulation step.
+	// --max-fps is accepted and ignored on purpose; see parseServerArgs().
+	const float seconds_per_sim_tick = 1.f/static_cast<float>(Settings::SIM_TICK_HZ);
 
 	uint64_t prev_ticks = SDL_GetPerformanceCounter();
 	uint64_t logic_ticks = SDL_GetPerformanceCounter();
@@ -223,7 +228,18 @@ static unsigned long serverMainLoop(unsigned long max_ticks) {
 		int loops = 0;
 		uint64_t now_ticks = SDL_GetPerformanceCounter();
 
-		while (now_ticks >= logic_ticks && loops < settings->max_frames_per_sec) {
+
+		// Bound the accumulated debt. Capping work per iteration is not enough on its own --
+		// the outer loop simply spins until the debt is repaid, so a five second stall still
+		// replays 300 ticks in milliseconds. Clients cannot follow that, so the missed time is
+		// dropped rather than simulated. Measured: without this, a 5s SIGSTOP cost 0s of wall
+		// clock; with it, it costs 5s.
+		const uint64_t max_debt = static_cast<uint64_t>(
+			seconds_per_sim_tick * static_cast<float>(MAX_CATCHUP_TICKS)
+			* static_cast<float>(SDL_GetPerformanceFrequency()));
+		if (now_ticks > logic_ticks + max_debt)
+			logic_ticks = now_ticks - max_debt;
+		while (now_ticks >= logic_ticks && loops < MAX_CATCHUP_TICKS) {
 			if (gswitch->isLoadingFrame()) {
 				logic_ticks = now_ticks;
 				break;
@@ -243,7 +259,7 @@ static unsigned long serverMainLoop(unsigned long max_ticks) {
 			if (max_ticks > 0 && total_ticks >= max_ticks)
 				done = true;
 
-			logic_ticks += static_cast<uint64_t>(seconds_per_frame * static_cast<float>(SDL_GetPerformanceFrequency()));
+			logic_ticks += static_cast<uint64_t>(seconds_per_sim_tick * static_cast<float>(SDL_GetPerformanceFrequency()));
 			loops++;
 
 			if (gswitch->isPaused()) {
@@ -257,8 +273,8 @@ static unsigned long serverMainLoop(unsigned long max_ticks) {
 
 		// Same frame pacing as the client, minus the busy-wait: a dedicated server has no
 		// reason to burn a core spinning for sub-millisecond accuracy.
-		if (getSecondsElapsed(prev_ticks, SDL_GetPerformanceCounter()) < seconds_per_frame) {
-			int32_t delay_ms = static_cast<int32_t>((seconds_per_frame - getSecondsElapsed(prev_ticks, SDL_GetPerformanceCounter())) * 1000.f);
+		if (getSecondsElapsed(prev_ticks, SDL_GetPerformanceCounter()) < seconds_per_sim_tick) {
+			int32_t delay_ms = static_cast<int32_t>((seconds_per_sim_tick - getSecondsElapsed(prev_ticks, SDL_GetPerformanceCounter())) * 1000.f);
 			if (delay_ms > 0)
 				SDL_Delay(delay_ms);
 		}
@@ -276,6 +292,8 @@ static void printHelp() {
 	       "--mods=<MOD>,...         Starts the server with only these mods enabled.\n"
 	       "--load-slot=<SLOT>       Loads a save slot by numerical index.\n"
 	       "--max-ticks=<N>          Stops after N logic ticks. For testing.\n"
+	       "--max-fps=<N>            Render frame limit. Accepted and ignored: the server\n"
+	       "                         renders nothing and always simulates at 60 Hz.\n"
 	       "--headless               Accepted and implied; the server is always headless.\n");
 }
 
@@ -334,6 +352,14 @@ int main(int argc, char *argv[]) {
 		}
 		else if (arg == "max-ticks") {
 			args.max_ticks = strtoul(parseServerArgValue(arg_full).c_str(), NULL, 10);
+		}
+		else if (arg == "max-fps") {
+			// Accepted so that the sim-rate-vs-render-rate claim can actually be tested: a
+			// server run at 30 and at 144 must produce the same tick count in the same wall
+			// time. The value is stored and then never read, because the server renders
+			// nothing -- which is exactly the property under test.
+			settings->max_frames_per_sec = static_cast<unsigned short>(
+				strtoul(parseServerArgValue(arg_full).c_str(), NULL, 10));
 		}
 		else {
 			printf("'%s' is not a valid command line option. Try '--help' for a list of valid options.\n", argv[i]);

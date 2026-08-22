@@ -244,9 +244,9 @@ MenuConfig::MenuConfig (bool _is_game_state)
 	, scrollpane_padding(8, 40) // appropriate defaults for fantasycore widget sizes
 	, scrollpane_separator_color(font->getColor(FontEngine::COLOR_WIDGET_DISABLED))
 	, new_render_device(settings->render_device_name)
-	, input_confirm_timer(settings->max_frames_per_sec * 10) // 10 seconds
+	, input_confirm_timer(Settings::SIM_TICK_HZ * 10) // 10 seconds
 	, input_action(0)
-	, keybind_tip_timer(settings->max_frames_per_sec * 5) // 5 seconds
+	, keybind_tip_timer(Settings::SIM_TICK_HZ * 5) // 5 seconds
 	, keybind_tip(new WidgetTooltip())
 	, clicked_accept(false)
 	, clicked_cancel(false)

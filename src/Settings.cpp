@@ -42,7 +42,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "SharedResources.h"
 #include "Version.h"
 
-const float Settings::LOGIC_FPS = 60.f;
+const unsigned short Settings::SIM_TICK_HZ = 60;
 
 Settings::Settings()
 	: path_conf("")

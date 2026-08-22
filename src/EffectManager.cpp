@@ -407,7 +407,7 @@ void EffectManager::logic() {
 			}
 		}
 
-		bool do_timed_effect = ei.timer.isWholeSecond() || (ei.timer.getDuration() < settings->max_frames_per_sec && ei.timer.isBegin());
+		bool do_timed_effect = ei.timer.isWholeSecond() || (ei.timer.getDuration() < Settings::SIM_TICK_HZ && ei.timer.isBegin());
 
 		// @TYPE damage|Damage per second
 		if (ei.type == Effect::DAMAGE && do_timed_effect) {
@@ -467,7 +467,7 @@ void EffectManager::logic() {
 		// @TYPE fear|Causes enemies to run away
 		else if (ei.type == Effect::FEAR) fear = true;
 		// @TYPE knockback|Pushes the target away from the source caster. Speed is the given value divided by the framerate cap.
-		else if (ei.type == Effect::KNOCKBACK) knockback_speed = static_cast<float>(ei.magnitude)/static_cast<float>(settings->max_frames_per_sec);
+		else if (ei.type == Effect::KNOCKBACK) knockback_speed = static_cast<float>(ei.magnitude)/static_cast<float>(Settings::SIM_TICK_HZ);
 
 		// @TYPE ${STAT}|Increases ${STAT}, where ${STAT} is any valid stat_id.
 		else if (ei.type >= Effect::TYPE_COUNT && ei.type < offset_resource_effects) {

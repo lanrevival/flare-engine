@@ -71,7 +71,7 @@ MenuDevConsole::MenuDevConsole()
 	scrollbar_w = scrollbar->getBounds().w;
 	delete scrollbar;
 
-	distance_timer.setDuration(settings->max_frames_per_sec);
+	distance_timer.setDuration(Settings::SIM_TICK_HZ);
 
 	button_close = new WidgetButton(WidgetButton::CLOSE_FILE);
 	tablist.add(button_close);

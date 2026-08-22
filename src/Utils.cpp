@@ -240,7 +240,7 @@ FMinMax::FMinMax()
 {}
 
 bool Timer::isWholeSecond() {
-	return current % settings->max_frames_per_sec == 0;
+	return current % Settings::SIM_TICK_HZ == 0;
 }
 
 FPoint Utils::screenToMap(int x, int y, float camx, float camy) {
@@ -670,7 +670,7 @@ std::string Utils::floatToString(const float value, size_t precision) {
 }
 
 std::string Utils::getDurationString(const int duration, size_t precision) {
-	float real_duration = static_cast<float>(duration) / settings->max_frames_per_sec;
+	float real_duration = static_cast<float>(duration) / Settings::SIM_TICK_HZ;
 	std::string temp = floatToString(real_duration, precision);
 
 	if (real_duration == 1.f) {

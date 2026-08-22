@@ -37,7 +37,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 CutsceneSettings::CutsceneSettings()
 	: caption_background(0,0,0,200)
-	, vscroll_speed(0.5f * Settings::LOGIC_FPS / settings->max_frames_per_sec)
+	, vscroll_speed(0.5f)
 	, vscroll_speed_fast(vscroll_speed * 16)
 {}
 
@@ -615,7 +615,7 @@ bool GameStateCutscene::load(const std::string& filename) {
 			}
 			else if (infile.key == "vscroll_speed") {
 				// @ATTR vscroll_speed|float|The speed at which elements will scroll in 'vscroll' scenes. Defaults to 0.5.
-				cutscene_settings.vscroll_speed = Parse::toFloat(infile.val) * Settings::LOGIC_FPS / settings->max_frames_per_sec;
+				cutscene_settings.vscroll_speed = Parse::toFloat(infile.val);
 				cutscene_settings.vscroll_speed_fast = cutscene_settings.vscroll_speed * 2;
 			}
 			else if (infile.key == "menu_backgrounds") {

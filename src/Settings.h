@@ -31,7 +31,16 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 class Settings {
 public:
-	static const float LOGIC_FPS;
+	/** The simulation rate, in Hz. Fixed and shared: two peers must agree on what tick N means.
+	 *
+	 * This is NOT max_frames_per_sec, which is a render frame limit and a user preference.
+	 * Anything converting between seconds and ticks -- durations, speeds, regen, timers --
+	 * uses this. Only the render pacing and the frame-limit setting itself use max_frames_per_sec.
+	 *
+	 * unsigned short deliberately, matching max_frames_per_sec, so the integer timer arithmetic
+	 * throughout the engine stays integer.
+	 */
+	static const unsigned short SIM_TICK_HZ;
 
 	enum {
 		LOOT_TIPS_DEFAULT = 0,

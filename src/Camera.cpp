@@ -39,7 +39,7 @@ Camera::Camera()
 	, prev_cam_target()
 	, prev_cam_dx(0)
 	, prev_cam_dy(0)
-	, cam_threshold(eset->misc.camera_speed / Settings::LOGIC_FPS / 50.f)
+	, cam_threshold(eset->misc.camera_speed / static_cast<float>(Settings::SIM_TICK_HZ) / 50.f)
 	, shake_strength(8)
 {
 }

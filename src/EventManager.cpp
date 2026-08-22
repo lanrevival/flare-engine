@@ -1139,7 +1139,7 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 		}
 		else if (ec->type == EventComponent::SHAKYCAM) {
 			mapr->cam.shake_timer.setDuration(ec->data[0].Int);
-			inpt->joystickRumble(InputState::JOYSTICK_RUMBLE_STRENGTH, InputState::JOYSTICK_RUMBLE_STRENGTH, (ec->data[0].Int * 1000) / settings->max_frames_per_sec);
+			inpt->joystickRumble(InputState::JOYSTICK_RUMBLE_STRENGTH, InputState::JOYSTICK_RUMBLE_STRENGTH, (ec->data[0].Int * 1000) / Settings::SIM_TICK_HZ);
 		}
 		else if (ec->type == EventComponent::REMOVE_CURRENCY) {
 			camp->removeCurrency(ec->data[0].Int);

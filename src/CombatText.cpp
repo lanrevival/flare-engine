@@ -60,9 +60,9 @@ CombatText::CombatText() {
 	msg_color[MSG_BUFF] = font->getColor(FontEngine::COLOR_COMBAT_BUFF);
 	msg_color[MSG_MISS] = font->getColor(FontEngine::COLOR_COMBAT_MISS);
 
-	duration = settings->max_frames_per_sec; // 1 second
+	duration = Settings::SIM_TICK_HZ; // 1 second
 	fade_duration = 0;
-	speed = Settings::LOGIC_FPS / settings->max_frames_per_sec;
+	speed = 1.f;
 	offset = 48; // average height of flare-game enemies, so a sensible default
 	font_id = "font_regular";
 
@@ -77,7 +77,7 @@ CombatText::CombatText() {
 			}
 			else if(infile.key == "speed") {
 				// @ATTR speed|float|Motion speed of the combat text.
-				speed = (Parse::toFloat(infile.val) * Settings::LOGIC_FPS) / settings->max_frames_per_sec;
+				speed = Parse::toFloat(infile.val);
 			}
 			else if (infile.key == "offset") {
 				// @ATTR offset|int|The vertical offset for the combat text's starting position.

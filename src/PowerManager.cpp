@@ -710,7 +710,7 @@ void PowerManager::loadPowers() {
 		}
 		else if (infile.key == "speed") {
 			// @ATTR power.speed|float|The speed of missile hazard, the unit is defined as map units per frame.
-			power->speed = Parse::toFloat(infile.val) / settings->max_frames_per_sec;
+			power->speed = Parse::toFloat(infile.val) / Settings::SIM_TICK_HZ;
 		}
 		else if (infile.key == "lifespan") {
 			// @ATTR power.lifespan|duration|How long the hazard/animation lasts in 'ms' or 's'.
@@ -726,7 +726,7 @@ void PowerManager::loadPowers() {
 		}
 		else if (infile.key == "charge_speed") {
 			// @ATTR power.charge_speed|float|Moves the caster at this speed in the direction they are facing for the duration specified by charge_duration or until the state animation is finished (whichever is shorter).
-			power->charge_speed = Parse::toFloat(infile.val) / settings->max_frames_per_sec;
+			power->charge_speed = Parse::toFloat(infile.val) / Settings::SIM_TICK_HZ;
 		}
 		else if (infile.key == "charge_duration") {
 			// @ATTR power.charge_duration|duration|Defines how long the charge_speed is applied. If set to 0, this property is ignored and the state animation is used to set the duration.
@@ -1732,7 +1732,6 @@ bool PowerManager::missile(PowerID power_index, StatBlock *src_stats, const FPoi
 		if (power->speed_variance != 0) {
 			const float var = power->speed_variance;
 			speed_var = sim_rng->rangeF(-var, var);
-			speed_var *= Settings::LOGIC_FPS / static_cast<float>(settings->max_frames_per_sec);
 		}
 
 		// set speed and angle
@@ -1770,7 +1769,7 @@ bool PowerManager::repeater(PowerID power_index, StatBlock *src_stats, const FPo
 	// calculate polar coordinates angle
 	float theta = Utils::calcTheta(origin.x, origin.y, target.x, target.y);
 
-	float repeater_speed = (power->speed * settings->max_frames_per_sec) / Settings::LOGIC_FPS;
+	float repeater_speed = power->speed;
 
 	speed.x = repeater_speed * cosf(theta);
 	speed.y = repeater_speed * sinf(theta);

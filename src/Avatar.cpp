@@ -432,7 +432,7 @@ void Avatar::set_direction() {
 		// when using mouse move, we use a longer turn delay to prevent the movement from being "jittery" with too many direction changes
 		// however, we lower this delay if the player can't reach their destination before the next direction check
 		// this keeps the player's movement smooth for most of the journey towards a given point, although there is still some jitter as they near their destination.
-		int delay_ticks = settings->max_frames_per_sec / 2;
+		int delay_ticks = Settings::SIM_TICK_HZ / 2;
 
 		float real_speed = stats.speed * StatBlock::SPEED_MULTIPLIER[stats.direction] * stats.effects.speed / 100;
 		// we multiply by 0.5 here because when we don't, the player tends to turn 180 degrees for brief moments
@@ -449,7 +449,7 @@ void Avatar::set_direction() {
 		// this allows the player to quickly change direction on their own without becoming overly "jittery"
 		// the cooldown can be ended by releasing the move button, but the cooldown is so fast that it doesn't matter much (maybe a speed run tactic?)
 		if (stats.direction != old_dir) {
-			set_dir_timer.setDuration(settings->max_frames_per_sec / 10);
+			set_dir_timer.setDuration(Settings::SIM_TICK_HZ / 10);
 		}
 	}
 }
