@@ -80,6 +80,50 @@ jobs:
           fi
           echo "OK: no global RNG call sites in src/"
 
+  replays:
+    # Replays a corpus of recorded input and compares world-state digests against committed
+    # goldens. This is the regression test Phases 1 and 2 lean on: almost every plan in them is a
+    # behaviour-preserving refactor, and this is what turns "did it change anything?" into an
+    # exit code.
+    #
+    # flare-game is PINNED to a commit on purpose. The goldens are digests of a simulation running
+    # that mod data, so a flare-game update moves them and would turn this job red for a change
+    # that is not a regression. Bumping the pin means re-recording the goldens in the same commit.
+    #
+    # NOT YET VERIFIED IN ACTIONS -- nothing has been pushed at the time of writing. The script and
+    # its negative control were verified locally. Confirm on the first push, and confirm it goes
+    # RED for a deliberate perturbation before trusting a green.
+    runs-on: ubuntu-24.04
+    env:
+      FLARE_GAME_COMMIT: af6eee6d339ac98011864bfe89da837fe7769c28
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get clean -qq
+          sudo apt-get update -qq
+          sudo apt-get install -qq g++ libegl1-mesa-dev libgles2-mesa-dev libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev
+
+      - name: Fetch game data
+        run: |
+          git clone --no-checkout https://github.com/lanrevival/flare-game.git ../flare-game
+          git -C ../flare-game checkout "$FLARE_GAME_COMMIT"
+
+      - name: Assemble a combined mods tree
+        run: |
+          # Neither repo is runnable alone: flare-engine/mods has only 'default', the campaigns
+          # live in flare-game/mods.
+          mkdir -p /tmp/flaredata/mods
+          ln -s "$GITHUB_WORKSPACE/mods/default" /tmp/flaredata/mods/default
+          for d in ../flare-game/mods/*/; do ln -s "$(cd "$d" && pwd)" "/tmp/flaredata/mods/$(basename "$d")"; done
+
+      - name: Build server
+        run: cmake . && make -j4 flare-server
+
+      - name: Run replays
+        run: ./tests/run-replays.sh /tmp/flaredata
+
   cppcheck:
     runs-on: ubuntu-24.04
     steps:

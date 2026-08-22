@@ -42,6 +42,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MessageEngine.h"
 #include "ModManager.h"
 #include "RenderDevice.h"
+#include "Replay.h"
 #include "WorldHash.h"
 #include "Rng.h"
 #include "SaveLoad.h"
@@ -63,7 +64,7 @@ GameSwitcher *gswitch;
 
 class ServerCmdLineArgs {
 public:
-	ServerCmdLineArgs() : mod_list(), load_slot(), data_path(), max_ticks(0), hash_every(0), hash_at_exit(false), sim_seed(RNG_DEFAULT_SIM_SEED) {}
+	ServerCmdLineArgs() : mod_list(), load_slot(), data_path(), max_ticks(0), hash_every(0), hash_at_exit(false), sim_seed(RNG_DEFAULT_SIM_SEED), record_path(), replay_path() {}
 	std::vector<std::string> mod_list;
 	std::string load_slot;
 	std::string data_path;
@@ -71,6 +72,8 @@ public:
 	unsigned long hash_every;
 	bool hash_at_exit;
 	uint64_t sim_seed;
+	std::string record_path;
+	std::string replay_path;
 };
 
 // The Platform implementations are compiled by #include-ing them into the entry point rather
@@ -144,6 +147,8 @@ static void serverInit(const ServerCmdLineArgs& args) {
 	fx_rng->seed(static_cast<uint64_t>(time(NULL)));
 	Utils::logInfo("main_server: sim_rng seeded with 0x%llx", static_cast<unsigned long long>(sim_rng->getSeed()));
 
+	replay = new Replay();
+
 	save_load = new SaveLoad();
 	msg = new MessageEngine();
 	font = getFontEngine();
@@ -194,6 +199,8 @@ static void serverCleanup() {
 	delete snd;
 	delete save_load;
 	delete eset;
+	delete replay;
+	replay = NULL;
 	delete sim_rng;
 	delete fx_rng;
 	delete tooltipm;
@@ -254,6 +261,14 @@ static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_
 			// bookkeeping, which the game logic expects to have run.
 			inpt->handle();
 
+			// Drive input from the recording before the logic that reads it. Recording
+			// happens at the same point so that a record/replay round trip sees the same
+			// state at the same moment.
+			if (replay && replay->isPlaying())
+				replay->applyTick(total_ticks + 1);
+			else if (replay && replay->isRecording())
+				replay->recordTick(total_ticks + 1);
+
 			gswitch->logic();
 			inpt->resetScroll();
 
@@ -312,6 +327,8 @@ static void printHelp() {
 	       "--load-slot=<SLOT>       Loads a save slot by numerical index.\n"
 	       "--max-ticks=<N>          Stops after N logic ticks. For testing.\n"
 	       "--sim-seed=<N>           Seeds the simulation RNG. Default is fixed.\n"
+	       "--record=<FILE>          Records per-tick input to FILE.\n"
+	       "--replay=<FILE>          Replays input from FILE. Refuses a version or mod mismatch.\n"
 	       "--hash                   Prints a digest of world state at exit.\n"
 	       "--hash-every=<N>         Prints a digest every N ticks, for bisecting a divergence.\n"
 	       "--max-fps=<N>            Render frame limit. Accepted and ignored: the server\n"
@@ -375,6 +392,12 @@ int main(int argc, char *argv[]) {
 		else if (arg == "max-ticks") {
 			args.max_ticks = strtoul(parseServerArgValue(arg_full).c_str(), NULL, 10);
 		}
+		else if (arg == "record") {
+			args.record_path = parseServerArgValue(arg_full);
+		}
+		else if (arg == "replay") {
+			args.replay_path = parseServerArgValue(arg_full);
+		}
 		else if (arg == "sim-seed") {
 			// Phase 3 will take this from the host instead. Until then it exists so that the
 			// RNG-to-world-state link is testable: two seeds must produce two digests.
@@ -411,7 +434,30 @@ int main(int argc, char *argv[]) {
 
 	serverInit(args);
 
+	// After serverInit so the mod list is loaded and can be validated against the recording.
+	if (!args.replay_path.empty()) {
+		if (!replay->startPlayback(args.replay_path)) {
+			// Utils::Exit, not serverCleanup + return: the engine is half-initialised here and
+			// ~AnimationManager asserts that every animation has been released, which has not
+			// happened yet. This is the engine's own idiom for a fatal startup error, and it is
+			// what the --headless assertion above uses.
+			Utils::logError("main_server: refusing to replay. Nothing was simulated.");
+			Utils::Exit(1);
+		}
+		// The recording's seed wins. Replaying under a different seed is not a replay.
+		sim_rng->seed(replay->getSeed());
+		Utils::logInfo("main_server: sim_rng reseeded from replay with 0x%llx",
+		               static_cast<unsigned long long>(sim_rng->getSeed()));
+	}
+	else if (!args.record_path.empty()) {
+		if (!replay->startRecording(args.record_path)) {
+			Utils::Exit(1);
+		}
+	}
+
 	unsigned long ticks = serverMainLoop(args.max_ticks, args.hash_every);
+
+	replay->finish();
 
 	if (shutdown_requested)
 		Utils::logInfo("main_server: shutdown requested, stopping.");
