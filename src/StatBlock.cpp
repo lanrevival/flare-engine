@@ -40,6 +40,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MessageEngine.h"
 #include "ModManager.h"
 #include "PowerManager.h"
+#include "Rng.h"
 #include "Settings.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
@@ -1533,7 +1534,7 @@ StatBlock::AIPower* StatBlock::getAIPower(int ai_type) {
 		if (ai_type != powers_ai[i].type)
 			continue;
 
-		if (!Math::percentChanceF(powers_ai[i].chance))
+		if (!sim_rng->percentChanceF(powers_ai[i].chance))
 			continue;
 
 		if (!powers_ai[i].cooldown.isEnd())
@@ -1551,7 +1552,7 @@ StatBlock::AIPower* StatBlock::getAIPower(int ai_type) {
 	}
 
 	if (!possible_ids.empty()) {
-		size_t index = static_cast<size_t>(rand()) % possible_ids.size();
+		size_t index = sim_rng->index(possible_ids.size());
 		return &powers_ai[possible_ids[index]];
 	}
 

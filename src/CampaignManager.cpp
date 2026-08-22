@@ -34,6 +34,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuManager.h"
 #include "MenuInventory.h"
 #include "MessageEngine.h"
+#include "Rng.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
 #include "StatBlock.h"
@@ -357,7 +358,7 @@ void CampaignManager::randomStatusRoll() {
 	if (random_status_pool.empty())
 		return;
 
-	random_status = random_status_pool[Math::randBetween(0, static_cast<int>(random_status_pool.size()) - 1)];
+	random_status = random_status_pool[sim_rng->range(0, static_cast<int>(random_status_pool.size()) - 1)];
 }
 
 void CampaignManager::randomStatusSet() {

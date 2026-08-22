@@ -24,6 +24,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "CommonIncludes.h"
 #include "EventManager.h"
 #include "MapCollision.h"
+#include "Rng.h"
 #include "Utils.h"
 
 class Event;
@@ -146,7 +147,7 @@ public:
 	Map_Enemy(const std::string& _type="", FPoint _pos=FPoint())
 		: type(_type)
 		, pos(_pos)
-		, direction(rand() % 8)
+		, direction(sim_rng->range(0, 7))
 		, waypoints(std::queue<FPoint>())
 		, wander_radius(Map_Group::DEFAULT_WANDER_RADIUS)
 		, hero_ally(false)

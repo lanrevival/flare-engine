@@ -334,7 +334,7 @@ void Avatar::set_direction() {
 				// add a 5% chance to recalculate on every frame. This prevents reclaulating lots of entities in the same frame
 				chance_calc_path += 5;
 
-				bool calc_path_success = Math::percentChance(chance_calc_path);
+				bool calc_path_success = sim_rng->percentChance(chance_calc_path);
 				if (calc_path_success)
 					recalculate_path = true;
 
@@ -989,7 +989,7 @@ void Avatar::beginPower(PowerID replaced_id, FPoint* target) {
 
 	for (size_t j = 0; j < power->chain_powers.size(); ++j) {
 		const ChainPower& chain_power = power->chain_powers[j];
-		if (chain_power.type == ChainPower::TYPE_PRE && Math::percentChanceF(chain_power.chance)) {
+		if (chain_power.type == ChainPower::TYPE_PRE && sim_rng->percentChanceF(chain_power.chance)) {
 			powers->activate(chain_power.id, &stats, stats.pos, *target);
 		}
 	}

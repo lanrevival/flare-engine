@@ -365,7 +365,7 @@ bool Entity::takeHit(Hazard &h) {
 	// exit if it was a beacon (to prevent stats.targeted from being set)
 	if (h.power->beacon) return false;
 
-	if (h.power->type == Power::TYPE_MISSILE && Math::percentChanceF(stats.get(Stats::REFLECT))) {
+	if (h.power->type == Power::TYPE_MISSILE && sim_rng->percentChanceF(stats.get(Stats::REFLECT))) {
 		// reflect the missile 180 degrees
 		h.setAngle(h.angle+static_cast<float>(M_PI));
 
@@ -401,11 +401,11 @@ bool Entity::takeHit(Hazard &h) {
 	}
 
 	float true_avoidance = 100 - (accuracy - avoidance);
-	bool is_overhit = (true_avoidance < 0 && !h.src_stats->perfect_accuracy) ? Math::percentChanceF(fabsf(true_avoidance)) : false;
+	bool is_overhit = (true_avoidance < 0 && !h.src_stats->perfect_accuracy) ? sim_rng->percentChanceF(fabsf(true_avoidance)) : false;
 	true_avoidance = std::min(std::max(true_avoidance, eset->combat.min_avoidance), eset->combat.max_avoidance);
 
 	bool missed = false;
-	if (!h.src_stats->perfect_accuracy && Math::percentChanceF(true_avoidance)) {
+	if (!h.src_stats->perfect_accuracy && sim_rng->percentChanceF(true_avoidance)) {
 		missed = true;
 	}
 
@@ -413,7 +413,7 @@ bool Entity::takeHit(Hazard &h) {
 	float dmg = 0;
 
 	for (size_t i = 0; i < h.damage.size(); ++i) {
-		float dmg_part = Math::randBetweenF(h.damage[i].min, h.damage[i].max);
+		float dmg_part = sim_rng->rangeF(h.damage[i].min, h.damage[i].max);
 
 		if ((i == h.power->base_damage && h.power->converted_damage == h.damage.size()) || i == h.power->converted_damage) {
 			// power damage modifiers are only applied to the base damage (or converted damage if that applies)
@@ -422,7 +422,7 @@ bool Entity::takeHit(Hazard &h) {
 			else if (h.power->mod_damage_mode == Power::STAT_MODIFIER_MODE_ADD)
 				dmg_part += h.power->mod_damage_value_min;
 			else if (h.power->mod_damage_mode == Power::STAT_MODIFIER_MODE_ABSOLUTE)
-				dmg_part = Math::randBetweenF(h.power->mod_damage_value_min, h.power->mod_damage_value_max);
+				dmg_part = sim_rng->rangeF(h.power->mod_damage_value_min, h.power->mod_damage_value_max);
 		}
 
 		dmg += stats.applyResistToDamage(i, dmg_part);
@@ -430,7 +430,7 @@ bool Entity::takeHit(Hazard &h) {
 
 	if (!h.power->trait_armor_penetration) { // armor penetration ignores all absorption
 		// subtract absorption from armor
-		float absorption = Math::randBetweenF(stats.get(Stats::ABS_MIN), stats.get(Stats::ABS_MAX));
+		float absorption = sim_rng->rangeF(stats.get(Stats::ABS_MIN), stats.get(Stats::ABS_MAX));
 
 		if (absorption > 0 && dmg > 0) {
 			float base_absorb = absorption;
@@ -483,23 +483,23 @@ bool Entity::takeHit(Hazard &h) {
 	if (stats.effects.stun || stats.effects.speed < 100)
 		true_crit_chance += h.power->trait_crits_impaired;
 
-	bool crit = Math::percentChanceF(true_crit_chance);
+	bool crit = sim_rng->percentChanceF(true_crit_chance);
 	if (crit) {
 		// default is dmg * 2
-		dmg = (dmg * Math::randBetweenF(eset->combat.min_crit_damage, eset->combat.max_crit_damage)) / 100;
+		dmg = (dmg * sim_rng->rangeF(eset->combat.min_crit_damage, eset->combat.max_crit_damage)) / 100;
 		if (!stats.hero) {
 			mapr->cam.shake_timer.setDuration(settings->max_frames_per_sec/2);
 			inpt->joystickRumble(InputState::JOYSTICK_RUMBLE_STRENGTH, InputState::JOYSTICK_RUMBLE_STRENGTH, 500);
 		}
 	}
 	else if (is_overhit) {
-		dmg = (dmg * Math::randBetweenF(eset->combat.min_overhit_damage, eset->combat.max_overhit_damage)) / 100;
+		dmg = (dmg * sim_rng->rangeF(eset->combat.min_overhit_damage, eset->combat.max_overhit_damage)) / 100;
 		// Should we use shakycam for overhits?
 	}
 
 	// misses cause reduced damage
 	if (missed) {
-		dmg = (dmg * Math::randBetweenF(eset->combat.min_miss_damage, eset->combat.max_miss_damage)) / 100;
+		dmg = (dmg * sim_rng->rangeF(eset->combat.min_miss_damage, eset->combat.max_miss_damage)) / 100;
 	}
 
 	dmg = eset->combat.resourceRound(dmg);
@@ -542,7 +542,7 @@ bool Entity::takeHit(Hazard &h) {
 		if (h.src_stats->hp > 0) {
 			float hp_steal = h.power->hp_steal + h.src_stats->get(Stats::HP_STEAL);
 			if (hp_steal != 0) {
-				if (Math::percentChanceF(stats.get(Stats::RESIST_HP_STEAL))) {
+				if (sim_rng->percentChanceF(stats.get(Stats::RESIST_HP_STEAL))) {
 					comb->addString(msg->get("Resist"), stats.pos, CombatText::MSG_MISS);
 				}
 				else {
@@ -556,7 +556,7 @@ bool Entity::takeHit(Hazard &h) {
 			}
 			float mp_steal = h.power->mp_steal + h.src_stats->get(Stats::MP_STEAL);
 			if (mp_steal != 0) {
-				if (Math::percentChanceF(stats.get(Stats::RESIST_MP_STEAL))) {
+				if (sim_rng->percentChanceF(stats.get(Stats::RESIST_MP_STEAL))) {
 					comb->addString(msg->get("Resist"), stats.pos, CombatText::MSG_MISS);
 				}
 				else {
@@ -571,7 +571,7 @@ bool Entity::takeHit(Hazard &h) {
 			for (size_t i = 0; i < h.src_stats->resource_stats.size(); ++i) {
 				float resource_steal = h.power->resource_steal[i] + h.src_stats->getResourceStat(i, EngineSettings::ResourceStats::STAT_STEAL);
 				if (resource_steal != 0) {
-					if (Math::percentChanceF(stats.getResourceStat(i, EngineSettings::ResourceStats::STAT_RESIST_STEAL))) {
+					if (sim_rng->percentChanceF(stats.getResourceStat(i, EngineSettings::ResourceStats::STAT_RESIST_STEAL))) {
 						comb->addString(msg->get("Resist"), stats.pos, CombatText::MSG_MISS);
 					}
 					else {
@@ -589,7 +589,7 @@ bool Entity::takeHit(Hazard &h) {
 			float dmg_return = (dmg * stats.get(Stats::RETURN_DAMAGE)) / 100.f;
 			dmg_return = eset->combat.resourceRound(dmg_return);
 			if (dmg_return > 0) {
-				if (Math::percentChanceF(h.src_stats->get(Stats::RESIST_DAMAGE_REFLECT))) {
+				if (sim_rng->percentChanceF(h.src_stats->get(Stats::RESIST_DAMAGE_REFLECT))) {
 					comb->addString(msg->get("Resist"), stats.pos, CombatText::MSG_MISS);
 				}
 				else {
@@ -620,7 +620,7 @@ bool Entity::takeHit(Hazard &h) {
 		// post power
 		for (size_t i = 0; i < h.power->chain_powers.size(); ++i) {
 			ChainPower& chain_power = h.power->chain_powers[i];
-			if (chain_power.type == ChainPower::TYPE_POST && Math::percentChanceF(chain_power.chance)) {
+			if (chain_power.type == ChainPower::TYPE_POST && sim_rng->percentChanceF(chain_power.chance)) {
 				size_t hazard_count = hazards->h.size();
 				if (h.power->post_hazards_skip_target) {
 					// calling this here clears the powers->hazards queue
@@ -676,7 +676,7 @@ bool Entity::takeHit(Hazard &h) {
 
 		// don't go through a hit animation if stunned or successfully poised
 		// however, critical hits ignore poise
-		bool chance_poise = Math::percentChanceF(stats.get(Stats::POISE));
+		bool chance_poise = sim_rng->percentChanceF(stats.get(Stats::POISE));
 
 		if(stats.cooldown_hit.isEnd()) {
 			stats.cooldown_hit.reset(Timer::BEGIN);
@@ -703,7 +703,7 @@ bool Entity::takeHit(Hazard &h) {
 			Power* block_power = powers->powers[stats.block_power];
 			for (size_t i = 0; i < block_power->chain_powers.size(); ++i) {
 				ChainPower& chain_power = block_power->chain_powers[i];
-				if (chain_power.type == ChainPower::TYPE_POST && stats.getPowerCooldown(chain_power.id) == 0 && Math::percentChanceF(chain_power.chance)) {
+				if (chain_power.type == ChainPower::TYPE_POST && stats.getPowerCooldown(chain_power.id) == 0 && sim_rng->percentChanceF(chain_power.chance)) {
 					powers->activate(chain_power.id, &stats, stats.pos, stats.pos);
 					stats.setPowerCooldown(chain_power.id, powers->powers[chain_power.id]->cooldown);
 				}

@@ -40,6 +40,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuTalker.h"
 #include "NPC.h"
 #include "PowerManager.h"
+#include "Rng.h"
 #include "Settings.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
@@ -309,7 +310,7 @@ void EntityBehavior::findTarget() {
 			e->stats.cur_state == StatBlock::ENTITY_STANCE &&
 			!move_to_safe_dist && target_dist < e->stats.flee_range &&
 			target_dist >= e->stats.melee_range &&
-			Math::percentChanceF(e->stats.chance_flee) &&
+			sim_rng->percentChanceF(e->stats.chance_flee) &&
 			e->stats.flee_cooldown_timer.isEnd()
 		)
 	{
@@ -347,7 +348,7 @@ void EntityBehavior::findTarget() {
 			fleeing = false;
 		}
 		else {
-			int index = Math::randBetween(0, static_cast<int>(flee_dirs.size())-1);
+			int index = sim_rng->range(0, static_cast<int>(flee_dirs.size())-1);
 			pursue_pos = Utils::calcVector(e->stats.pos, flee_dirs[index], 1);
 
 			if (e->stats.flee_timer.isEnd()) {
@@ -494,7 +495,7 @@ void EntityBehavior::checkMove() {
 				// add a 5% chance to recalculate on every frame. This prevents reclaulating lots of entities in the same frame
 				chance_calc_path += 5;
 
-				bool calc_path_success = Math::percentChance(chance_calc_path);
+				bool calc_path_success = sim_rng->percentChance(chance_calc_path);
 				if (calc_path_success)
 					recalculate_path = true;
 
@@ -619,7 +620,7 @@ void EntityBehavior::checkMoveStateStance() {
 	// 1. too far away and chance_pursue roll succeeds
 	// 2. within range, but lack line-of-sight (required to attack)
 	bool ally_targeting_hero = e->stats.hero_ally && !e->stats.in_combat && hero_dist > ALLY_FOLLOW_DISTANCE_WALK;
-	bool should_move_to_target = (e->stats.in_combat || !e->stats.waypoints.empty()) && ((target_dist > e->stats.melee_range && Math::percentChanceF(e->stats.chance_pursue)) || (target_dist <= e->stats.melee_range && !los));
+	bool should_move_to_target = (e->stats.in_combat || !e->stats.waypoints.empty()) && ((target_dist > e->stats.melee_range && sim_rng->percentChanceF(e->stats.chance_pursue)) || (target_dist <= e->stats.melee_range && !los));
 
 	if (should_move_to_target || fleeing || ally_targeting_hero) {
 
@@ -657,7 +658,7 @@ void EntityBehavior::checkMoveStateMove() {
 		}
 	}
 	// in order to prevent infinite fleeing, we re-roll our chance to flee after a certain duration
-	bool stop_fleeing = can_attack && fleeing && e->stats.flee_timer.isEnd() && !Math::percentChanceF(e->stats.chance_flee);
+	bool stop_fleeing = can_attack && fleeing && e->stats.flee_timer.isEnd() && !sim_rng->percentChanceF(e->stats.chance_flee);
 
 	if (!stop_fleeing && e->stats.flee_timer.isEnd()) {
 		// if the roll to continue fleeing succeeds, but the flee duration has expired, we don't want to reset the duration to the full amount
@@ -803,7 +804,7 @@ void EntityBehavior::updateState() {
 				// pre power
 				for (size_t i = 0; i < epower->chain_powers.size(); ++i) {
 					ChainPower& chain_power = epower->chain_powers[i];
-					if (chain_power.type == ChainPower::TYPE_PRE && Math::percentChanceF(chain_power.chance)) {
+					if (chain_power.type == ChainPower::TYPE_PRE && sim_rng->percentChanceF(chain_power.chance)) {
 						powers->activate(chain_power.id, &e->stats, e->stats.pos, pursue_pos);
 					}
 				}
@@ -981,8 +982,8 @@ void EntityBehavior::updateState() {
 
 FPoint EntityBehavior::getWanderPoint() {
 	FPoint waypoint;
-	waypoint.x = static_cast<float>(e->stats.wander_area.x) + static_cast<float>(rand() % (e->stats.wander_area.w)) + 0.5f;
-	waypoint.y = static_cast<float>(e->stats.wander_area.y) + static_cast<float>(rand() % (e->stats.wander_area.h)) + 0.5f;
+	waypoint.x = static_cast<float>(e->stats.wander_area.x) + static_cast<float>(sim_rng->range(0, e->stats.wander_area.w - 1)) + 0.5f;
+	waypoint.y = static_cast<float>(e->stats.wander_area.y) + static_cast<float>(sim_rng->range(0, e->stats.wander_area.h - 1)) + 0.5f;
 
 	if (mapr->collider.isValidPosition(waypoint.x, waypoint.y, e->stats.movement_type, mapr->collider.getCollideType(e->stats.hero)) &&
 	    mapr->collider.lineOfMovement(e->stats.pos.x, e->stats.pos.y, waypoint.x, waypoint.y, e->stats.movement_type))

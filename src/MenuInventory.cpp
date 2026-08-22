@@ -42,6 +42,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuPowers.h"
 #include "MessageEngine.h"
 #include "PowerManager.h"
+#include "Rng.h"
 #include "Settings.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
@@ -350,7 +351,7 @@ void MenuInventory::logic() {
 				}
 			}
 			if (!removable_items.empty()) {
-				size_t random_item = static_cast<size_t>(rand()) % removable_items.size();
+				size_t random_item = sim_rng->index(removable_items.size());
 				remove(removable_items[random_item], 1);
 				death_message += msg->getv("Lost %s.",items->getItemName(removable_items[random_item]).c_str());
 			}

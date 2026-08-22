@@ -28,6 +28,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Hazard.h"
 #include "MessageEngine.h"
 #include "PowerManager.h"
+#include "Rng.h"
 #include "Settings.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
@@ -527,23 +528,23 @@ void EffectManager::addEffect(StatBlock* stats, EffectDef &effect, EffectParams 
 
 	// if we're already immune, don't add negative effects
 	if (stats && !effect.ignore_resist) {
-		if ((effect.type == Effect::DAMAGE || effect.type == Effect::DAMAGE_PERCENT) && Math::percentChanceF(stats->get(Stats::RESIST_DAMAGE_OVER_TIME))) {
+		if ((effect.type == Effect::DAMAGE || effect.type == Effect::DAMAGE_PERCENT) && sim_rng->percentChanceF(stats->get(Stats::RESIST_DAMAGE_OVER_TIME))) {
 			comb->addString(msg->get("Resist"), stats->pos, CombatText::MSG_MISS);
 			return;
 		}
-		else if (effect.type == Effect::SPEED && params.magnitude < 100 && Math::percentChanceF(stats->get(Stats::RESIST_SLOW))) {
+		else if (effect.type == Effect::SPEED && params.magnitude < 100 && sim_rng->percentChanceF(stats->get(Stats::RESIST_SLOW))) {
 			comb->addString(msg->get("Resist"), stats->pos, CombatText::MSG_MISS);
 			return;
 		}
-		else if (effect.type == Effect::STUN && Math::percentChanceF(stats->get(Stats::RESIST_STUN))) {
+		else if (effect.type == Effect::STUN && sim_rng->percentChanceF(stats->get(Stats::RESIST_STUN))) {
 			comb->addString(msg->get("Resist"), stats->pos, CombatText::MSG_MISS);
 			return;
 		}
-		else if (effect.type == Effect::KNOCKBACK && Math::percentChanceF(stats->get(Stats::RESIST_KNOCKBACK))) {
+		else if (effect.type == Effect::KNOCKBACK && sim_rng->percentChanceF(stats->get(Stats::RESIST_KNOCKBACK))) {
 			comb->addString(msg->get("Resist"), stats->pos, CombatText::MSG_MISS);
 			return;
 		}
-		else if (effect.type > Effect::TYPE_COUNT && params.magnitude < 0 && Math::percentChanceF(stats->get(Stats::RESIST_STAT_DEBUFF))) {
+		else if (effect.type > Effect::TYPE_COUNT && params.magnitude < 0 && sim_rng->percentChanceF(stats->get(Stats::RESIST_STAT_DEBUFF))) {
 			comb->addString(msg->get("Resist"), stats->pos, CombatText::MSG_MISS);
 			return;
 		}
@@ -619,7 +620,7 @@ void EffectManager::addEffect(StatBlock* stats, EffectDef &effect, EffectParams 
 	for (int i = Stats::RESIST_DAMAGE_OVER_TIME; i <= Stats::RESIST_STAT_DEBUFF; ++i) {
 		float resist_chance = (stats ? stats->get(static_cast<Stats::STAT>(i)) + params.magnitude : params.magnitude);
 
-		if ((effect.type == Effect::RESIST_ALL || effect.type == Effect::TYPE_COUNT + i) && Math::percentChanceF(resist_chance)) {
+		if ((effect.type == Effect::RESIST_ALL || effect.type == Effect::TYPE_COUNT + i) && sim_rng->percentChanceF(resist_chance)) {
 			clearNegativeEffects(Effect::TYPE_COUNT + i);
 		}
 	}

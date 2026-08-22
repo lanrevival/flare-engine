@@ -34,6 +34,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "AStarNode.h"
 #include "EngineSettings.h"
 #include "MapCollision.h"
+#include "Rng.h"
 #include "SharedResources.h"
 
 #include <cfloat>
@@ -545,7 +546,7 @@ FPoint MapCollision::getRandomNeighbor(const Point& target, int range, int movem
 	}
 
 	if (!valid_tiles.empty())
-		return valid_tiles[rand() % valid_tiles.size()];
+		return valid_tiles[sim_rng->index(valid_tiles.size())];
 	else
 		return FPoint(target);
 }

@@ -32,6 +32,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MessageEngine.h"
 #include "ModManager.h"
 #include "PowerManager.h"
+#include "Rng.h"
 #include "SaveLoad.h"
 #include "Settings.h"
 #include "SharedResources.h"
@@ -1008,7 +1009,7 @@ Chunk* Map::procGenWalkSingle(int path_type, size_t cur_x, size_t cur_y, int wal
 			link_count++;
 	}
 
-	if (link_count > 0 && (next->door_level != prev->door_level || rand() % link_count > 0))
+	if (link_count > 0 && (next->door_level != prev->door_level || sim_rng->range(0, link_count - 1) > 0))
 		return prev;
 
 	return next;
@@ -1041,8 +1042,8 @@ int Map::procGenCreatePath(int path_type, int desired_length, int* _door_count, 
 	size_t cur_x = 0;
 	size_t cur_y = 0;
 	if (path_type == PATH_MAIN) {
-		cur_x = rand() % MAP_SIZE_X;
-		cur_y = rand() % MAP_SIZE_Y;
+		cur_x = sim_rng->index(MAP_SIZE_X);
+		cur_y = sim_rng->index(MAP_SIZE_Y);
 	}
 	else {
 		cur_x = start_x;
@@ -1068,12 +1069,12 @@ int Map::procGenCreatePath(int path_type, int desired_length, int* _door_count, 
 	int max_branches = procgen_branches_per_door_level_max;
 
 	while (steps >= 0) {
-		int link = rand() % Chunk::LINK_COUNT;
+		int link = sim_rng->range(0, Chunk::LINK_COUNT - 1);
 
 		Chunk* prev = current;
 
 		int link_rotate = Chunk::LINK_COUNT;
-		int rotate_dir = Math::percentChance(50) ? 1 : -1;
+		int rotate_dir = sim_rng->percentChance(50) ? 1 : -1;
 		while (current->links[link] && link_rotate > 0) {
 			link += rotate_dir;
 			if (link >= Chunk::LINK_COUNT) {
@@ -1148,7 +1149,7 @@ int Map::procGenCreatePath(int path_type, int desired_length, int* _door_count, 
 
 		if (current != prev) {
 			if (path_type == PATH_MAIN) {
-				if (prev->type != Chunk::TYPE_START && prev->isStraight() && door_count < procgen_doors_max && rand() % 100 < door_chance) {
+				if (prev->type != Chunk::TYPE_START && prev->isStraight() && door_count < procgen_doors_max && sim_rng->percentChance(door_chance)) {
 					if (prev->links[Chunk::LINK_NORTH] && prev->links[Chunk::LINK_SOUTH])
 						prev->type = Chunk::TYPE_DOOR_NORTH_SOUTH;
 					else if (prev->links[Chunk::LINK_WEST] && prev->links[Chunk::LINK_EAST])
@@ -1172,7 +1173,7 @@ int Map::procGenCreatePath(int path_type, int desired_length, int* _door_count, 
 						door_chance += 5;
 				}
 
-				if (current->type == Chunk::TYPE_NORMAL && branch_count < max_branches && rand() % 100 < branch_chance) {
+				if (current->type == Chunk::TYPE_NORMAL && branch_count < max_branches && sim_rng->percentChance(branch_chance)) {
 					procgen_branch_roots.push_back(Point(static_cast<int>(cur_x), static_cast<int>(cur_y)));
 					branch_chance = 50;
 					branch_count++;
@@ -1327,7 +1328,7 @@ void Map::procGenFillArea(const std::string& config_filename, const Rect& area) 
 	int gen_attempts = 0;
 	int door_count = 0;
 
-	int desired_main_path_length = Math::randBetween(main_path_length_min, main_path_length_max);
+	int desired_main_path_length = sim_rng->range(main_path_length_min, main_path_length_max);
 
 	while ((main_path_length < main_path_length_min || main_path_length > main_path_length_max || (door_count == 0 && procgen_doors_max > 0)) && gen_attempts < main_path_attempts_max) {
 		main_path_length = procGenCreatePath(PATH_MAIN, desired_main_path_length, &door_count, 0, 0);
@@ -1337,7 +1338,7 @@ void Map::procGenFillArea(const std::string& config_filename, const Rect& area) 
 	Utils::logInfo("Map: Generated main path with length=%d and branches=%lu. Generator attempts: %d", main_path_length, procgen_branch_roots.size(), gen_attempts);
 
 	for (size_t i = 0; i < procgen_branch_roots.size(); ++i) {
-		int branch_length = Math::randBetween(branch_length_min, std::min(branch_length_min, branch_length_max));
+		int branch_length = sim_rng->range(branch_length_min, std::min(branch_length_min, branch_length_max));
 		procGenCreatePath(PATH_BRANCH, branch_length, NULL, procgen_branch_roots[i].x, procgen_branch_roots[i].y);
 		// map_chunks[branch_roots[i].second][branch_roots[i].first].type = Chunk::TYPE_BRANCH;
 	}
@@ -1368,7 +1369,7 @@ void Map::procGenFillArea(const std::string& config_filename, const Rect& area) 
 			continue;
 		}
 
-		size_t chunk_index = rand() % normal_chunks[i].size();
+		size_t chunk_index = sim_rng->index(normal_chunks[i].size());
 		Chunk* chunk = normal_chunks[i][chunk_index];
 		chunk->type = Chunk::TYPE_KEY;
 		normal_chunks[i].erase(normal_chunks[i].begin() + chunk_index);
@@ -1399,7 +1400,7 @@ void Map::procGenFillArea(const std::string& config_filename, const Rect& area) 
 				continue;
 			}
 
-			size_t valid_chunk_index = rand() % valid_chunks.size();
+			size_t valid_chunk_index = sim_rng->index(valid_chunks.size());
 
 			// attempt to reduce the occurrences of the same room variants being connected to each other
 			if (chunk->links[Chunk::LINK_WEST] && chunk->type == procgen_chunks[chunk_y][chunk_x-1].type && valid_chunks[valid_chunk_index] == procgen_chunks[chunk_y][chunk_x-1].variant) {
@@ -1423,7 +1424,7 @@ void Map::procGenFillArea(const std::string& config_filename, const Rect& area) 
 
 			size_t link_chunk_variant = 0;
 			if (chunk_maps[Chunk::TYPE_LINKS].size() > 1)
-				link_chunk_variant = rand() % chunk_maps[Chunk::TYPE_LINKS].size();
+				link_chunk_variant = sim_rng->index(chunk_maps[Chunk::TYPE_LINKS].size());
 
 			Map* chunk_map_links = chunk_maps[Chunk::TYPE_LINKS][link_chunk_variant];
 

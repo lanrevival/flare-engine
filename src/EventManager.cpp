@@ -34,6 +34,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MessageEngine.h"
 #include "ModManager.h"
 #include "PowerManager.h"
+#include "Rng.h"
 #include "Settings.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
@@ -967,7 +968,7 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 	// if chance_exec roll fails, don't execute the event
 	// we respect the value of "repeat", even if the event doesn't execute
 	EventComponent *ec_chance_exec = ev.getComponent(EventComponent::CHANCE_EXEC);
-	if (ec_chance_exec && !Math::percentChanceF(ec_chance_exec->data[0].Float)) {
+	if (ec_chance_exec && !sim_rng->percentChanceF(ec_chance_exec->data[0].Float)) {
 		return !ev.keep_after_trigger;
 	}
 
@@ -1172,7 +1173,7 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 			random_table.push_back(EventComponent());
 			loot->parseLoot(ec->s, &random_table.back(), &random_table);
 
-			unsigned rand_count = Math::randBetween(random_table_count.x, random_table_count.y);
+			unsigned rand_count = sim_rng->range(random_table_count.x, random_table_count.y);
 			std::vector<ItemStack> rand_itemstacks;
 			for (unsigned j = 0; j < rand_count; ++j) {
 				loot->checkLoot(random_table, NULL, &rand_itemstacks);
@@ -1444,7 +1445,7 @@ EventComponent EventManager::getRandomMapFromFile(const std::string& fname) {
 		mapr->intermap_random_filename = fname;
 
 		while (!ec_list.empty()) {
-			size_t index = rand() % ec_list.size();
+			size_t index = sim_rng->index(ec_list.size());
 			mapr->intermap_random_queue.push(ec_list[index]);
 			ec_list.erase(ec_list.begin() + index);
 		}

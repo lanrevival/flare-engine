@@ -63,9 +63,9 @@ public:
 
 	/** Uniform in [min_val, max_val], BOTH ENDS INCLUSIVE. Unbiased (rejection sampling).
 	 *
-	 * Draws nothing when min_val >= max_val, returning min_val. Matching the old
-	 * Math::randBetween() here is deliberate: it kept the draw COUNT identical for the common
-	 * randBetween(n, n) case, and determinism depends on the count, not just the values.
+	 * Draws nothing when min_val >= max_val, returning min_val. Matching the old UtilsMath
+	 * helper here is deliberate: it kept the draw COUNT identical for the common equal-bounds
+	 * case, and determinism depends on the count, not just on the values.
 	 */
 	int range(int min_val, int max_val);
 

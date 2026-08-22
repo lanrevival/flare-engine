@@ -445,7 +445,9 @@ int main(int argc, char *argv[]) {
 
 soft_reset:
 	if (!done) {
-		srand(static_cast<unsigned int>(time(NULL)));
+		// Nothing to seed here any more: the global C library generator is gone. sim_rng and
+		// fx_rng are seeded in init(), which runs once per soft reset, so this label needs
+		// nothing of its own.
 #ifdef __EMSCRIPTEN__
 		platform.FSInit();
 		emscripten_set_main_loop(EmscriptenMainLoop, settings->max_frames_per_sec, 1);

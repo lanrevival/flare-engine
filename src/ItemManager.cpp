@@ -39,6 +39,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MessageEngine.h"
 #include "NPC.h"
 #include "PowerManager.h"
+#include "Rng.h"
 #include "Settings.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
@@ -130,21 +131,21 @@ void LevelScaledValue::randomize() {
 		randomized = true;
 
 	step_count = static_cast<int>((base_max - base) / base_step);
-	base += static_cast<float>(Math::randBetween(0, step_count)) * base_step;
+	base += static_cast<float>(sim_rng->range(0, step_count)) * base_step;
 	base_max = base;
 
 	if (per_item_level != per_item_level_max)
 		randomized = true;
 
 	step_count = static_cast<int>((per_item_level_max - per_item_level) / per_item_level_step);
-	per_item_level += static_cast<float>(Math::randBetween(0, step_count)) * per_item_level_step;
+	per_item_level += static_cast<float>(sim_rng->range(0, step_count)) * per_item_level_step;
 	per_item_level_max = per_item_level;
 
 	if (per_player_level != per_player_level_max)
 		randomized = true;
 
 	step_count = static_cast<int>((per_player_level_max - per_player_level) / per_player_level_step);
-	per_player_level += static_cast<float>(Math::randBetween(0, step_count)) * per_player_level_step;
+	per_player_level += static_cast<float>(sim_rng->range(0, step_count)) * per_player_level_step;
 	per_player_level_max = per_player_level;
 
 	for (size_t i = 0; i < per_player_primary.size(); ++i) {
@@ -152,7 +153,7 @@ void LevelScaledValue::randomize() {
 			randomized = true;
 
 		step_count = static_cast<int>((per_player_primary_max[i] - per_player_primary[i]) / per_player_primary_step[i]);
-		per_player_primary[i] += static_cast<float>(Math::randBetween(0, step_count)) * per_player_primary_step[i];
+		per_player_primary[i] += static_cast<float>(sim_rng->range(0, step_count)) * per_player_primary_step[i];
 		per_player_primary_max[i] = per_player_primary[i];
 	}
 }
@@ -1937,7 +1938,7 @@ ItemID ItemManager::getExtendedItem(ItemID item_id) {
 
 		// pick an option
 		std::vector<size_t> option_ids;
-		float option_chance = Math::randBetweenF(0, 100);
+		float option_chance = sim_rng->rangeF(0, 100);
 		float option_threshold = 100;
 		size_t bonus_count = 0;
 
@@ -1957,9 +1958,9 @@ ItemID ItemManager::getExtendedItem(ItemID item_id) {
 			}
 		}
 		if (!option_ids.empty()) {
-			size_t option_roll = static_cast<size_t>(rand()) % option_ids.size();
+			size_t option_roll = sim_rng->index(option_ids.size());
 			ItemRandomizerDef::Option* option = &(ird->option[option_roll]);
-			bonus_count = static_cast<size_t>(Math::randBetween(option->bonus_min, option->bonus_max));
+			bonus_count = static_cast<size_t>(sim_rng->range(option->bonus_min, option->bonus_max));
 			if (option->quality < item_qualities.size() && !item_qualities[option->quality].name.empty())
 				items[extended_item]->quality = option->quality;
 
@@ -1968,13 +1969,13 @@ ItemID ItemManager::getExtendedItem(ItemID item_id) {
 				int min = std::max(1, items[item_id]->level + option->level_range_min);
 				int max = std::max(min, items[item_id]->level + option->level_range_max);
 
-				items[extended_item]->level = Math::randBetween(min, max);
+				items[extended_item]->level = sim_rng->range(min, max);
 			}
 			else if (option->level_src == ItemRandomizerDef::Option::LEVEL_SRC_HERO) {
 				int min = std::max(1, pc->stats.level + option->level_range_min);
 				int max = std::min(eset->xp.getMaxLevel(), std::max(min, pc->stats.level + option->level_range_max));
 
-				items[extended_item]->level = Math::randBetween(min, max);
+				items[extended_item]->level = sim_rng->range(min, max);
 			}
 
 		}
@@ -2007,7 +2008,7 @@ ItemID ItemManager::getExtendedItem(ItemID item_id) {
 		}
 
 		for (size_t i = 0; i < bonus_count; ++i) {
-			size_t roll = static_cast<size_t>(Math::randBetween(0, static_cast<int>(bonus_ids.size()-1)));
+			size_t roll = static_cast<size_t>(sim_rng->range(0, static_cast<int>(bonus_ids.size()-1)));
 			size_t bonus_id = bonus_ids[roll];
 
 			BonusData bdata = ird->bonus[bonus_id];

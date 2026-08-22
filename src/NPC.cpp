@@ -374,7 +374,7 @@ bool NPC::load(const std::string& npc_id) {
 	loadGraphics(); // TODO rename?
 
 	// fill inventory with items from random stock table
-	unsigned rand_count = Math::randBetween(random_table_count.x, random_table_count.y);
+	unsigned rand_count = sim_rng->range(random_table_count.x, random_table_count.y);
 
 	std::vector<ItemStack> rand_itemstacks;
 	for (unsigned i=0; i<rand_count; ++i) {
@@ -385,7 +385,7 @@ bool NPC::load(const std::string& npc_id) {
 		stock.add(rand_itemstacks[i], ItemStorage::NO_SLOT);
 	}
 
-	rand_count = Math::randBetween(craft_random_table_count.x, craft_random_table_count.y);
+	rand_count = sim_rng->range(craft_random_table_count.x, craft_random_table_count.y);
 
 	rand_itemstacks.clear();
 	for (unsigned i=0; i<rand_count; ++i) {
@@ -548,7 +548,7 @@ void NPC::getDialogNodes(std::vector<int> &result, bool allow_responses) {
 
 	while (it != groups.end() && !it->second.empty()) {
 		/* roll a dialog for this group and add to result */
-		int di = it->second[rand() % it->second.size()];
+		int di = it->second[sim_rng->index(it->second.size())];
 		result.insert(result.begin(), di);
 		++it;
 	}

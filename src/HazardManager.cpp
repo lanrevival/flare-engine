@@ -33,6 +33,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MapRenderer.h"
 #include "PowerManager.h"
 #include "RenderDevice.h"
+#include "Rng.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
 #include "SoundManager.h"
@@ -51,7 +52,7 @@ void HazardManager::logic() {
 		if (h[i-1]->lifespan == 0) {
 			for (size_t j = 0; j < h[i-1]->power->chain_powers.size(); ++j) {
 				ChainPower& chain_power = h[i-1]->power->chain_powers[j];
-				if (chain_power.type == ChainPower::TYPE_EXPIRE && Math::percentChanceF(chain_power.chance)) {
+				if (chain_power.type == ChainPower::TYPE_EXPIRE && sim_rng->percentChanceF(chain_power.chance)) {
 					powers->activate(chain_power.id, h[i-1]->src_stats, h[i-1]->pos, h[i-1]->pos);
 
 					if (powers->powers[chain_power.id]->directional) {
@@ -90,7 +91,7 @@ void HazardManager::logic() {
 
 			for (size_t j = 0; j < hazard->power->chain_powers.size(); ++j) {
 				ChainPower& chain_power = hazard->power->chain_powers[j];
-				if (chain_power.type == ChainPower::TYPE_WALL && Math::percentChanceF(chain_power.chance)) {
+				if (chain_power.type == ChainPower::TYPE_WALL && sim_rng->percentChanceF(chain_power.chance)) {
 					powers->activate(chain_power.id, hazard->src_stats, hazard->pos, hazard->pos);
 
 					if (powers->powers[chain_power.id]->directional) {

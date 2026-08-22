@@ -44,6 +44,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "NPCManager.h"
 #include "PowerManager.h"
 #include "RenderDevice.h"
+#include "Rng.h"
 #include "Settings.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
@@ -95,7 +96,7 @@ bool MapRenderer::enemyGroupPlaceEnemy(float x, float y, const Map_Group &g) {
 		if (!enemy_lev.type.empty()) {
 			Map_Enemy group_member = Map_Enemy(enemy_lev.type, FPoint(x, y));
 
-			group_member.direction = (g.direction == -1 ? rand() % 8 : g.direction);
+			group_member.direction = (g.direction == -1 ? sim_rng->range(0, 7) : g.direction);
 			group_member.wander_radius = g.wander_radius;
 			group_member.requirements = g.requirements;
 			group_member.invincible_requirements = g.invincible_requirements;
@@ -118,7 +119,7 @@ bool MapRenderer::enemyGroupPlaceEnemy(float x, float y, const Map_Group &g) {
 
 void MapRenderer::pushEnemyGroup(Map_Group &g) {
 	// activate at all?
-	if (!Math::percentChanceF(g.chance)) {
+	if (!sim_rng->percentChanceF(g.chance)) {
 		return;
 	}
 
@@ -129,15 +130,15 @@ void MapRenderer::pushEnemyGroup(Map_Group &g) {
 	// actual places, so have an upper bound of tries.
 
 	// random number of enemies
-	int enemies_to_spawn = Math::randBetween(g.numbermin, g.numbermax);
+	int enemies_to_spawn = sim_rng->range(g.numbermin, g.numbermax);
 
 	// pick an upper bound, which is definitely larger than threetimes the enemy number to spawn.
 	int allowed_misses = 5 * g.numbermax;
 
 	while (enemies_to_spawn > 0 && allowed_misses > 0) {
 
-		float x = (g.area.x == 0) ? (static_cast<float>(g.pos.x) + 0.5f) : (static_cast<float>(g.pos.x + (rand() % g.area.x))) + 0.5f;
-		float y = (g.area.y == 0) ? (static_cast<float>(g.pos.y) + 0.5f) : (static_cast<float>(g.pos.y + (rand() % g.area.y))) + 0.5f;
+		float x = (g.area.x == 0) ? (static_cast<float>(g.pos.x) + 0.5f) : (static_cast<float>(g.pos.x + sim_rng->range(0, g.area.x - 1))) + 0.5f;
+		float y = (g.area.y == 0) ? (static_cast<float>(g.pos.y) + 0.5f) : (static_cast<float>(g.pos.y + sim_rng->range(0, g.area.y - 1))) + 0.5f;
 
 		if (enemyGroupPlaceEnemy(x, y, g))
 			enemies_to_spawn--;

@@ -1544,7 +1544,7 @@ void PowerManager::buff(PowerID power_index, StatBlock *src_stats, const FPoint&
 		if (!power->passive) {
 			for (size_t i = 0; i < power->chain_powers.size(); ++i) {
 				ChainPower& chain_power = power->chain_powers[i];
-				if (chain_power.type == ChainPower::TYPE_POST && Math::percentChanceF(chain_power.chance)) {
+				if (chain_power.type == ChainPower::TYPE_POST && sim_rng->percentChanceF(chain_power.chance)) {
 					activate(chain_power.id, src_stats, origin, src_stats->pos);
 				}
 			}
@@ -1569,7 +1569,7 @@ bool PowerManager::effect(StatBlock *target_stats, StatBlock *caster_stats, Powe
 	for (size_t i = 0; i < pwr->post_effects.size(); ++i) {
 		const PostEffect& pe = pwr->post_effects[i];
 
-		if (!Math::percentChanceF(pe.chance))
+		if (!sim_rng->percentChanceF(pe.chance))
 			continue;
 
 		EffectDef effect_data;
@@ -1596,7 +1596,7 @@ bool PowerManager::effect(StatBlock *target_stats, StatBlock *caster_stats, Powe
 				else if(pwr->mod_damage_mode == Power::STAT_MODIFIER_MODE_ADD)
 					magnitude = caster_stats->getDamageMax(pwr->base_damage) + pwr->mod_damage_value_min;
 				else if(pwr->mod_damage_mode == Power::STAT_MODIFIER_MODE_ABSOLUTE)
-					magnitude = Math::randBetweenF(pwr->mod_damage_value_min, pwr->mod_damage_value_max);
+					magnitude = sim_rng->rangeF(pwr->mod_damage_value_min, pwr->mod_damage_value_max);
 				else
 					magnitude = caster_stats->getDamageMax(pwr->base_damage);
 
@@ -1608,14 +1608,14 @@ bool PowerManager::effect(StatBlock *target_stats, StatBlock *caster_stats, Powe
 					continue;
 
 				// heal for ment weapon damage * damage multiplier
-				magnitude = Math::randBetweenF(caster_stats->getDamageMin(pwr->base_damage), caster_stats->getDamageMax(pwr->base_damage));
+				magnitude = sim_rng->rangeF(caster_stats->getDamageMin(pwr->base_damage), caster_stats->getDamageMax(pwr->base_damage));
 
 				if(pwr->mod_damage_mode == Power::STAT_MODIFIER_MODE_MULTIPLY)
 					magnitude = magnitude * pwr->mod_damage_value_min / 100;
 				else if(pwr->mod_damage_mode == Power::STAT_MODIFIER_MODE_ADD)
 					magnitude += pwr->mod_damage_value_min;
 				else if(pwr->mod_damage_mode == Power::STAT_MODIFIER_MODE_ABSOLUTE)
-					magnitude = Math::randBetweenF(pwr->mod_damage_value_min, pwr->mod_damage_value_max);
+					magnitude = sim_rng->rangeF(pwr->mod_damage_value_min, pwr->mod_damage_value_max);
 
 				comb->addString(msg->getv("+%s HP", Utils::floatToString(magnitude, eset->number_format.combat_text).c_str()), dest_stats->pos, CombatText::MSG_BUFF);
 				dest_stats->hp += magnitude;
@@ -1723,7 +1723,7 @@ bool PowerManager::missile(PowerID power_index, StatBlock *src_stats, const FPoi
 		float variance = 0;
 		if (power->angle_variance != 0) {
 			//random arc between negative angle_variance and positive angle_variance
-			variance = Math::randBetweenF(power->angle_variance * -1.f, power->angle_variance) * static_cast<float>(M_PI) / 180.0f;
+			variance = sim_rng->rangeF(power->angle_variance * -1.f, power->angle_variance) * static_cast<float>(M_PI) / 180.0f;
 		}
 		float alpha = theta + offset_angle + variance;
 
@@ -1731,7 +1731,7 @@ bool PowerManager::missile(PowerID power_index, StatBlock *src_stats, const FPoi
 		float speed_var = 0;
 		if (power->speed_variance != 0) {
 			const float var = power->speed_variance;
-			speed_var = ((var * 2.0f * static_cast<float>(rand())) / static_cast<float>(RAND_MAX)) - var;
+			speed_var = sim_rng->rangeF(-var, var);
 			speed_var *= Settings::LOGIC_FPS / static_cast<float>(settings->max_frames_per_sec);
 		}
 
@@ -2054,7 +2054,7 @@ bool PowerManager::activate(PowerID power_index, StatBlock *src_stats, const FPo
 			}
 			else {
 				// we have nothing to determine direction, so just pick a random one
-				new_target = Utils::calcVector(origin, rand() % 8, dist);
+				new_target = Utils::calcVector(origin, sim_rng->range(0, 7), dist);
 			}
 		}
 	}
@@ -2284,7 +2284,7 @@ void PowerManager::activatePassivePostPowers(StatBlock *src_stats) {
 				continue;
 
 			if (src_stats->getPowerCooldown(chain_power.id) == 0 && src_stats->canUsePower(chain_power.id, !StatBlock::CAN_USE_PASSIVE)) {
-				if (Math::percentChanceF(chain_power.chance)) {
+				if (sim_rng->percentChanceF(chain_power.chance)) {
 					activate(chain_power.id, src_stats, src_stats->pos, src_stats->pos);
 					src_stats->setPowerCooldown(chain_power.id, powers[chain_power.id]->cooldown);
 				}

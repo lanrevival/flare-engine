@@ -39,29 +39,18 @@ namespace Math {
 		return (0 < value) - (value < 0);
 	}
 
-	/**
-	 * Returns random number between minVal and maxVal.
-	 */
-	inline int randBetween(int minVal, int maxVal) {
-		if (minVal == maxVal) return minVal;
-		int d = maxVal - minVal;
-		return minVal + (rand() % (d + signum(d)));
-	}
-
-	inline float randBetweenF(float minVal, float maxVal) {
-		if (minVal == maxVal) return minVal;
-		return minVal + ((static_cast<float>(rand()) / static_cast<float>(RAND_MAX)) * (maxVal - minVal));
-	}
-
-	/**
-	 * Returns true with random percent chance.
-	 */
-	inline bool percentChance(int percent) {
-		return rand() % 100 < percent;
-	}
-
-	inline bool percentChanceF(float percent) {
-		return randBetweenF(0, 100) < percent;
-	}
+	// randBetween(), randBetweenF(), percentChance() and percentChanceF() used to live here.
+	// They were removed because they hid which random stream a caller was drawing from: all
+	// four drew from the global C library generator, so two thirds of the engine's randomness
+	// was invisible to a search for it. Their replacements are members of Rng (see Rng.h), which forces
+	// every call site to name sim_rng or fx_rng.
+	//
+	//   randBetween(a, b)     -> rng->range(a, b)
+	//   randBetweenF(a, b)    -> rng->rangeF(a, b)
+	//   percentChance(p)      -> rng->percentChance(p)
+	//   percentChanceF(p)     -> rng->percentChanceF(p)
+	//
+	// signum() above is kept: it is not a random function. It currently has no callers outside
+	// this header, since randBetween() was its only user.
 }
 #endif // UTILS_MATH_H

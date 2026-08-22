@@ -43,6 +43,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MessageEngine.h"
 #include "ModManager.h"
 #include "RenderDevice.h"
+#include "Rng.h"
 #include "Settings.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
@@ -277,10 +278,10 @@ void LootManager::checkEnemiesForLoot() {
 		if (!e->loot_table.empty()) {
 			unsigned drops;
 			if (e->loot_count.y != 0) {
-				drops = Math::randBetween(e->loot_count.x, e->loot_count.y);
+				drops = sim_rng->range(e->loot_count.x, e->loot_count.y);
 			}
 			else {
-				drops = Math::randBetween(1, eset->loot.drop_max);
+				drops = sim_rng->range(1, eset->loot.drop_max);
 			}
 
 			for (unsigned j=0; j<drops; ++j) {
@@ -300,10 +301,10 @@ void LootManager::checkMapForLoot() {
 	for (size_t i = 0; i < mapr->loot.size(); ++i) {
 		unsigned drops;
 		if (mapr->loot[i].second.y != 0) {
-			drops = Math::randBetween(mapr->loot[i].second.x, mapr->loot[i].second.y);
+			drops = sim_rng->range(mapr->loot[i].second.x, mapr->loot[i].second.y);
 		}
 		else {
-			drops = Math::randBetween(1, eset->loot.drop_max);
+			drops = sim_rng->range(1, eset->loot.drop_max);
 		}
 
 		while (drops > 0) {
@@ -325,7 +326,7 @@ void LootManager::checkLoot(std::vector<EventComponent> &loot_table, FPoint *pos
 	ItemStack new_loot;
 	std::vector<EventComponent*> possible_ids;
 
-	float chance = Math::randBetweenF(0,100);
+	float chance = sim_rng->rangeF(0,100);
 
 	// first drop any 'fixed' (0% chance) items
 	for (size_t i = loot_table.size(); i > 0; i--) {
@@ -378,7 +379,7 @@ void LootManager::checkLoot(std::vector<EventComponent> &loot_table, FPoint *pos
 
 	if (!possible_ids.empty()) {
 		// if there was more than one item with the same chance, randomly pick one of them
-		size_t chosen_loot = static_cast<size_t>(rand()) % possible_ids.size();
+		size_t chosen_loot = sim_rng->index(possible_ids.size());
 		ec = possible_ids[chosen_loot];
 		checkLootComponent(ec, pos, itemstack_vec);
 
@@ -838,7 +839,7 @@ void LootManager::checkLootComponent(EventComponent* ec, FPoint *pos, std::vecto
 	int quantity_min = ec->data[LOOT_EC_QUANTITY_MIN].Int + ((pc->stats.level-1) * ec->data[LOOT_EC_QUANTITY_PER_LEVEL_MIN].Int);
 	int quantity_max = ec->data[LOOT_EC_QUANTITY_MAX].Int + ((pc->stats.level-1) * ec->data[LOOT_EC_QUANTITY_PER_LEVEL_MAX].Int);
 
-	new_loot.quantity = Math::randBetween(quantity_min, quantity_max);
+	new_loot.quantity = sim_rng->range(quantity_min, quantity_max);
 
 	// an item id of 0 means we should drop currency instead
 	if (ec->id == 0 || ec->id == eset->misc.currency_id) {

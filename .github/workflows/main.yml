@@ -46,6 +46,40 @@ jobs:
         if: steps.build.outcome != 'success'
         run: exit 1
 
+  rng-guard:
+    # The four Math:: helpers and the global generator were removed in P0.3b so that every
+    # random draw has to name sim_rng or fx_rng. Nothing in the type system enforces that, so
+    # this does. Run the same command locally before pushing:
+    #
+    #   git grep -nE '(^|[^_[:alnum:]])s?rand[[:space:]]*\(|Math::randBetween|Math::percentChance|RAND_MAX' -- 'src/*.cpp' 'src/*.h'
+    #
+    # It matches comments as well as code, on purpose: an exception list is how a guard rots
+    # into decoration. Describe the old API without naming it.
+    #
+    # NOTE the pattern avoids \b. git grep -E uses POSIX ERE, where \b is not a word boundary,
+    # so a \brand\(\) pattern silently matches NOTHING -- it looked correct and was blind to
+    # the single most important case. Verified against seven reintroduction forms.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: No global RNG in src/
+        run: |
+          if git grep -nE '(^|[^_[:alnum:]])s?rand[[:space:]]*\(|Math::randBetween|Math::percentChance|RAND_MAX' -- 'src/*.cpp' 'src/*.h'; then
+            echo ""
+            echo "ERROR: the global random generator is back in src/."
+            echo "Every draw must name a stream. See src/Rng.h:"
+            echo "  sim_rng  simulation -- authority tick only, reproducible"
+            echo "  fx_rng   presentation and client-local UI"
+            echo ""
+            echo "  randBetween(a, b)  -> rng->range(a, b)"
+            echo "  randBetweenF(a, b) -> rng->rangeF(a, b)"
+            echo "  percentChance(p)   -> rng->percentChance(p)"
+            echo "  x % container.size() -> rng->index(container.size())"
+            exit 1
+          fi
+          echo "OK: no global RNG call sites in src/"
+
   cppcheck:
     runs-on: ubuntu-24.04
     steps:

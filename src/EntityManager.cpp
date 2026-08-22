@@ -37,6 +37,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuActionBar.h"
 #include "PowerManager.h"
 #include "RenderDevice.h"
+#include "Rng.h"
 #include "Settings.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
@@ -462,7 +463,7 @@ void EntityManager::spawn(const std::string& entity_type, const Point& target, E
 	espawn.pos.y += 0.5f;
 
 	// quick spawns start facing a random direction
-	espawn.direction = rand() % 8;
+	espawn.direction = sim_rng->range(0, 7);
 
 	if (!mapr->collider.isValidPosition(espawn.pos.x, espawn.pos.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_NONE)) {
 		return;

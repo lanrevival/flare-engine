@@ -20,6 +20,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "EnemyGroupManager.h"
 #include "FileParser.h"
 #include "ModManager.h"
+#include "Rng.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
 #include "UtilsFileSystem.h"
@@ -118,7 +119,7 @@ Enemy_Level EnemyGroupManager::getRandomEnemy(const std::string& category, int m
 		return Enemy_Level();
 	}
 	else {
-		return enemyCandidates[rand() % enemyCandidates.size()];
+		return enemyCandidates[sim_rng->index(enemyCandidates.size())];
 	}
 }
 
