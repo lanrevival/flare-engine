@@ -247,6 +247,11 @@ static void mainLoop () {
 			// Input done means the user closes the window.
 			done = gswitch->done || inpt->done;
 
+			// Same reason as main_server.cpp: 'done' does not end the catch-up loop, so
+			// without this the client keeps simulating after the game has said stop.
+			if (done)
+				break;
+
 			logic_ticks += static_cast<uint64_t>(seconds_per_sim_tick * static_cast<float>(SDL_GetPerformanceFrequency()));
 			loops++;
 

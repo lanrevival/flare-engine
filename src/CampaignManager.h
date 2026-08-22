@@ -34,6 +34,10 @@ class EventComponent;
 class StatBlock;
 
 class CampaignManager {
+	// Reads private simulation state to digest it. A diagnostic should not force the
+	// class to widen its public API for everyone else. See WorldHash.h.
+	friend class WorldHash;
+
 public:
 	typedef std::map<StatusID, std::pair<bool, std::string> > StatusMap;
 

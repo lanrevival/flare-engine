@@ -219,6 +219,7 @@ Set (FLARE_SOURCES
 	./src/UtilsParsing.cpp
 	./src/Version.cpp
 	./src/Widget.cpp
+	./src/WorldHash.cpp
 	./src/WidgetCheckBox.cpp
 	./src/WidgetButton.cpp
 	./src/WidgetHorizontalList.cpp
@@ -341,6 +342,7 @@ Set (FLARE_HEADERS
 	./src/UtilsParsing.h
 	./src/Version.h
 	./src/Widget.h
+	./src/WorldHash.h
 	./src/WidgetCheckBox.h
 	./src/WidgetButton.h
 	./src/WidgetHorizontalList.h

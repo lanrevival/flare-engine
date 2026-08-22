@@ -38,6 +38,10 @@ class EnemyManager;
 class StatBlock;
 
 class LootManager {
+	// Reads private simulation state to digest it. A diagnostic should not force the
+	// class to widen its public API for everyone else. See WorldHash.h.
+	friend class WorldHash;
+
 private:
 	// functions
 	void loadGraphics();

@@ -42,6 +42,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MessageEngine.h"
 #include "ModManager.h"
 #include "RenderDevice.h"
+#include "WorldHash.h"
 #include "Rng.h"
 #include "SaveLoad.h"
 #include "Settings.h"
@@ -62,11 +63,14 @@ GameSwitcher *gswitch;
 
 class ServerCmdLineArgs {
 public:
-	ServerCmdLineArgs() : mod_list(), load_slot(), data_path(), max_ticks(0) {}
+	ServerCmdLineArgs() : mod_list(), load_slot(), data_path(), max_ticks(0), hash_every(0), hash_at_exit(false), sim_seed(RNG_DEFAULT_SIM_SEED) {}
 	std::vector<std::string> mod_list;
 	std::string load_slot;
 	std::string data_path;
 	unsigned long max_ticks;
+	unsigned long hash_every;
+	bool hash_at_exit;
+	uint64_t sim_seed;
 };
 
 // The Platform implementations are compiled by #include-ing them into the entry point rather
@@ -135,7 +139,7 @@ static void serverInit(const ServerCmdLineArgs& args) {
 	// The server is the simulation authority, so sim_rng's seed is the one that will eventually
 	// be handed to joining clients (Phase 3). Fixed for now. See Rng.h.
 	sim_rng = new Rng();
-	sim_rng->seed(RNG_DEFAULT_SIM_SEED);
+	sim_rng->seed(args.sim_seed);
 	fx_rng = new Rng();
 	fx_rng->seed(static_cast<uint64_t>(time(NULL)));
 	Utils::logInfo("main_server: sim_rng seeded with 0x%llx", static_cast<unsigned long long>(sim_rng->getSeed()));
@@ -213,7 +217,7 @@ static float getSecondsElapsed(uint64_t prev_ticks, uint64_t now_ticks) {
 // Mirrors main.cpp. A stall must not become a fast-forward.
 static const int MAX_CATCHUP_TICKS = 5;
 
-static unsigned long serverMainLoop(unsigned long max_ticks) {
+static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_every) {
 	bool done = false;
 	unsigned long total_ticks = 0;
 
@@ -255,9 +259,24 @@ static unsigned long serverMainLoop(unsigned long max_ticks) {
 
 			total_ticks++;
 
+			// Per-tick digests make a divergence bisectable: diff two runs and the first
+			// differing line is the exact tick they parted.
+			if (hash_every > 0 && total_ticks % hash_every == 0) {
+				printf("tick %lu %s\n", total_ticks,
+				       WorldHash::toString(WorldHash::compute(total_ticks)).c_str());
+			}
+
 			done = gswitch->done || shutdown_requested;
 			if (max_ticks > 0 && total_ticks >= max_ticks)
 				done = true;
+
+			// Leave the catch-up loop immediately. Setting 'done' does not end it -- its
+			// condition is the accumulator, not this flag -- so without this break the server
+			// simulates one to four extra ticks past the stopping point, and exactly how many
+			// depends on wall-clock timing. That made --max-ticks nondeterministic and showed
+			// up as a bimodal world digest before the tick-by-tick digest localised it.
+			if (done)
+				break;
 
 			logic_ticks += static_cast<uint64_t>(seconds_per_sim_tick * static_cast<float>(SDL_GetPerformanceFrequency()));
 			loops++;
@@ -292,6 +311,9 @@ static void printHelp() {
 	       "--mods=<MOD>,...         Starts the server with only these mods enabled.\n"
 	       "--load-slot=<SLOT>       Loads a save slot by numerical index.\n"
 	       "--max-ticks=<N>          Stops after N logic ticks. For testing.\n"
+	       "--sim-seed=<N>           Seeds the simulation RNG. Default is fixed.\n"
+	       "--hash                   Prints a digest of world state at exit.\n"
+	       "--hash-every=<N>         Prints a digest every N ticks, for bisecting a divergence.\n"
 	       "--max-fps=<N>            Render frame limit. Accepted and ignored: the server\n"
 	       "                         renders nothing and always simulates at 60 Hz.\n"
 	       "--headless               Accepted and implied; the server is always headless.\n");
@@ -353,6 +375,17 @@ int main(int argc, char *argv[]) {
 		else if (arg == "max-ticks") {
 			args.max_ticks = strtoul(parseServerArgValue(arg_full).c_str(), NULL, 10);
 		}
+		else if (arg == "sim-seed") {
+			// Phase 3 will take this from the host instead. Until then it exists so that the
+			// RNG-to-world-state link is testable: two seeds must produce two digests.
+			args.sim_seed = strtoull(parseServerArgValue(arg_full).c_str(), NULL, 0);
+		}
+		else if (arg == "hash") {
+			args.hash_at_exit = true;
+		}
+		else if (arg == "hash-every") {
+			args.hash_every = strtoul(parseServerArgValue(arg_full).c_str(), NULL, 10);
+		}
 		else if (arg == "max-fps") {
 			// Accepted so that the sim-rate-vs-render-rate claim can actually be tested: a
 			// server run at 30 and at 144 must produce the same tick count in the same wall
@@ -378,11 +411,15 @@ int main(int argc, char *argv[]) {
 
 	serverInit(args);
 
-	unsigned long ticks = serverMainLoop(args.max_ticks);
+	unsigned long ticks = serverMainLoop(args.max_ticks, args.hash_every);
 
 	if (shutdown_requested)
 		Utils::logInfo("main_server: shutdown requested, stopping.");
 	Utils::logInfo("main_server: simulated %lu logic ticks.", ticks);
+
+	// stdout, not the log: golden-file comparison should not have to parse timestamps.
+	if (args.hash_at_exit)
+		printf("%s\n", WorldHash::toString(WorldHash::compute(ticks)).c_str());
 
 	serverCleanup();
 
