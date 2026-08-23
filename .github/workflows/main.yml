@@ -122,15 +122,44 @@ jobs:
     # or the instruction set. It is BOTH -- arm64 Linux is a third distinct outcome, not a copy of
     # either neighbour:
     #
-    #   'melee'    splits by ISA: both arm64 columns kill enemies, x86-64 kills nothing.
+    #   'melee'    splits by ISA: both arm64 columns fire 'die', x86-64 fires 'critdie' instead.
+    #              Enemies die in all three -- see the correction above.
     #   'beatdown' splits by OS:  both Linux columns miss the low-HP warning, macOS fires it.
-    #   every digest differs three ways, INCLUDING 'smoke' -- which is slot 1 with no equipment,
-    #   no powers and no combat. Plain movement already produces three different worlds.
     #
-    # So there is no single culprit to find and delete, and lockstep is off the table: buying
-    # bit-identical simulation would mean a fixed-point rewrite of every position, speed and damage
-    # number in the engine. Phase 3 uses an authoritative host instead, and determinism stops being
-    # load-bearing for correctness.
+    # WHERE THE DIVERGENCE IS, AND IS NOT. This block used to add "every digest differs three ways,
+    # INCLUDING 'smoke' -- plain movement already produces three different worlds", and conclude
+    # from it that there is no single culprit to find. Both halves were wrong.
+    #
+    # 'smoke' is NOT plain movement. It is movement on abandoned_mines, which has fifty enemies
+    # whose activation and AI run every tick. The rows that really are plain movement are the two
+    # that run on the empty test maps, and they do NOT differ by instruction set:
+    #
+    #   row        map              Linux x86-64        Linux aarch64
+    #   smoke      abandoned_mines  0x6cf2c6fb4d2cf49b  0xc69b53f7b33f9743   differ
+    #   patrol     abandoned_mines  0x50acdfc34271acc3  0x9a60368fa90e0406   differ
+    #   death      abandoned_mines  0xaa9a42be1815d204  0xcc11545eb36db289   differ
+    #   deathfull  abandoned_mines  0x399ae5d931e65393  0x18b4933dba5382a5   differ
+    #   autoequip  empty room       0xdbde2fa251175f73  0xdbde2fa251175f73   IDENTICAL
+    #   equipswap  empty room       0x0ad088f0e0e56138  0x0ad088f0e0e56138   IDENTICAL
+    #
+    # Identical on both compilers as well, over 900 ticks of walking plus a map event, an item
+    # grant, auto-equip and an equipment-set swap. 900 was chosen deliberately: at the rows' first
+    # length of 350 and 200 they were also the SHORTEST in the corpus, and "a short run has less
+    # chance to diverge" is a perfectly good alternative explanation. Extending them past 'smoke'
+    # removed it, and the digests did not move apart. Measured, therefore:
+    #
+    #   ISA divergence NEEDS ENTITIES.       Two instruction sets, one OS, no entities: identical.
+    #   OS divergence does not.              Same ISA, different OS, no entities: still differs
+    #                                        (macOS reports 0x7c6b23db6fdf0545 / 0x06cbca6a3c109e24).
+    #
+    # HYPOTHESIS, and it is only that: arm64 macOS and arm64 Linux share an instruction set, so a
+    # divergence between them on a map with nothing on it points at the math library rather than
+    # at codegen. Untested. What is tested is the table.
+    #
+    # Lockstep is still off the table and Phase 3 still uses an authoritative host -- that decision
+    # has other support and is not reopened here. But it can no longer be argued from "there is no
+    # single culprit to find": nobody has looked, and the search space is now much smaller than
+    # this comment used to claim.
     #
     # The matrix STAYS, but not for the reason first written here. That said "a host and a
     # rejoining client still have to agree", which is WRONG: under an authoritative host a
