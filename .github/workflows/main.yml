@@ -95,10 +95,28 @@ jobs:
     # WHAT IS KNOWN, measured by the first runs after P0.5c fixed the fixture step:
     #
     #   gcc and clang, same machine   -- agree byte-for-byte on every digest. NOT codegen.
-    #   macOS/arm64 vs Linux/x86-64   -- diverge BEHAVIOURALLY, not just in the hash. 'melee'
-    #                                    kills two enemies on macOS and kills nothing on Linux;
-    #                                    'beatdown' fires the low-HP warning on macOS and never
-    #                                    on Linux. Those show up as coverage failures below.
+    #   macOS/arm64 vs Linux/x86-64   -- diverge BEHAVIOURALLY, not just in the hash. Those show
+    #                                    up as coverage failures below.
+    #
+    # WHAT THE DIVERGENCE ACTUALLY IS -- corrected in P1.3d-3, after the 'equipped' field made the
+    # simevents lines comparable side by side. This block used to say 'melee' "kills two enemies on
+    # macOS and kills nothing on Linux". That is WRONG, and the number that says so was on screen
+    # the whole time:
+    #
+    #   melee, macOS arm64      die=2  critdie=0  loot=2  levelup=1
+    #   melee, Linux x86-64     die=0  critdie=2  loot=2  levelup=1
+    #
+    # The same two enemies die on both. On Linux the killing blow is a CRITICAL hit, so the engine
+    # emits SFX_CRITDIE instead of SFX_DIE and the 'die' requirement fails. The divergence is in a
+    # damage roll crossing a threshold, not in whether the AI fights at all.
+    #
+    # 'beatdown' is a real difference and survives the correction: macOS takes 16 hits and drops
+    # into the low-HP band once; Linux x86-64 takes 10 and never does. But "the game is easier on
+    # Linux" is too glib -- Linux arm64 takes 24 hits and still never drops into the band.
+    #
+    # KEEP the 'die' requirement as it is. It is mis-NAMED for what it detects, not mis-designed:
+    # it is currently the only thing in the suite that notices this at all, and relaxing it to
+    # 'die or critdie' would delete the detector to make the label true.
     #
     # WHAT THE 'os' AXIS ANSWERED. arm64 Linux was added to say whether the divergence was the OS
     # or the instruction set. It is BOTH -- arm64 Linux is a third distinct outcome, not a copy of

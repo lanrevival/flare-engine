@@ -55,6 +55,14 @@
 #           canary means the same thing on every row.
 #           The canary earns its place either way: a zero is what every Linux CI run reported
 #           until P0.5c, hashing an empty world and passing.
+#
+#           'die' on the melee row is worth a word, because it does not detect what its name says.
+#           On x86-64 Linux that row reports die=0 AND critdie=2: the same two enemies die, but a
+#           critical killing blow emits SFX_CRITDIE instead. So this entry is really asserting
+#           that the killing blow is not critical -- which is an accident, and is also currently
+#           the only thing in the suite that notices macOS and Linux simulate differently.
+#           Leave it. Relaxing it to 'die or critdie' would make the label honest by deleting the
+#           detector.
 
 smoke     smoke     600   1  -  yes  0  1  map_event,step
 patrol    patrol    2000  1  -  yes  0  1  map_event,step
@@ -62,5 +70,5 @@ melee     melee     2956  2  -  yes  6  1  map_event,attack,hit,die,step,levelup
 beatdown  beatdown  2956  3  -  yes  6  1  map_event,attack,hit,step,power,hazard_hit,lowhp_start,lowhp_stop
 death     patrol    1400  4  -  no   0  1  map_event,step,hit,lowhp_start
 deathfull deathfull 1400  5  test_deathpenalty  no   0  1  map_event,step,hit,lowhp_start
-autoequip autoequip 350   6  test_autoequip     yes  1  1  map_event,step
-equipswap equipswap 200   7  test_equipswap     yes  6  2  map_event,step
+autoequip autoequip 900   6  test_autoequip     yes  1  1  map_event,step
+equipswap equipswap 900   7  test_equipswap     yes  6  2  map_event,step
