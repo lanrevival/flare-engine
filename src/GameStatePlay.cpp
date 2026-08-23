@@ -53,6 +53,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuDevConsole.h"
 #include "MenuEnemy.h"
 #include "MenuExit.h"
+#include "MenuGameOver.h"
 #include "MenuHUDLog.h"
 #include "MenuInventory.h"
 #include "MenuLog.h"
@@ -905,6 +906,14 @@ void GameStatePlay::logic() {
 		PlayerCommandBuilder::build(player_cmd, *inpt, mapr->cam.pos);
 		menu->act->checkAction(pc->action_queue);
 		player_cmd.actions = pc->action_queue;
+
+		// Respawn is a menu click, so it is resolved HERE rather than inside the simulation.
+		// Avatar used to read menu->game_over->continue_clicked itself, which meant a dead player
+		// could only come back if a UI button existed to press -- untrue on a headless server.
+		// The click is consumed at the same boundary that reads it. See PlayerCommand.h.
+		player_cmd.respawn = menu->game_over->visible && menu->game_over->continue_clicked;
+		if (player_cmd.respawn)
+			menu->game_over->close();
 		pc->logic(player_cmd, player_locks);
 
 		// transfer hero data to enemies, for AI use

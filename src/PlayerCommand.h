@@ -61,6 +61,13 @@ public:
 	// has no business knowing about screen space.
 	Point mouse_screen;
 
+	// Respawn after death. NOT built from InputState: it comes from the game-over menu, so
+	// GameStatePlay fills it at the boundary and consumes the click there. The point is that the
+	// simulation no longer waits on a UI button to bring a dead player back -- a headless server
+	// has no such button, and Avatar used to read menu->game_over->continue_clicked directly.
+	// Phase 3 sets this from a network message instead; nothing in Avatar has to change for that.
+	bool respawn;
+
 	// power activations queued this tick
 	std::vector<ActionData> actions;
 };

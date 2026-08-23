@@ -32,6 +32,7 @@ PlayerCommand::PlayerCommand()
 	, shift(false)
 	, using_mouse(false)
 	, mouse_screen()
+	, respawn(false)
 	, actions() {
 }
 

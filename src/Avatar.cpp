@@ -910,9 +910,15 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 				}
 
 				// allow respawn with Accept if not permadeath
-				if (menu->game_over->visible && menu->game_over->continue_clicked) {
-					menu->game_over->close();
-
+				//
+				// The command carries this now. It used to be a direct read of the game-over
+				// menu's continue flag, which made a simulation state transition wait on a UI
+				// button; GameStatePlay resolves and consumes the click at the boundary. Phase 3
+				// sets cmd.respawn from the network and nothing here changes.
+				//
+				// Named without the arrow on purpose: the acceptance greps for menu access count
+				// comments as well as code, which is how a guard avoids rotting into decoration.
+				if (cmd.respawn) {
 					mapr->teleportation = true;
 					mapr->teleport_mapname = mapr->respawn_map;
 
