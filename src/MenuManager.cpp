@@ -106,7 +106,7 @@ MenuManager::MenuManager()
 	, devconsole(NULL)
 	, touch_controls(NULL)
 	, subtitles(NULL)
-	, pause(false)
+	, pause_requested(false)
 	, menus_open(false) {
 
 	hp = new MenuStatBar(MenuStatBar::TYPE_HP, 0);
@@ -383,7 +383,7 @@ void MenuManager::logic() {
 			resetDrag();
 		}
 		else {
-			pause = true;
+			pause_requested = true;
 			return;
 		}
 	}
@@ -521,7 +521,7 @@ void MenuManager::logic() {
 			action_picker->tablist.defocus();
 		}
 		else {
-			pause = true;
+			pause_requested = true;
 			return;
 		}
 	}
@@ -647,7 +647,7 @@ void MenuManager::logic() {
 	stash->logic();
 	game_over->logic();
 
-	if (!pause)
+	if (!pause_requested)
 		region_title->logic();
 
 	touch_controls->logic();
@@ -913,7 +913,7 @@ void MenuManager::logic() {
 
 	bool console_open = settings->dev_mode && devconsole->visible;
 	menus_open = (inv->visible || pow->visible || chr->visible || questlog->visible || vendor->visible || talker->visible || book->visible || console_open);
-	pause = (eset->misc.menus_pause && menus_open) || exit->visible || console_open || book->visible;
+	pause_requested = (eset->misc.menus_pause && menus_open) || exit->visible || console_open || book->visible;
 
 	touch_controls->visible = !menus_open && !exit->visible && inpt->usingTouchscreen();
 
@@ -1800,7 +1800,7 @@ void MenuManager::showExitMenu() {
 	if (game_over->visible)
 		return;
 
-	pause = true;
+	pause_requested = true;
 	closeAll();
 	if (exit) {
 		// handleCancel() will show the menu, but only if it is already hidden

@@ -1141,7 +1141,19 @@ void GameStatePlay::render() {
 }
 
 bool GameStatePlay::isPaused() {
-	return menu->pause;
+	// A menu asking for a pause is a request, and this is where it is granted or refused.
+	//
+	// Headless refuses, always. A server must not stop simulating because a menu object it never
+	// renders happens to be flagged visible -- and it can be: MenuManager sets the flag from the
+	// exit menu, the dev console, an open book and both item pickers, none of which need a
+	// display to exist. Before this, main_server's loop read isPaused() through GameSwitcher and
+	// would have stopped advancing time.
+	//
+	// This is also the seam for Phase 3. A pause is a single-player affordance: with eight
+	// players sharing a world, one of them opening a menu must not freeze the other seven. The
+	// condition becomes "not headless AND not a multiplayer session"; single-player keeps today's
+	// feel, which is why the client half is unchanged here.
+	return !settings->headless && menu->pause_requested;
 }
 
 void GameStatePlay::resetNPC() {

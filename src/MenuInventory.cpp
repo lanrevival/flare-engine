@@ -427,7 +427,7 @@ void MenuInventory::logic() {
 		}
 	}
 
-	if (max_equipment_set > 0 && !menu->pause) {
+	if (max_equipment_set > 0 && !menu->pause_requested) {
 		if (inpt->pressing[Input::EQUIPMENT_SWAP] && !inpt->lock[Input::EQUIPMENT_SWAP]) {
 			inpt->lock[Input::EQUIPMENT_SWAP] = true;
 			applyNextEquipmentSet();

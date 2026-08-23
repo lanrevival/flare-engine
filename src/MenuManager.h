@@ -190,7 +190,21 @@ public:
 
 	Subtitles *subtitles;
 
-	bool pause;
+	/** The UI would like the world to stop. A REQUEST, not a command.
+	 *
+	 * It used to be called 'pause' and GameStatePlay::isPaused() returned it directly, so any
+	 * menu could halt the simulation. eset->misc.menus_pause defaults to false and Empyrean does
+	 * not set it, but the exit menu, the dev console, an open book and the two item pickers all
+	 * pause unconditionally -- so in co-op one player pressing Escape would have frozen the world
+	 * for everyone, and on a headless server a menu object nobody renders could stop the game.
+	 *
+	 * The simulation decides whether to honour it. See GameStatePlay::isPaused().
+	 *
+	 * Client-local reads that mean "a menu owns this client's input right now" -- the equipment
+	 * swap hotkey in MenuInventory, the region title in logic() -- keep reading this directly and
+	 * keep today's behaviour. For them "a menu is up" is exactly the question being asked.
+	 */
+	bool pause_requested;
 	bool menus_open;
 	std::queue<ItemStack> drop_stack;
 
