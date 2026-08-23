@@ -100,18 +100,22 @@ jobs:
     #                                    'beatdown' fires the low-HP warning on macOS and never
     #                                    on Linux. Those show up as coverage failures below.
     #
-    # WHAT THE 'os' AXIS IS FOR. Those two runners differ in BOTH the operating system and the
-    # instruction set, so the measurement cannot say which one moved. ubuntu-24.04-arm holds the
-    # OS fixed and changes only the ISA:
+    # WHAT THE 'os' AXIS ANSWERED. arm64 Linux was added to say whether the divergence was the OS
+    # or the instruction set. It is BOTH -- arm64 Linux is a third distinct outcome, not a copy of
+    # either neighbour:
     #
-    #   arm64 Linux behaves like x86-64 Linux  -> the cause is the OS/libc (libm, most likely).
-    #   arm64 Linux behaves like arm64 macOS   -> the cause is the instruction set (FMA
-    #                                             contraction, extended precision, or similar).
+    #   'melee'    splits by ISA: both arm64 columns kill enemies, x86-64 kills nothing.
+    #   'beatdown' splits by OS:  both Linux columns miss the low-HP warning, macOS fires it.
+    #   every digest differs three ways, INCLUDING 'smoke' -- which is slot 1 with no equipment,
+    #   no powers and no combat. Plain movement already produces three different worlds.
     #
-    # This does not block anything. Phase 3 is going authoritative-host rather than lockstep, so
-    # cross-platform determinism is no longer load-bearing for correctness. The axis stays because
-    # a host and a REJOINING client still have to agree, and because leaving a measured divergence
-    # unattributed in the record is how it comes back later as a mystery.
+    # So there is no single culprit to find and delete, and lockstep is off the table: buying
+    # bit-identical simulation would mean a fixed-point rewrite of every position, speed and damage
+    # number in the engine. Phase 3 uses an authoritative host instead, and determinism stops being
+    # load-bearing for correctness.
+    #
+    # The matrix STAYS anyway. A host and a REJOINING client still have to agree, so this is the
+    # check that catches a same-platform regression -- and it is the instrument that caught P0.5c.
     #
     # Linux goldens are still deliberately unrecorded. A golden for a platform where 'melee' does
     # not melee would rebuild the P0.5c mistake in a new form -- see the coverage block in
