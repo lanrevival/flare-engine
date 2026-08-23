@@ -128,7 +128,7 @@ for m in tests/mods/*/; do
 done
 
 fail=0
-while read -r name rec ticks slot mods survives equipped requires; do
+while read -r name rec ticks slot mods survives equipped equipset requires; do
 	case "$name" in ''|\#*) continue ;; esac
 
 	golden="$DIR/$name.$TAG.hash"
@@ -208,6 +208,26 @@ while read -r name rec ticks slot mods survives equipped requires; do
 		echo "     got: $events"
 		echo "     gear arriving or falling out is what P1.3 says the danger is. Find out which"
 		echo "     slot changed -- do NOT edit the number in $DIR/MANIFEST to match."
+		fail=1
+		continue
+	fi
+
+	# WHICH SET, checked with the count above, because they fail differently. A refactor that
+	# loses an item moves 'equipped'; one that loses track of which set is live moves this and
+	# leaves 'equipped' untouched, and the player is standing there in nothing.
+	#
+	# The 'equipswap' row is the only one that changes it, and it is worth saying what that row
+	# measured: with set 2 empty, one tick of EQUIPMENT_SWAP does not merely move a scalar -- the
+	# same recording with that one bit cleared takes 13 steps instead of 14 and its last event
+	# lands two ticks earlier, because a character wearing nothing moves differently.
+	got_equipset=$(echo "$events" | tr ' ' '\n' | sed -n 's/^equipset=//p')
+	[ -n "$got_equipset" ] || got_equipset="?"
+
+	if [ "$equipset" != "$got_equipset" ]; then
+		echo "FAIL $name: equipment set $got_equipset active at the end, and this row says $equipset"
+		echo "     got: $events"
+		echo "     the character is wearing a different half of its equipment than this row"
+		echo "     expects -- do NOT edit the number in $DIR/MANIFEST to match."
 		fail=1
 		continue
 	fi

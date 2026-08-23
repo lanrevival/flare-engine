@@ -568,6 +568,12 @@ int main(int argc, char *argv[]) {
 		}
 		printf(" equipped=%d", equipped);
 
+		// Which equipment set is live. Separate from the count above because they answer
+		// different questions: 'equipped' is how much gear exists, 'equipset' is how much of it
+		// the character is actually wearing. MenuInventory::isEquipSlotActive() returns false for
+		// every slot when this is 0, so the two numbers can disagree completely.
+		printf(" equipset=%d", (menu && menu->inv) ? static_cast<int>(menu->inv->active_equipment_set) : -1);
+
 		printf("\n");
 	}
 

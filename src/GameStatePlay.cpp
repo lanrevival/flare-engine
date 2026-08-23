@@ -914,6 +914,34 @@ void GameStatePlay::logic() {
 		player_cmd.respawn = menu->game_over->visible && menu->game_over->continue_clicked;
 		if (player_cmd.respawn)
 			menu->game_over->close();
+
+		// Stepping through equipment sets is simulation -- it decides which half of the slots the
+		// character is wearing -- so it is driven from the tick now. MenuInventory::logic() used
+		// to read the keyboard and do it itself.
+		//
+		// TWO THINGS MOVED, and they are worth separating:
+		//
+		//   the input read  is now in PlayerCommandBuilder::build(), the one place intent is
+		//                   taken out of globals. Phase 3 fills equip_set_delta from a network
+		//                   message and nothing below changes.
+		//   the pause guard was '!menu->pause_requested' and is now this block's 'if (!isPaused())'.
+		//                   On a headless server those differ, and that is P1.3c's point: a menu
+		//                   asking for a pause is a request, and a server refuses it.
+		//                   On a client they agree on the value but not on its age. MenuManager
+		//                   computes pause_requested at the END of its logic() (MenuManager.cpp:916)
+		//                   and calls inv->logic() before that (:642), so the old code was reading
+		//                   the PREVIOUS tick's answer; this reads the current one. One tick, on
+		//                   the tick a pause begins or ends, and only if the key is pressed on
+		//                   exactly that tick. Stated because nothing in the corpus can see it:
+		//                   P1.3c measured pause false on every tick of the six recordings that
+		//                   existed then, and the two added since run on empty test maps where no
+		//                   menu opens. Neither of those is a check -- if this one tick ever
+		//                   matters, it will have to be found by hand.
+		//
+		// The lock is claimed here rather than in build(), which is const and claims nothing.
+		if (menu->inv->applyEquipmentSetDelta(player_cmd.equip_set_delta))
+			inpt->lock[player_cmd.equip_set_delta > 0 ? Input::EQUIPMENT_SWAP : Input::EQUIPMENT_SWAP_PREV] = true;
+
 		pc->logic(player_cmd, player_locks);
 
 		// transfer hero data to enemies, for AI use

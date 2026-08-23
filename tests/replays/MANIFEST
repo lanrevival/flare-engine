@@ -1,4 +1,4 @@
-# name  rec  ticks  slot  mods  survives  equipped  requires
+# name  rec  ticks  slot  mods  survives  equipped  equipset  requires
 #
 # name      identifies the ROW, and names the golden file. Unique.
 # rec       which input recording to replay, without the .rec suffix. NOT the same thing as the
@@ -9,7 +9,8 @@
 # ticks     how long to run.
 # slot      which save game tests/make-fixture.sh writes that the run boots from.
 #           1 = movement, 2 = combat, 3 = beatdown, 4 = death, 5 = death with every penalty
-#           on, 6 = naked, on a bare test map that hands it something to wear.
+#           on, 6 = naked, on a bare test map that hands it something to wear, 7 = slot 2's
+#           character in an empty room, so a set swap is the only thing that can happen.
 # mods      EXTRA mods appended to the default list, or '-' for none. Mods in tests/mods/ are
 #           linked into the data path by tests/run-replays.sh. Order matters -- later mods
 #           override earlier ones, so an override has to land last, which appending guarantees.
@@ -20,10 +21,12 @@
 #           two fixtures had rotted into corpses partway through -- patrol died at tick 1101 of
 #           2000 and beatdown at 1186 of 2956, and both were green, because 'requires' only asks
 #           whether an event EVER fired and every one of them had fired before the death.
-#           The other direction matters too: the death penalty lives in MenuInventory::logic()
-#           and runs only when the player dies, so a 'no' row is the only way that code is
-#           reachable under test at all. A 'no' row that stops dying is a silently disarmed test,
-#           exactly like a 'yes' row that starts.
+#           The other direction matters too: the death penalty runs only when the player dies, so
+#           a 'no' row is the only way that code is reachable under test at all. (It lived in
+#           MenuInventory::logic() when this column was written; P1.3b moved it to
+#           applyDeathPenalty(), driven from GameStatePlay's tick. The reason the column exists is
+#           unchanged -- the penalty is still only reachable through a death.) A 'no' row that
+#           stops dying is a silently disarmed test, exactly like a 'yes' row that starts.
 # equipped  how many equipment slots must still hold something when the run ends.
 #           This is the column that speaks to P1.3's own stated failure mode -- "a subtle error
 #           means players lose gear" -- in a number a reviewer can read, rather than in a hex
@@ -32,6 +35,12 @@
 #           below is only a test at all because its fixture starts at 0 and must end at 1.
 #           melee and beatdown are 6 at both ends, which is the assertion that 2956 ticks of
 #           combat do not quietly cost the player a slot.
+# equipset  which equipment set must be active when the run ends.
+#           A different question from 'equipped': that one is how much gear EXISTS, this one is
+#           how much of it the character is WEARING. MenuInventory::isEquipSlotActive() returns
+#           false for every slot whose set is not the active one, so the two can disagree
+#           completely -- 'equipswap' below ends on 6 and 2, six items held and none of them worn.
+#           Every fixture loads on set 1; only that row changes it.
 # requires  simevents counters that must be NON-ZERO for this row, or '-' for none.
 #           This column exists because P0.5b shipped a recording called 'attack' that never
 #           attacked, and three matching digests could not tell anyone. A digest proves the world
@@ -47,10 +56,11 @@
 #           The canary earns its place either way: a zero is what every Linux CI run reported
 #           until P0.5c, hashing an empty world and passing.
 
-smoke     smoke     600   1  -  yes  0  map_event,step
-patrol    patrol    2000  1  -  yes  0  map_event,step
-melee     melee     2956  2  -  yes  6  map_event,attack,hit,die,step,levelup,loot,power
-beatdown  beatdown  2956  3  -  yes  6  map_event,attack,hit,step,power,hazard_hit,lowhp_start,lowhp_stop
-death     patrol    1400  4  -  no   0  map_event,step,hit,lowhp_start
-deathfull deathfull 1400  5  test_deathpenalty  no   0  map_event,step,hit,lowhp_start
-autoequip autoequip 350   6  test_autoequip     yes  1  map_event,step
+smoke     smoke     600   1  -  yes  0  1  map_event,step
+patrol    patrol    2000  1  -  yes  0  1  map_event,step
+melee     melee     2956  2  -  yes  6  1  map_event,attack,hit,die,step,levelup,loot,power
+beatdown  beatdown  2956  3  -  yes  6  1  map_event,attack,hit,step,power,hazard_hit,lowhp_start,lowhp_stop
+death     patrol    1400  4  -  no   0  1  map_event,step,hit,lowhp_start
+deathfull deathfull 1400  5  test_deathpenalty  no   0  1  map_event,step,hit,lowhp_start
+autoequip autoequip 350   6  test_autoequip     yes  1  1  map_event,step
+equipswap equipswap 200   7  test_equipswap     yes  6  2  map_event,step

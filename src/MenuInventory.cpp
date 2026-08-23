@@ -429,20 +429,9 @@ void MenuInventory::logic() {
 		}
 	}
 
-	if (max_equipment_set > 0 && !menu->pause_requested) {
-		if (inpt->pressing[Input::EQUIPMENT_SWAP] && !inpt->lock[Input::EQUIPMENT_SWAP]) {
-			inpt->lock[Input::EQUIPMENT_SWAP] = true;
-			applyNextEquipmentSet();
-			applyEquipment();
-			clearHighlight();
-		}
-		else if (inpt->pressing[Input::EQUIPMENT_SWAP_PREV] && !inpt->lock[Input::EQUIPMENT_SWAP_PREV]) {
-			inpt->lock[Input::EQUIPMENT_SWAP_PREV] = true;
-			applyPreviousEquipmentSet();
-			applyEquipment();
-			clearHighlight();
-		}
-	}
+	// The equipment-set keys used to be read here, out of inpt->pressing, and used here to change
+	// which half of this character's gear is being worn. GameStatePlay drives that now, from
+	// PlayerCommand::equip_set_delta; see applyEquipmentSetDelta().
 
 	tap_to_activate_timer.tick();
 
@@ -1538,6 +1527,20 @@ void MenuInventory::setEquipSlotEnabled(int slot, bool enabled) {
 	// Presentation follows the state, never the other way round.
 	if (slot < static_cast<int>(inventory[EQUIPMENT].slots.size()))
 		inventory[EQUIPMENT].slots[slot]->enabled = enabled;
+}
+
+bool MenuInventory::applyEquipmentSetDelta(int delta) {
+	if (delta == 0 || max_equipment_set == 0)
+		return false;
+
+	if (delta > 0)
+		applyNextEquipmentSet();
+	else
+		applyPreviousEquipmentSet();
+
+	applyEquipment();
+	clearHighlight();
+	return true;
 }
 
 bool MenuInventory::isEquipSlotActive(size_t equipped) {

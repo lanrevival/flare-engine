@@ -68,6 +68,22 @@ public:
 	// Phase 3 sets this from a network message instead; nothing in Avatar has to change for that.
 	bool respawn;
 
+	// Which way to step through the character's equipment sets: +1 next, -1 previous, 0 no
+	// change. An int rather than two bools because the two keys are mutually exclusive and
+	// modelling them as separate flags invites a state that means nothing.
+	//
+	// This decides which half of the equipment slots the character is actually WEARING
+	// (MenuInventory::isEquipSlotActive()), so it is simulation intent, not a UI preference.
+	// MenuInventory::logic() used to read inpt->pressing[Input::EQUIPMENT_SWAP] itself: a menu
+	// reading the keyboard and changing what a character has on. On a server with eight players
+	// there is one keyboard and it belongs to none of them.
+	//
+	// The equipment-set BUTTONS inside the inventory menu still call applyEquipmentSet directly.
+	// They are clicks on an open menu, they cannot fire on a headless server, and they move with
+	// the state in P1.3d-4 -- but they are a second route into the same change and they are not
+	// gone.
+	int equip_set_delta;
+
 	// power activations queued this tick
 	std::vector<ActionData> actions;
 };

@@ -327,4 +327,51 @@ time_played=0
 engine_version=1.15.52
 SAVE
 
-echo "wrote $SAVE_ROOT/{1,2,3,4,5,6}/avatar.txt"
+# ---------------------------------------------------------------------------
+# slot 7 -- the EQUIPMENT-SET SWAP fixture, for equipswap.rec.
+#
+# Slot 2's character, verbatim, standing in an empty room instead of a goblin nest. The kit is
+# unchanged on purpose: this fixture is not meant to fight, and copying slot 2 rather than tuning
+# a new character means the only difference between the two rows is the thing under test.
+#
+# What is under test is MenuInventory::logic():432 -- a menu reading inpt->pressing directly and
+# writing active_equipment_set, which decides which ten of the twenty equipment slots the
+# character is actually wearing (isEquipSlotActive()). That is a menu mutating simulation state
+# from raw input, the same shape as the respawn click P1.3b routed through PlayerCommand.
+#
+# Set 2 is EMPTY here, and that is the sharp part rather than a shortcut. Swapping to it strips
+# the character of everything without removing anything from storage, so the two numbers on the
+# simevents line separate cleanly:
+#
+#   equipped   stays 6   -- nothing left the inventory
+#   equipset   1 -> 2    -- but none of it is being worn any more
+#
+# A swap that silently stopped working would leave equipset at 1 and the row fails on the number,
+# not on a hex digest nobody can interpret.
+#
+# The map is tests/mods/test_equipswap: no enemies, no loot, no events except one that exists to
+# carry a sound for the map_event canary. Stripping a character naked in a goblin nest would end
+# the run in a death and take the coverage with it.
+# ---------------------------------------------------------------------------
+mkdir -p "$SAVE_ROOT/7"
+cat > "$SAVE_ROOT/7/avatar.txt" <<'SAVE'
+## flare-engine save file ##
+name=EquipSwapFixture
+permadeath=0
+class=Brute,
+xp=524020
+build=50,5,4,15
+currency=0
+equipped_quantity=1,0,0,0,1,1,0,1,1,1,0,0,0,0,0,0,0,0,0,0
+equipped=7,0,0,0,8,11,0,4,5,6,0,0,0,0,0,0,0,0,0,0
+carried_quantity=
+carried=
+spawn=maps/test_equipswap.txt,8,8
+actionbar=0,0,0,0,0,0,0,0,0,0,1,2
+powers=2,7
+campaign=
+time_played=0
+engine_version=1.15.52
+SAVE
+
+echo "wrote $SAVE_ROOT/{1,2,3,4,5,6,7}/avatar.txt"

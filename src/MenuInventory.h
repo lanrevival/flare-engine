@@ -112,6 +112,19 @@ public:
 	void align();
 
 	void applyDeathPenalty();
+
+	/** Steps the active equipment set: +1 next, -1 previous, 0 nothing.
+	 *
+	 * Driven from GameStatePlay's tick, not from this class's logic(), which is where it used to
+	 * live as a direct read of inpt->pressing[Input::EQUIPMENT_SWAP]. See PlayerCommand.h. The
+	 * guard on max_equipment_set stays here because it is inventory state -- the caller should
+	 * not have to know whether this character's mod defines more than one set.
+	 *
+	 * Returns whether anything happened, so the caller can claim the input lock on exactly the
+	 * ticks the old code claimed it: a mod that defines no equipment sets left the key unclaimed
+	 * for the rest of the UI, and still does.
+	 */
+	bool applyEquipmentSetDelta(int delta);
 	void logic();
 	void render();
 	void renderTooltips(const Point& position);

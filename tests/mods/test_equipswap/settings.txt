@@ -1,0 +1,5 @@
+description=TEST ONLY. A quiet room with nothing in it, so a replay can press EQUIPMENT_SWAP and the only thing that changes is the swap.
+requires=fantasycore
+game=flare-game
+version=1.00
+engine_version_min=1.15

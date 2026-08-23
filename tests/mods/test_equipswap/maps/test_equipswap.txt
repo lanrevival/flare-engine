@@ -1,0 +1,50 @@
+# TEST ONLY -- not shipped game content. See tests/mods/test_equipswap/settings.txt.
+#
+# The same empty room as tests/mods/test_autoequip, minus the item grant. It is a separate mod
+# rather than a second map in that one because a row that loads test_autoequip also loads its
+# reward event, and then a swap row would be measuring two things at once.
+#
+# Nothing is on this map. No enemies, no loot, no NPCs, no hotspot. That is the point: the row
+# that runs here presses EQUIPMENT_SWAP and the only thing in the world that can change is what
+# the character is wearing.
+#
+# The one event exists solely to carry a sound, because SFX_MAP_EVENT is emitted by an event with
+# a soundfx component and by nothing else (EventManager.cpp:1115). Every row in the corpus asserts
+# map_event is non-zero; without this the canary would have to be exempted here, and a check with
+# an exemption in it is a check on its way out.
+
+[header]
+width=16
+height=16
+tilewidth=64
+tileheight=32
+orientation=isometric
+hero_pos=8,8
+tileset=tilesetdefs/tileset_dungeon.txt
+title=Equipment-set swap coverage
+
+[layer]
+type=collision
+data=
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+
+[event]
+type=event
+location=8,8,1,1
+activate=on_load
+soundfx=soundfx/door_open.ogg,0,0

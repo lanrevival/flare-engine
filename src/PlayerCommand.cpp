@@ -33,6 +33,7 @@ PlayerCommand::PlayerCommand()
 	, using_mouse(false)
 	, mouse_screen()
 	, respawn(false)
+	, equip_set_delta(0)
 	, actions() {
 }
 
@@ -94,6 +95,17 @@ void PlayerCommandBuilder::build(PlayerCommand& cmd, const InputState& in, const
 	cmd.shift = in.pressing[Input::SHIFT];
 	cmd.using_mouse = const_cast<InputState&>(in).usingMouse();
 	cmd.mouse_screen = in.mouse;
+
+	// Next wins if both are held, which is the order MenuInventory::logic() used to resolve them
+	// in. The lock is NOT set here -- build() takes a const InputState because it reads intent and
+	// claims nothing. GameStatePlay sets it when it applies the delta, at the same boundary that
+	// consumes the game-over click.
+	if (in.pressing[Input::EQUIPMENT_SWAP] && !in.lock[Input::EQUIPMENT_SWAP])
+		cmd.equip_set_delta = 1;
+	else if (in.pressing[Input::EQUIPMENT_SWAP_PREV] && !in.lock[Input::EQUIPMENT_SWAP_PREV])
+		cmd.equip_set_delta = -1;
+	else
+		cmd.equip_set_delta = 0;
 
 	// actions are filled by the caller from menu->act->checkAction(); they are the one part of
 	// player intent the engine already modelled as a command list.
