@@ -90,22 +90,38 @@ jobs:
     # that mod data, so a flare-game update moves them and would turn this job red for a change
     # that is not a regression. Bumping the pin means re-recording the goldens in the same commit.
     #
-    # Goldens are PER-PLATFORM AND PER-COMPILER. Running both gcc and clang answers the question
-    # that decides Phase 3's architecture -- whether cross-machine divergence is the ARCHITECTURE
-    # (two compilers on one machine will agree) or CODEGEN (they will not, and lockstep between
-    # differently-built peers is then impossible).
+    # Goldens are PER-PLATFORM AND PER-COMPILER, and the matrix is the measuring instrument.
     #
-    # As of P0.5c that question is OPEN AGAIN. It was recorded as answered -- "the divergence is
-    # the architecture" -- but the Linux digests it rested on were produced by runs in which no
-    # save game was ever created, so they hashed an empty world with no map loaded while the macOS
-    # digests hashed a real one. tests/run-replays.sh now creates the fixture itself and fails if
-    # it cannot, and the manifest requires a non-zero map_event on every recording, so a repeat is
-    # a red build rather than a green one. The first Linux goldens recorded after this change are
-    # the first ones worth comparing.
-    runs-on: ubuntu-24.04
+    # WHAT IS KNOWN, measured by the first runs after P0.5c fixed the fixture step:
+    #
+    #   gcc and clang, same machine   -- agree byte-for-byte on every digest. NOT codegen.
+    #   macOS/arm64 vs Linux/x86-64   -- diverge BEHAVIOURALLY, not just in the hash. 'melee'
+    #                                    kills two enemies on macOS and kills nothing on Linux;
+    #                                    'beatdown' fires the low-HP warning on macOS and never
+    #                                    on Linux. Those show up as coverage failures below.
+    #
+    # WHAT THE 'os' AXIS IS FOR. Those two runners differ in BOTH the operating system and the
+    # instruction set, so the measurement cannot say which one moved. ubuntu-24.04-arm holds the
+    # OS fixed and changes only the ISA:
+    #
+    #   arm64 Linux behaves like x86-64 Linux  -> the cause is the OS/libc (libm, most likely).
+    #   arm64 Linux behaves like arm64 macOS   -> the cause is the instruction set (FMA
+    #                                             contraction, extended precision, or similar).
+    #
+    # This does not block anything. Phase 3 is going authoritative-host rather than lockstep, so
+    # cross-platform determinism is no longer load-bearing for correctness. The axis stays because
+    # a host and a REJOINING client still have to agree, and because leaving a measured divergence
+    # unattributed in the record is how it comes back later as a mystery.
+    #
+    # Linux goldens are still deliberately unrecorded. A golden for a platform where 'melee' does
+    # not melee would rebuild the P0.5c mistake in a new form -- see the coverage block in
+    # tests/run-replays.sh. Missing goldens fail the job AND print the digest, which is what makes
+    # one run enough to compare platforms.
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ ubuntu-24.04, ubuntu-24.04-arm ]
         compiler: [ { cc: gcc, cxx: g++ }, { cc: clang, cxx: clang++ } ]
     env:
       FLARE_GAME_COMMIT: af6eee6d339ac98011864bfe89da837fe7769c28

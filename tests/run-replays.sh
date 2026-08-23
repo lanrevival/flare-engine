@@ -20,22 +20,26 @@ DATA_PATH="${1:-$FLARE_TEST_DATA_PATH}"
 MODS="fantasycore,empyrean_campaign"
 DIR="tests/replays"
 
-# Goldens are PER-PLATFORM. Whether that is a finding or a precaution is, as of P0.5c, OPEN.
+# Goldens are PER-PLATFORM, and that is a finding rather than a precaution -- but not the finding
+# it was first recorded as.
 #
-# It was recorded as a finding: the same recording gave a different digest on macOS/arm64 than on
-# Linux/x86-64, and gcc and clang on Linux agreed with each other, which was read as "the
-# divergence is the architecture, not the compiler" -- the answer that decides whether Phase 3
-# can use lockstep at all.
+# It was originally read as "the divergence is the architecture, not the compiler". That reading
+# rested on Linux digests produced by a job in which the fixture step below silently did nothing,
+# so the Linux runs hashed an empty world with no map loaded while the macOS runs hashed a real
+# one. smoke.Linux-x86_64-clang.hash was 0x8751e5eefd8e093b, which is exactly what this server
+# prints for a run with no save game at all. Two compilers agreeing on the digest of nothing says
+# nothing about codegen. P0.5c fixed the fixture step; the numbers below are from after that.
 #
-# That comparison does not hold. The Linux digests came from a job in which the fixture step below
-# silently did nothing, so the Linux runs hashed an empty world with no map loaded while the macOS
-# runs hashed a real one. smoke.Linux-x86_64-clang.hash was 0x8751e5eefd8e093b, which is exactly
-# what this server prints for a run with no save game at all. Two compilers agreeing on the digest
-# of nothing says nothing about codegen.
+# MEASURED, on a corpus that does load a world:
+#   gcc vs clang on one machine  -- identical digests. The divergence is not codegen.
+#   macOS/arm64 vs Linux/x86-64  -- diverge behaviourally: 'melee' kills two enemies on one and
+#                                   nothing on the other. The coverage block below catches it.
 #
-# The question is still live and still matters. Keep FLARE_GOLDEN_SUFFIX set to the compiler so a
-# compiler-level divergence stays distinguishable from an architecture-level one, and re-answer it
-# once these goldens have been recorded on a Linux run that actually loads a world.
+# Those two runners differ in both OS and ISA, so which one moved is UNATTRIBUTED. The CI matrix
+# now carries an arm64 Linux runner to split them; see .github/workflows/main.yml.
+#
+# Keep FLARE_GOLDEN_SUFFIX set to the compiler. uname -m is already in the tag, so the four
+# combinations land in four distinct files and none of them can quietly overwrite another.
 TAG="$(uname -s)-$(uname -m)${FLARE_GOLDEN_SUFFIX:+-$FLARE_GOLDEN_SUFFIX}"
 echo "platform tag: $TAG"
 
