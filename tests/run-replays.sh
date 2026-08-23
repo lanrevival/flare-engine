@@ -67,13 +67,13 @@ if ! ./tests/make-fixture.sh > /dev/null; then
 fi
 
 fail=0
-while read -r name ticks slot requires; do
+while read -r name rec ticks slot survives requires; do
 	case "$name" in ''|\#*) continue ;; esac
 
 	golden="$DIR/$name.$TAG.hash"
 
 	out=$(./flare-server --headless --data-path="$DATA_PATH" --mods="$MODS" --load-slot="$slot" \
-	        --replay="$DIR/$name.rec" --max-ticks="$ticks" --hash 2>/dev/null || true)
+	        --replay="$DIR/$rec.rec" --max-ticks="$ticks" --hash 2>/dev/null || true)
 
 	got=$(echo "$out" | grep '^0x' || true)
 	events=$(echo "$out" | grep '^simevents' || true)
@@ -103,7 +103,7 @@ while read -r name ticks slot requires; do
 		fi
 	fi
 
-	# LIVENESS, checked before the digest.
+	# LIVENESS, checked before the digest. Enforced in BOTH directions.
 	#
 	# The coverage block above asks whether an event EVER fired. It cannot see a recording whose
 	# player dies a third of the way in and leaves a corpse for the rest: every required event
@@ -115,13 +115,32 @@ while read -r name ticks slot requires; do
 	# it is in plans/phase0/P0.5e -- smoke's last event is at tick 378 of 600 while its world
 	# goes on changing to the last tick. Events stopping is not the world stopping. Dying is
 	# specific, it is what the fixtures claim, and it cannot be satisfied by lowering a number.
+	#
+	# P0.5e checked one direction, and that turned out to exclude real code from the suite. The
+	# death penalty -- currency loss, XP loss, and a random item destroyed with sim_rng -- lives
+	# in MenuInventory::logic() and runs only when the player dies, so 'no recording may die'
+	# meant it could never execute under test. P1.3b moves that code out of the menus, and a
+	# survives=no row is what makes the move verifiable. Both directions are enforced because a
+	# fixture that stops dying disarms its test exactly as silently as one that starts.
 	died=$(echo "$events" | tr ' ' '\n' | sed -n 's/^died_tick=//p')
-	if [ -n "$died" ] && [ "$died" != "0" ]; then
-		echo "FAIL $name: the player died at tick $died of $ticks"
+	[ -n "$died" ] || died=0
+
+	if [ "$survives" = "yes" ] && [ "$died" != "0" ]; then
+		echo "FAIL $name: the player died at tick $died of $ticks, and this row says survives=yes"
 		echo "     the rest of the recording is a corpse, and every 'requires' entry still"
 		echo "     passes because each one fired before the death. Re-tune the fixture in"
 		echo "     tests/make-fixture.sh -- do NOT lower the tick budget in $DIR/MANIFEST,"
-		echo "     and do NOT weaken the 'requires' column."
+		echo "     do NOT weaken the 'requires' column, and do NOT flip this row to survives=no."
+		fail=1
+		continue
+	fi
+
+	if [ "$survives" = "no" ] && [ "$died" = "0" ]; then
+		echo "FAIL $name: the player survived $ticks ticks, and this row says survives=no"
+		echo "     this row exists to reach code that only runs on death -- the death penalty in"
+		echo "     MenuInventory::logic(). A fixture that stopped dying has disarmed it silently,"
+		echo "     which is the same failure as a survives=yes row that started dying."
+		echo "     Re-tune the fixture in tests/make-fixture.sh; do NOT flip this row to yes."
 		fail=1
 		continue
 	fi
@@ -138,7 +157,7 @@ while read -r name ticks slot requires; do
 	elif [ "$got" != "$(cat "$golden")" ]; then
 		echo "FAIL $name: expected $(cat "$golden")  got $got"
 		echo "     bisect with: ./flare-server --headless --data-path=$DATA_PATH --mods=$MODS \\"
-		echo "                    --load-slot=$slot --replay=$DIR/$name.rec --max-ticks=$ticks --hash-every=1"
+		echo "                    --load-slot=$slot --replay=$DIR/$rec.rec --max-ticks=$ticks --hash-every=1"
 		fail=1
 	else
 		echo "ok   $name  $got"

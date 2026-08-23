@@ -1,8 +1,24 @@
-# recording  ticks  slot  requires
+# name  rec  ticks  slot  survives  requires
 #
-# slot      which save game in plans/artifacts/P0.5-make-fixture.sh the run boots from.
-#           1 = movement fixture, 2 = combat, 3 = beatdown.
-# requires  simevents counters that must be NON-ZERO for this recording, or '-' for none.
+# name      identifies the ROW, and names the golden file. Unique.
+# rec       which input recording to replay, without the .rec suffix. NOT the same thing as the
+#           name: a recording is just a per-tick input stream, and Replay validates only the
+#           format, the engine version and the mod list -- never the save it is replayed against.
+#           So one recording can drive several fixtures, and 'death' below is 'patrol' again on a
+#           weaker character. Reusing the file beats copying it; a copy drifts in silence.
+# ticks     how long to run.
+# slot      which save game tests/make-fixture.sh writes that the run boots from.
+#           1 = movement, 2 = combat, 3 = beatdown, 4 = death.
+# survives  'yes' if the player must be alive at the end, 'no' if the player must die.
+#           Both directions are enforced. P0.5e added this check in one direction only, because
+#           two fixtures had rotted into corpses partway through -- patrol died at tick 1101 of
+#           2000 and beatdown at 1186 of 2956, and both were green, because 'requires' only asks
+#           whether an event EVER fired and every one of them had fired before the death.
+#           The other direction matters too: the death penalty lives in MenuInventory::logic()
+#           and runs only when the player dies, so a 'no' row is the only way that code is
+#           reachable under test at all. A 'no' row that stops dying is a silently disarmed test,
+#           exactly like a 'yes' row that starts.
+# requires  simevents counters that must be NON-ZERO for this row, or '-' for none.
 #           This column exists because P0.5b shipped a recording called 'attack' that never
 #           attacked, and three matching digests could not tell anyone. A digest proves the world
 #           changed; only these say WHICH code ran.
@@ -10,7 +26,9 @@
 #           'map_event' is on every row as a canary. It is emitted during map load, so a zero
 #           there means no map loaded at all -- which is exactly the state every Linux CI run was
 #           in until P0.5c, hashing an empty world and passing.
-smoke        600   1  map_event,step
-patrol       2000  1  map_event,step
-melee        2956  2  map_event,attack,hit,die,step,levelup,loot,power
-beatdown     2956  3  map_event,attack,hit,step,power,hazard_hit,lowhp_start,lowhp_stop
+
+smoke     smoke     600   1  yes  map_event,step
+patrol    patrol    2000  1  yes  map_event,step
+melee     melee     2956  2  yes  map_event,attack,hit,die,step,levelup,loot,power
+beatdown  beatdown  2956  3  yes  map_event,attack,hit,step,power,hazard_hit,lowhp_start,lowhp_stop
+death     patrol    1400  4  no   map_event,step,hit,lowhp_start

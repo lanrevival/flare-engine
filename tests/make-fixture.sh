@@ -174,4 +174,61 @@ time_played=0
 engine_version=1.15.52
 SAVE
 
-echo "wrote $SAVE_ROOT/{1,2,3}/avatar.txt"
+# ---------------------------------------------------------------------------
+# slot 4 -- the DEATH fixture, for death.rec (which is patrol.rec's input again).
+#
+# This exists because of a gap found while verifying P1.3: the death penalty --
+# currency loss, XP loss and random item destruction -- does not live in the
+# simulation. It lives in MenuInventory::logic(), and it draws from sim_rng.
+# P1.3b moves it out. Nothing could verify that move, because the penalty only
+# runs when the player dies and P0.5e made a dying player a hard FAIL on every
+# recording in the corpus. The two checks are each correct and together they
+# excluded the code from ever executing under test.
+#
+# So this fixture is the one that is SUPPOSED to die, and the MANIFEST's new
+# 'survives' column says so out loud rather than exempting it quietly.
+#
+# It is deliberately the naked level 1 that P0.5e retired from slot 1, on slot
+# 1's spawn, replaying slot 1's input. P0.5e measured that character dying at
+# tick 1101 of patrol's 2000, so the death is already a known quantity rather
+# than something newly tuned. The budget below is 1400: comfortably past 1101,
+# and short enough not to spend 800 ticks watching a corpse.
+#
+#   currency=1000  is the whole point. SaveLoad.cpp:545 turns this field into
+#                  1000 real currency items in CARRIED, and MenuInventory
+#                  recomputes pc->stats.currency from that stack every tick.
+#                  engine/death_penalty.txt removes 50% on death, so a run that
+#                  applies the penalty ends on 500 and one that does not ends on
+#                  1000. Both numbers are hashed -- as the scalar AND as the
+#                  stack quantity -- so P1.3b cannot silently drop the penalty.
+#
+# LIMIT, stated rather than relied on: of the three penalty branches, the shipped
+# mod data enables only currency. xp_total, xp_current_level and random_item are
+# all off in mods/default/engine/death_penalty.txt, so the XP arithmetic and the
+# sim_rng->index() item-destruction draw stay uncovered. Do NOT edit shipped game
+# data to fix that; the way in is a test-only mod that overrides death_penalty.txt
+# with every branch enabled, which needs a 'mods' column here. Worth doing in
+# P1.3b, when that code is the thing being moved.
+# ---------------------------------------------------------------------------
+mkdir -p "$SAVE_ROOT/4"
+cat > "$SAVE_ROOT/4/avatar.txt" <<'SAVE'
+## flare-engine save file ##
+name=DeathFixture
+permadeath=0
+class=Brute,
+xp=0
+build=1,1,1,1
+currency=1000
+equipped_quantity=
+equipped=
+carried_quantity=
+carried=
+spawn=maps/abandoned_mines.txt,76,71
+actionbar=0,0,0,0,0,0,0,0,0,0,0,0
+powers=
+campaign=
+time_played=0
+engine_version=1.15.52
+SAVE
+
+echo "wrote $SAVE_ROOT/{1,2,3,4}/avatar.txt"
