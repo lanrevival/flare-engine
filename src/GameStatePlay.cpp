@@ -872,6 +872,12 @@ void GameStatePlay::logic() {
 
 	checkCutscene();
 
+	// The death penalty is simulation and is driven from here, not from menu->logic(), which is
+	// where it used to run. See MenuInventory::applyDeathPenalty(). The call sits immediately
+	// before menu->logic() so the tick it lands on is exactly the one it landed on before --
+	// this was a pure relocation and every golden had to stay put to prove it.
+	menu->inv->applyDeathPenalty();
+
 	// check menus first (top layer gets mouse click priority)
 	menu->logic();
 

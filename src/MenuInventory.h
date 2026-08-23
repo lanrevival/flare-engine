@@ -97,6 +97,7 @@ public:
 	~MenuInventory();
 	void align();
 
+	void applyDeathPenalty();
 	void logic();
 	void render();
 	void renderTooltips(const Point& position);

@@ -305,9 +305,23 @@ void MenuInventory::align() {
 		button_sort->setPos(window_area.x, window_area.y);
 }
 
-void MenuInventory::logic() {
-
-	// if the player has just died, the penalty is half his current currency.
+/** The death penalty: currency, XP, and one destroyed item.
+ *
+ * This is SIMULATION, and until P1.3b it ran as a side effect of MenuInventory::logic() -- a
+ * menu's per-tick update, mutating pc->stats and drawing from sim_rng, the stream P0.3b created
+ * so that simulation draws would be reproducible. Avatar.cpp said so out loud: "raise the death
+ * penalty flag. This is handled in MenuInventory".
+ *
+ * It now runs from GameStatePlay's tick instead, so that making MenuManager optional (P1.3f)
+ * cannot silently delete it. The CODE still lives here because it needs the inventory, and the
+ * inventory is still menu-owned; P1.3d gives it a sim-side owner and this method moves with the
+ * rest of the storage operations, its call site becoming pc->inventory.applyDeathPenalty().
+ *
+ * Deliberately NOT moved into the !isPaused() block. That would be a real behaviour change in a
+ * case no recording can see, since the corpus never pauses. P1.3c splits the pause concept and is
+ * where this belongs.
+ */
+void MenuInventory::applyDeathPenalty() {
 	if (pc->stats.death_penalty && eset->death_penalty.enabled) {
 		std::string death_message = "";
 
@@ -361,8 +375,14 @@ void MenuInventory::logic() {
 
 		pc->stats.death_penalty = false;
 	}
+}
+
+void MenuInventory::logic() {
 
 	// a copy of currency is kept in stats, to help with various situations
+	//
+	// Also simulation state written by a menu, and also still here for the reason above: the
+	// count comes from inventory[CARRIED], which nothing outside this class owns yet. P1.3d.
 	pc->stats.currency = currency = inventory[CARRIED].count(eset->misc.currency_id);
 
 	if (visible) {
