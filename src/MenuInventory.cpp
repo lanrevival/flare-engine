@@ -183,6 +183,8 @@ MenuInventory::MenuInventory()
 
 	label_currency.setColor(font->getColor(FontEngine::COLOR_MENU_NORMAL));
 
+	equip_slot_enabled.resize(MAX_EQUIPPED, true);
+
 	inventory[EQUIPMENT].initFromList(MAX_EQUIPPED, equipped_area, slot_type);
 	inventory[CARRIED].initGrid(MAX_CARRIED, carried_area, carried_cols);
 
@@ -650,7 +652,7 @@ bool MenuInventory::drop(const Point& position, ItemStack stack) {
 		// make sure the item is going to the correct slot
 		// we match slot_type to stack.item's type to place items in the proper slots
 		// also check to see if the hero meets the requirements
-		if (items->isValid(stack.item) && slot_type[slot] == items->items[stack.item]->type && items->requirementsMet(&pc->stats, stack.item) && pc->stats.humanoid && inventory[EQUIPMENT].slots[slot]->enabled) {
+		if (items->isValid(stack.item) && slot_type[slot] == items->items[stack.item]->type && items->requirementsMet(&pc->stats, stack.item) && pc->stats.humanoid && equip_slot_enabled[slot]) {
 			if (inventory[area][slot].item == stack.item) {
 				// Merge the stacks
 				success = add(stack, area, slot, !ADD_PLAY_SOUND, !ADD_AUTO_EQUIP);
@@ -924,7 +926,7 @@ bool MenuInventory::add(ItemStack stack, int area, int slot, bool play_sound, bo
 			}
 		}
 
-		if (equip_slot >= 0 && inventory[EQUIPMENT].slots[equip_slot]->enabled && disabled_slots_empty) {
+		if (equip_slot >= 0 && equip_slot_enabled[equip_slot] && disabled_slots_empty) {
 			area = EQUIPMENT;
 			slot = equip_slot;
 		}
@@ -1283,7 +1285,7 @@ void MenuInventory::applyEquipment() {
 
 	// enable all slots by default
 	for (int i = 0; i < MAX_EQUIPPED; ++i) {
-		inventory[EQUIPMENT].slots[i]->enabled = true;
+		setEquipSlotEnabled(i, true);
 	}
 	// disable any incompatible slots, unequipping items if neccessary
 	for (int i = 0; i < MAX_EQUIPPED; ++i) {
@@ -1525,6 +1527,19 @@ void MenuInventory::updateEquipmentSetWidgets() {
 }
 
 
+/** Sets the slot's usability and mirrors it onto the widget so the UI matches. */
+void MenuInventory::setEquipSlotEnabled(int slot, bool enabled) {
+	if (slot < 0 || slot >= static_cast<int>(equip_slot_enabled.size()))
+		return;
+
+	equip_slot_enabled[slot] = enabled;
+
+	// The widget still needs it: a disabled WidgetSlot draws differently and refuses clicks.
+	// Presentation follows the state, never the other way round.
+	if (slot < static_cast<int>(inventory[EQUIPMENT].slots.size()))
+		inventory[EQUIPMENT].slots[slot]->enabled = enabled;
+}
+
 bool MenuInventory::isEquipSlotActive(size_t equipped) {
 	if (equipment_set[equipped] == 0 || equipment_set[equipped]==active_equipment_set) {
 		return true;
@@ -1668,7 +1683,7 @@ void MenuInventory::disableEquipmentSlot(size_t disable_slot_type) {
 				updateEquipment(i);
 				applyEquipment();
 			}
-			inventory[EQUIPMENT].slots[i]->enabled = false;
+			setEquipSlotEnabled(i, false);
 		}
 	}
 }
