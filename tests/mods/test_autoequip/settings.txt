@@ -1,0 +1,5 @@
+description=TEST ONLY. A bare map that hands the player an equippable item, so the replay corpus can execute the auto-equip branch of MenuInventory::add().
+requires=fantasycore
+game=flare-game
+version=1.00
+engine_version_min=1.15

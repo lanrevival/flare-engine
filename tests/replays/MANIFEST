@@ -1,4 +1,4 @@
-# name  rec  ticks  slot  mods  survives  requires
+# name  rec  ticks  slot  mods  survives  equipped  requires
 #
 # name      identifies the ROW, and names the golden file. Unique.
 # rec       which input recording to replay, without the .rec suffix. NOT the same thing as the
@@ -8,7 +8,8 @@
 #           weaker character. Reusing the file beats copying it; a copy drifts in silence.
 # ticks     how long to run.
 # slot      which save game tests/make-fixture.sh writes that the run boots from.
-#           1 = movement, 2 = combat, 3 = beatdown, 4 = death, 5 = death with every penalty on.
+#           1 = movement, 2 = combat, 3 = beatdown, 4 = death, 5 = death with every penalty
+#           on, 6 = naked, on a bare test map that hands it something to wear.
 # mods      EXTRA mods appended to the default list, or '-' for none. Mods in tests/mods/ are
 #           linked into the data path by tests/run-replays.sh. Order matters -- later mods
 #           override earlier ones, so an override has to land last, which appending guarantees.
@@ -23,18 +24,33 @@
 #           and runs only when the player dies, so a 'no' row is the only way that code is
 #           reachable under test at all. A 'no' row that stops dying is a silently disarmed test,
 #           exactly like a 'yes' row that starts.
+# equipped  how many equipment slots must still hold something when the run ends.
+#           This is the column that speaks to P1.3's own stated failure mode -- "a subtle error
+#           means players lose gear" -- in a number a reviewer can read, rather than in a hex
+#           digest that can only say "different".
+#           Pinned on EVERY row, including the naked ones, because 0 is a claim too: 'autoequip'
+#           below is only a test at all because its fixture starts at 0 and must end at 1.
+#           melee and beatdown are 6 at both ends, which is the assertion that 2956 ticks of
+#           combat do not quietly cost the player a slot.
 # requires  simevents counters that must be NON-ZERO for this row, or '-' for none.
 #           This column exists because P0.5b shipped a recording called 'attack' that never
 #           attacked, and three matching digests could not tell anyone. A digest proves the world
 #           changed; only these say WHICH code ran.
 #
-#           'map_event' is on every row as a canary. It is emitted during map load, so a zero
-#           there means no map loaded at all -- which is exactly the state every Linux CI run was
-#           in until P0.5c, hashing an empty world and passing.
+#           'map_event' is on every row as a canary for a map having loaded, and it works, but
+#           NOT for the reason this comment used to give. It said the event is emitted during map
+#           load. It is not: EventManager.cpp:1115 emits SFX_MAP_EVENT only for a map event that
+#           carries a soundfx component, and it happens that every campaign map has one on load.
+#           A map with no sound-carrying event reports map_event=0 while running perfectly well,
+#           which is what tests/mods/test_autoequip hit; that map now carries a soundfx so the
+#           canary means the same thing on every row.
+#           The canary earns its place either way: a zero is what every Linux CI run reported
+#           until P0.5c, hashing an empty world and passing.
 
-smoke     smoke     600   1  -  yes  map_event,step
-patrol    patrol    2000  1  -  yes  map_event,step
-melee     melee     2956  2  -  yes  map_event,attack,hit,die,step,levelup,loot,power
-beatdown  beatdown  2956  3  -  yes  map_event,attack,hit,step,power,hazard_hit,lowhp_start,lowhp_stop
-death     patrol    1400  4  -  no   map_event,step,hit,lowhp_start
-deathfull deathfull 1400  5  test_deathpenalty  no   map_event,step,hit,lowhp_start
+smoke     smoke     600   1  -  yes  0  map_event,step
+patrol    patrol    2000  1  -  yes  0  map_event,step
+melee     melee     2956  2  -  yes  6  map_event,attack,hit,die,step,levelup,loot,power
+beatdown  beatdown  2956  3  -  yes  6  map_event,attack,hit,step,power,hazard_hit,lowhp_start,lowhp_stop
+death     patrol    1400  4  -  no   0  map_event,step,hit,lowhp_start
+deathfull deathfull 1400  5  test_deathpenalty  no   0  map_event,step,hit,lowhp_start
+autoequip autoequip 350   6  test_autoequip     yes  1  map_event,step

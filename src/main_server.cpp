@@ -41,6 +41,8 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "FontEngine.h"
 #include "GameSwitcher.h"
 #include "InputState.h"
+#include "MenuInventory.h"
+#include "MenuManager.h"
 #include "MessageEngine.h"
 #include "ModManager.h"
 #include "RenderDevice.h"
@@ -549,6 +551,23 @@ int main(int argc, char *argv[]) {
 		// its world keeps changing to the final tick. It is printed because it is what made the
 		// beatdown problem visible. See plans/phase0/P0.5e.
 		printf(" last_tick=%lu died_tick=%lu", last_event_tick, died_tick);
+
+		// How many equipment slots still hold something. Third liveness field, and the one that
+		// speaks to P1.3's own stated failure mode: "a subtle error means players lose gear".
+		// The digest covers equipment contents, but a golden can only say "different", and the
+		// obvious way for a refactor of the inventory to go wrong is for gear to quietly stop
+		// arriving or quietly fall out. tests/replays/MANIFEST pins this per row, so that is a
+		// named number a reviewer can read rather than a hex digest nobody can interpret.
+		int equipped = 0;
+		if (menu && menu->inv) {
+			int slots = menu->inv->inventory[MenuInventory::EQUIPMENT].getSlotNumber();
+			for (int i = 0; i < slots; ++i) {
+				if (!menu->inv->inventory[MenuInventory::EQUIPMENT][i].empty())
+					equipped++;
+			}
+		}
+		printf(" equipped=%d", equipped);
+
 		printf("\n");
 	}
 

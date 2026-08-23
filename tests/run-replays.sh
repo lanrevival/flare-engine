@@ -76,6 +76,30 @@ if [ ! -x ./flare-server ]; then
 	exit 1
 fi
 
+# A HOME OF ITS OWN.
+#
+# The simulation reads the user's config file. Measured, not assumed: one line in
+# ~/.config/flare/settings.txt --
+#
+#   auto_equip=0
+#
+# -- makes the 'autoequip' row below report equipped=0 and digest 0xa3b5c21e37e4adef, which is
+# BYTE FOR BYTE the digest produced by a build with MenuInventory::add()'s auto-equip branch
+# deliberately sabotaged. A config file and a broken engine are indistinguishable from here.
+#
+# This is the P0.5d problem again in a different coat: something machine-local reaching the
+# simulation. There the route was the window size, and the fix was to cut the route. Here the
+# route is legitimate -- auto_equip really is a player preference -- so the fix is to stop the
+# corpus asking the developer's account what the player prefers. Every row runs against the
+# shipped defaults, and an empty settings.txt is what says so.
+#
+# This also owns the save games, because make-fixture.sh writes under $HOME.
+FLARE_TEST_HOME="$(mktemp -d)"
+mkdir -p "$FLARE_TEST_HOME/.config/flare"
+: > "$FLARE_TEST_HOME/.config/flare/settings.txt"
+trap 'rm -rf "$FLARE_TEST_HOME"' INT TERM
+export HOME="$FLARE_TEST_HOME"
+
 # The fixtures decide which map loads, where the player stands and how hard they hit. Without them
 # the server sits on the title screen and there is no world to digest. The MANIFEST's 'slot'
 # column picks which of the three each recording boots from.
@@ -104,7 +128,7 @@ for m in tests/mods/*/; do
 done
 
 fail=0
-while read -r name rec ticks slot mods survives requires; do
+while read -r name rec ticks slot mods survives equipped requires; do
 	case "$name" in ''|\#*) continue ;; esac
 
 	golden="$DIR/$name.$TAG.hash"
@@ -164,6 +188,30 @@ while read -r name rec ticks slot mods survives requires; do
 	# meant it could never execute under test. P1.3b moves that code out of the menus, and a
 	# survives=no row is what makes the move verifiable. Both directions are enforced because a
 	# fixture that stops dying disarms its test exactly as silently as one that starts.
+	# GEAR, checked before the digest, for the same reason coverage is: a digest can only say
+	# "different", and P1.3's own risk note says the way this refactor goes wrong is that
+	# "a subtle error means players lose gear".
+	#
+	# Not redundant with the digest. Equipment contents are hashed, so a lost item does move the
+	# golden -- but so does everything else, and the person reading a red run gets a hex number
+	# and no idea which of the twenty things in the digest moved. This says the word.
+	#
+	# It is also the ONLY check that can fail when auto-equip breaks on the 'autoequip' row, in
+	# the sense that matters: the row exists because P1.3d measured that the rest of the corpus
+	# cannot see equipping at all. Forcing every equipment slot disabled moved no digest on any
+	# of the six recordings that predate it.
+	got_equipped=$(echo "$events" | tr ' ' '\n' | sed -n 's/^equipped=//p')
+	[ -n "$got_equipped" ] || got_equipped="?"
+
+	if [ "$equipped" != "$got_equipped" ]; then
+		echo "FAIL $name: $got_equipped equipment slots filled at the end, and this row says $equipped"
+		echo "     got: $events"
+		echo "     gear arriving or falling out is what P1.3 says the danger is. Find out which"
+		echo "     slot changed -- do NOT edit the number in $DIR/MANIFEST to match."
+		fail=1
+		continue
+	fi
+
 	died=$(echo "$events" | tr ' ' '\n' | sed -n 's/^died_tick=//p')
 	[ -n "$died" ] || died=0
 
@@ -242,6 +290,15 @@ for res in 1280x720 5120x1440; do
 	fi
 	inv_prev="$inv"
 done
+
+# Kept on failure, deliberately. Utils::logInfo writes to $HOME/.config/flare/flare_log.txt and
+# nowhere else, so deleting this directory on a red run throws away the only detailed account of
+# what the server did.
+if [ "$fail" -eq 0 ]; then
+	rm -rf "$FLARE_TEST_HOME"
+else
+	echo "server log: $FLARE_TEST_HOME/.config/flare/flare_log.txt"
+fi
 
 if [ "$fail" -eq 0 ]; then
 	if [ "$goldens_required" = "0" ]; then

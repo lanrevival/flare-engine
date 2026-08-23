@@ -1,0 +1,59 @@
+# TEST ONLY -- not shipped game content. See tests/mods/test_autoequip/settings.txt.
+#
+# An empty room with one event in it. The room is deliberately featureless: this map exists to
+# execute ONE branch (auto-equip inside MenuInventory::add), and anything else on it -- enemies,
+# loot, NPCs, a second event -- would put other code between the grant and the digest and make a
+# failure harder to read, not easier.
+#
+# The hotspot covers the whole interior INCLUDING the spawn tile, so the event fires on the first
+# tick rather than when the player walks somewhere. That is on purpose and it is a limit worth
+# stating: this row covers the grant and the auto-equip decision, NOT the walk-onto-a-hotspot
+# path, which every other recording already exercises against the real campaign maps.
+#
+# repeat is off. A repeating grant would hand out a second shirt the tick after the first, the
+# chest slot would already be full, getEquipSlotFromItem(ONLY_EMPTY_SLOTS) would return -1 and
+# the surplus would pile up in the carried area -- which is a different branch wearing this
+# branch's clothes.
+
+[header]
+width=16
+height=16
+tilewidth=64
+tileheight=32
+orientation=isometric
+hero_pos=8,8
+tileset=tilesetdefs/tileset_dungeon.txt
+title=Auto-equip coverage
+
+[layer]
+type=collision
+data=
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+
+[event]
+type=event
+location=1,1,14,14
+activate=on_trigger
+hotspot=location
+repeat=false
+reward_item=4,1
+# The sound is not decoration. SFX_MAP_EVENT is emitted only by an event carrying a soundfx
+# component (EventManager.cpp:1115) -- NOT by map load, whatever the MANIFEST used to say -- and
+# every row in the corpus asserts map_event is non-zero. Without this line the canary would be
+# zero on this row alone and would have had to be exempted, which is how a check gets weakened.
+soundfx=soundfx/door_open.ogg,0,0

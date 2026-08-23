@@ -274,4 +274,57 @@ time_played=0
 engine_version=1.15.52
 SAVE
 
-echo "wrote $SAVE_ROOT/{1,2,3,4,5}/avatar.txt"
+# ---------------------------------------------------------------------------
+# slot 6 -- the AUTO-EQUIP fixture, for autoequip.rec.
+#
+# This exists because of a gap found while verifying P1.3d: the corpus does not exercise
+# equipping AT ALL. Three measurements, none of which could be argued with:
+#
+#   forcing every equipment slot disabled          moved no digest, on any recording
+#   counting enabled/disabled slots at exit        20 enabled, 0 disabled, all six recordings
+#   a naked level-50 fixture replaying melee.rec   kills, loots, and still moves nothing,
+#                                                  because getEquipSlotFromItem() returns -1 for
+#                                                  everything that drops there
+#
+# So MenuInventory::add()'s auto-equip branch -- the one that reads equip_slot_enabled and
+# decides whether an incoming item goes to EQUIPMENT or CARRIED -- had no coverage, in a plan
+# whose own stated failure mode is "a subtle error means players lose gear".
+#
+# The way in is a map event, not a loot drop. CampaignManager::rewardItem() is the only caller
+# that passes ADD_AUTO_EQUIP from map data (CampaignManager.cpp:188), and a map event is
+# something a test mod can author outright instead of hoping the enemy loot tables cooperate.
+#
+#   spawn      tests/mods/test_autoequip/maps/test_autoequip.txt, an empty 16x16 room whose one
+#              event grants item 4. Nothing else is on that map on purpose.
+#   naked      equipped= is empty, so the chest slot is free and the shirt has somewhere to go.
+#              This is what makes the row's assertion sharp: equipped goes 0 -> 1, and if the
+#              auto-equip decision stops working the item lands in CARRIED and it stays 0.
+#   currency=0 nothing else to lose, so the digest moves for one reason only.
+#
+# Item 4 is the Cloth Shirt (items/categories/level_1.txt), item_type=chest, level=1. Level
+# matters: applyEquipment() strips gear the character cannot meet the requirements for, and a
+# level 1 character that instantly unequips what it was just handed would report equipped=0 and
+# look exactly like a broken auto-equip branch.
+# ---------------------------------------------------------------------------
+mkdir -p "$SAVE_ROOT/6"
+cat > "$SAVE_ROOT/6/avatar.txt" <<'SAVE'
+## flare-engine save file ##
+name=AutoEquipFixture
+permadeath=0
+class=Brute,
+xp=0
+build=1,1,1,1
+currency=0
+equipped_quantity=
+equipped=
+carried_quantity=
+carried=
+spawn=maps/test_autoequip.txt,8,8
+actionbar=0,0,0,0,0,0,0,0,0,0,0,0
+powers=
+campaign=
+time_played=0
+engine_version=1.15.52
+SAVE
+
+echo "wrote $SAVE_ROOT/{1,2,3,4,5,6}/avatar.txt"
