@@ -131,6 +131,12 @@ uint64_t WorldHash::compute(unsigned long tick) {
 	// digest that stopped at positions would pass all of it.
 	h = mixI32(h, TAG_INVENTORY);
 	if (menu && menu->inv) {
+		// Which equipment set is active, not just what is in the slots. Measured gap: a probe
+		// that vanished items from the digest showed contents ARE covered (melee notices a loss
+		// in both storage areas), but this scalar was not hashed at all, so a swap between two
+		// equally-full sets was invisible. P1.3d moves it into PlayerInventory; cover it first.
+		h = mixI32(h, static_cast<int32_t>(menu->inv->active_equipment_set));
+
 		for (int area = 0; area < MenuInventory::CARRIED + 1; ++area) {
 			int slots = menu->inv->inventory[area].getSlotNumber();
 			h = mixI32(h, slots);
