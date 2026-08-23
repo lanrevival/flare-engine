@@ -114,8 +114,21 @@ jobs:
     # number in the engine. Phase 3 uses an authoritative host instead, and determinism stops being
     # load-bearing for correctness.
     #
-    # The matrix STAYS anyway. A host and a REJOINING client still have to agree, so this is the
-    # check that catches a same-platform regression -- and it is the instrument that caught P0.5c.
+    # The matrix STAYS, but not for the reason first written here. That said "a host and a
+    # rejoining client still have to agree", which is WRONG: under an authoritative host a
+    # rejoining client receives a state snapshot and never simulates, so it needs determinism from
+    # nobody. That reasoning was carried over from the lockstep design without being re-checked
+    # against the decision that replaced it.
+    #
+    # The real reason is the COVERAGE assertions, not the digests. They are what found that 'melee'
+    # kills nothing on x86-64 Linux and 'beatdown' never triggers the low-HP warning there -- the
+    # game is measurably easier on Linux. That is a player-facing difference and it matters whether
+    # or not networking is involved. A digest comparison alone would only have said "different
+    # hash" on a platform with no golden to compare against.
+    #
+    # Hence the split below: coverage and liveness are hard failures on every platform, while the
+    # digest comparison is a same-machine regression test and only applies where a golden exists.
+    # See tests/run-replays.sh.
     #
     # Linux goldens are still deliberately unrecorded. A golden for a platform where 'melee' does
     # not melee would rebuild the P0.5c mistake in a new form -- see the coverage block in

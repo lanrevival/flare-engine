@@ -43,6 +43,28 @@ DIR="tests/replays"
 TAG="$(uname -s)-$(uname -m)${FLARE_GOLDEN_SUFFIX:+-$FLARE_GOLDEN_SUFFIX}"
 echo "platform tag: $TAG"
 
+# Is this platform RECORDED? Counted, not configured, and deliberately not a flag: a switch that
+# turns the digest comparison off is a switch someone eventually flips on the platform that needs
+# it. The rule is all-or-nothing per platform --
+#
+#   no goldens at all  -> unrecorded. Digests are printed as information. Coverage and liveness
+#                         still hard-fail, because those ask whether the game BEHAVED, which is a
+#                         meaningful question on a platform with nothing to compare against.
+#   some goldens       -> recorded. Every row must have one and match it. A missing golden here
+#                         means a partial recording, i.e. somebody forgot one, which is an error.
+#
+# This exists because the digest is a SAME-MACHINE regression test, not a determinism requirement.
+# Cross-machine determinism was abandoned when the arm64 Linux runner showed the divergence is both
+# the ISA and the OS; Phase 3 uses an authoritative host. Linux goldens stay unrecorded on purpose,
+# because 'melee' does not melee there and a golden for that would rebuild the P0.5c mistake.
+golden_count=$(ls "$DIR"/*."$TAG".hash 2>/dev/null | wc -l | tr -d ' ')
+if [ "$golden_count" = "0" ]; then
+	goldens_required=0
+	echo "platform is UNRECORDED -- digests are informational; coverage and liveness still enforced"
+else
+	goldens_required=1
+fi
+
 if [ -z "$DATA_PATH" ]; then
 	echo "usage: $0 <data-path>   (or set FLARE_TEST_DATA_PATH)"
 	echo "the data path needs default + the flare-game mods; neither repo is runnable alone"
@@ -168,10 +190,14 @@ while read -r name rec ticks slot mods survives requires; do
 	if [ -z "$got" ]; then
 		echo "FAIL $name: no digest produced (replay refused, or the server died)"
 		fail=1
+	elif [ "$goldens_required" = "0" ]; then
+		# Unrecorded platform. The digest is printed rather than swallowed, so one CI run is still
+		# enough to record this platform's goldens should anyone want to. Not a failure: there is
+		# nothing here to regress against, and the checks that CAN fail on this platform --
+		# coverage and liveness -- already ran above and passed.
+		echo "info $name  $got  (no golden for $TAG)"
 	elif [ ! -f "$golden" ]; then
-		# Print the digest rather than swallowing it, so one CI run is enough to record a new
-		# platform's goldens. Still a failure: an unrecorded platform is untested, not passing.
-		echo "FAIL $name: no golden for this platform -- digest is $got"
+		echo "FAIL $name: no golden, but this platform has $golden_count others -- partial recording"
 		echo "     to record it: echo $got > $golden"
 		fail=1
 	elif [ "$got" != "$(cat "$golden")" ]; then
@@ -218,7 +244,12 @@ for res in 1280x720 5120x1440; do
 done
 
 if [ "$fail" -eq 0 ]; then
-	echo "all replays match"
+	if [ "$goldens_required" = "0" ]; then
+		echo "behaviour OK on $TAG -- every recording ran, covered its required events and ended as"
+		echo "the manifest says. No goldens recorded for this platform, so nothing was compared."
+	else
+		echo "all replays match"
+	fi
 else
 	echo "REPLAY MISMATCH -- the simulation changed"
 fi
