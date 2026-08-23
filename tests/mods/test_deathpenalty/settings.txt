@@ -1,0 +1,5 @@
+description=TEST ONLY. Enables every death-penalty branch so the replay corpus can cover them.
+requires=fantasycore
+game=flare-game
+version=1.00
+engine_version_min=1.15

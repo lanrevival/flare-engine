@@ -66,13 +66,33 @@ if ! ./tests/make-fixture.sh > /dev/null; then
 	exit 1
 fi
 
+# Test-only mods live in the repo and are linked into the data path, the same way CI assembles
+# 'default' and the flare-game mods. Keeping the source of truth in the tree is the point: a mod
+# generated into a scratch directory is one nobody can review, and P0.5c is what happens when a
+# setup step is invisible. Only MANIFEST rows that name a mod in their 'mods' column load it.
+for m in tests/mods/*/; do
+	[ -d "$m" ] || continue
+	name=$(basename "$m")
+	if [ ! -e "$DATA_PATH/mods/$name" ]; then
+		if ! ln -s "$(cd "$m" && pwd)" "$DATA_PATH/mods/$name"; then
+			echo "FAIL: could not link test mod '$name' into $DATA_PATH/mods"
+			exit 1
+		fi
+	fi
+done
+
 fail=0
-while read -r name rec ticks slot survives requires; do
+while read -r name rec ticks slot mods survives requires; do
 	case "$name" in ''|\#*) continue ;; esac
 
 	golden="$DIR/$name.$TAG.hash"
 
-	out=$(./flare-server --headless --data-path="$DATA_PATH" --mods="$MODS" --load-slot="$slot" \
+	# The 'mods' column is EXTRA mods appended to the default list, or '-' for none. Order
+	# matters: later mods override earlier ones, so a test override has to land last.
+	row_mods="$MODS"
+	[ "$mods" = "-" ] || row_mods="$MODS,$mods"
+
+	out=$(./flare-server --headless --data-path="$DATA_PATH" --mods="$row_mods" --load-slot="$slot" \
 	        --replay="$DIR/$rec.rec" --max-ticks="$ticks" --hash 2>/dev/null || true)
 
 	got=$(echo "$out" | grep '^0x' || true)
@@ -156,7 +176,7 @@ while read -r name rec ticks slot survives requires; do
 		fail=1
 	elif [ "$got" != "$(cat "$golden")" ]; then
 		echo "FAIL $name: expected $(cat "$golden")  got $got"
-		echo "     bisect with: ./flare-server --headless --data-path=$DATA_PATH --mods=$MODS \\"
+		echo "     bisect with: ./flare-server --headless --data-path=$DATA_PATH --mods=$row_mods \\"
 		echo "                    --load-slot=$slot --replay=$DIR/$rec.rec --max-ticks=$ticks --hash-every=1"
 		fail=1
 	else

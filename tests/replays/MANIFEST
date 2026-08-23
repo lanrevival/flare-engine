@@ -1,4 +1,4 @@
-# name  rec  ticks  slot  survives  requires
+# name  rec  ticks  slot  mods  survives  requires
 #
 # name      identifies the ROW, and names the golden file. Unique.
 # rec       which input recording to replay, without the .rec suffix. NOT the same thing as the
@@ -8,7 +8,12 @@
 #           weaker character. Reusing the file beats copying it; a copy drifts in silence.
 # ticks     how long to run.
 # slot      which save game tests/make-fixture.sh writes that the run boots from.
-#           1 = movement, 2 = combat, 3 = beatdown, 4 = death.
+#           1 = movement, 2 = combat, 3 = beatdown, 4 = death, 5 = death with every penalty on.
+# mods      EXTRA mods appended to the default list, or '-' for none. Mods in tests/mods/ are
+#           linked into the data path by tests/run-replays.sh. Order matters -- later mods
+#           override earlier ones, so an override has to land last, which appending guarantees.
+#           NOTE a recording's header records the mod list it was made under and Replay REFUSES a
+#           mismatch, so changing this column means the row needs a recording whose header agrees.
 # survives  'yes' if the player must be alive at the end, 'no' if the player must die.
 #           Both directions are enforced. P0.5e added this check in one direction only, because
 #           two fixtures had rotted into corpses partway through -- patrol died at tick 1101 of
@@ -27,8 +32,9 @@
 #           there means no map loaded at all -- which is exactly the state every Linux CI run was
 #           in until P0.5c, hashing an empty world and passing.
 
-smoke     smoke     600   1  yes  map_event,step
-patrol    patrol    2000  1  yes  map_event,step
-melee     melee     2956  2  yes  map_event,attack,hit,die,step,levelup,loot,power
-beatdown  beatdown  2956  3  yes  map_event,attack,hit,step,power,hazard_hit,lowhp_start,lowhp_stop
-death     patrol    1400  4  no   map_event,step,hit,lowhp_start
+smoke     smoke     600   1  -  yes  map_event,step
+patrol    patrol    2000  1  -  yes  map_event,step
+melee     melee     2956  2  -  yes  map_event,attack,hit,die,step,levelup,loot,power
+beatdown  beatdown  2956  3  -  yes  map_event,attack,hit,step,power,hazard_hit,lowhp_start,lowhp_stop
+death     patrol    1400  4  -  no   map_event,step,hit,lowhp_start
+deathfull deathfull 1400  5  test_deathpenalty  no   map_event,step,hit,lowhp_start

@@ -1,0 +1,21 @@
+# TEST-ONLY OVERRIDE. Not shipped, not enabled for players: tests/run-replays.sh links this mod
+# into the data path and only the MANIFEST rows that name it in their 'mods' column load it.
+#
+# The shipped configuration in mods/default/engine/death_penalty.txt turns on exactly one of the
+# three penalty branches -- currency. That left the XP arithmetic and the sim_rng item-destruction
+# draw with no coverage at all, which matters because P1.3b MOVES that code out of
+# MenuInventory::logic() and into the simulation. A copy-paste error in an uncovered branch is
+# invisible.
+#
+# Editing the shipped file instead would have been the easy version of this and the wrong one:
+# it changes the game for players in order to suit a test.
+
+enable=true
+permadeath=false
+
+# every branch on, and deliberately not 50/50/50 -- distinct percentages mean a digest that moves
+# can be traced to a specific branch rather than just "something about death changed".
+currency=25
+xp_total=10
+xp_current_level=0
+random_item=true

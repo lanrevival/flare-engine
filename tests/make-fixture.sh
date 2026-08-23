@@ -231,4 +231,47 @@ time_played=0
 engine_version=1.15.52
 SAVE
 
-echo "wrote $SAVE_ROOT/{1,2,3,4}/avatar.txt"
+# ---------------------------------------------------------------------------
+# slot 5 -- the FULL death penalty fixture, for deathfull.rec.
+#
+# Slot 4 dies under the shipped configuration, which enables exactly one of the
+# three penalty branches. This one runs with tests/mods/test_deathpenalty
+# appended, which turns all three on, so the XP arithmetic and the
+# sim_rng->index() item-destruction draw are covered too. P1.3b moves that code;
+# an uncovered branch is where a copy-paste error hides.
+#
+# Same naked level 1 on the same spawn replaying the same input, so the death
+# itself is the known quantity from slot 4. What differs is what there is to lose:
+#
+#   currency=1000  25% goes on death under the test mod, so 1000 -> 750.
+#   carried=4,5    two ordinary items from the Brute kit, plus the 1000 currency
+#                  items, gives the random-item draw a list of THREE to choose
+#                  from. With only currency carried the list has one entry and
+#                  sim_rng->index(1) is 0 every time -- the call would execute
+#                  without the choice ever being exercised.
+#   xp=<tuned>     xp_total=10 removes a tenth of it. Tuned by measurement below,
+#                  because XP is what sets the level and the level is what decides
+#                  whether this character still dies inside the budget.
+# ---------------------------------------------------------------------------
+mkdir -p "$SAVE_ROOT/5"
+cat > "$SAVE_ROOT/5/avatar.txt" <<'SAVE'
+## flare-engine save file ##
+name=DeathFullFixture
+permadeath=0
+class=Brute,
+xp=200
+build=1,1,1,1
+currency=1000
+equipped_quantity=
+equipped=
+carried_quantity=1,1
+carried=4,5
+spawn=maps/abandoned_mines.txt,76,71
+actionbar=0,0,0,0,0,0,0,0,0,0,0,0
+powers=
+campaign=
+time_played=0
+engine_version=1.15.52
+SAVE
+
+echo "wrote $SAVE_ROOT/{1,2,3,4,5}/avatar.txt"
