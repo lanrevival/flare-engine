@@ -141,10 +141,18 @@ public:
 	 */
 	unsigned long getCount(int type) const;
 
+	/** Every event pushed since the process started, all types summed.
+	 *
+	 * The point is liveness, not accounting: a caller that samples this each tick can see the
+	 * tick on which the simulation last did anything. See main_server's `last_tick`.
+	 */
+	unsigned long getTotal() const { return total; }
+
 private:
 	std::vector<SimEvent> queue;
 	size_t high_water;
 	unsigned long counts[SimEvent::TYPE_COUNT];
+	unsigned long total;
 };
 
 extern SimEventQueue* sim_events;

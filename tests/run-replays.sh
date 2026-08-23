@@ -99,6 +99,29 @@ while read -r name ticks slot requires; do
 		fi
 	fi
 
+	# LIVENESS, checked before the digest.
+	#
+	# The coverage block above asks whether an event EVER fired. It cannot see a recording whose
+	# player dies a third of the way in and leaves a corpse for the rest: every required event
+	# has already fired by then. Measured when this check was added -- beatdown died at 1186 of
+	# 2956 and patrol at 1101 of 2000, and both were green.
+	#
+	# The gate is survival, not activity. An earlier version of this check required the last
+	# simulation event to land in the final third; it was wrong, and the measurement that killed
+	# it is in plans/phase0/P0.5e -- smoke's last event is at tick 378 of 600 while its world
+	# goes on changing to the last tick. Events stopping is not the world stopping. Dying is
+	# specific, it is what the fixtures claim, and it cannot be satisfied by lowering a number.
+	died=$(echo "$events" | tr ' ' '\n' | sed -n 's/^died_tick=//p')
+	if [ -n "$died" ] && [ "$died" != "0" ]; then
+		echo "FAIL $name: the player died at tick $died of $ticks"
+		echo "     the rest of the recording is a corpse, and every 'requires' entry still"
+		echo "     passes because each one fired before the death. Re-tune the fixture in"
+		echo "     tests/make-fixture.sh -- do NOT lower the tick budget in $DIR/MANIFEST,"
+		echo "     and do NOT weaken the 'requires' column."
+		fail=1
+		continue
+	fi
+
 	if [ -z "$got" ]; then
 		echo "FAIL $name: no digest produced (replay refused, or the server died)"
 		fail=1

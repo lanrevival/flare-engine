@@ -33,8 +33,25 @@ set -e
 SAVE_ROOT="${HOME}/.local/share/flare/saves/empyrean"
 
 # ---------------------------------------------------------------------------
-# slot 1 -- the movement fixture. Deliberately unchanged since P0.5a so that
-# smoke.rec and patrol.rec keep meaning what they meant.
+# slot 1 -- the movement fixture, for smoke.rec and patrol.rec.
+#
+# It was a naked level 1 from P0.5a until P0.5e, and P0.5e's new died_tick
+# report showed why that was wrong: the player was killed at tick 1101 of
+# patrol's 2000, so 45% of that recording was a corpse walking nowhere. The
+# corpus was green throughout, because patrol only requires map_event and step
+# and both had already fired.
+#
+# Level 7 is the tuned value, measured against patrol at its full 2000 ticks:
+#
+#   level 1  (xp=0,     build=1,1,1,1)      died at 1101
+#   level 5  (xp=3840,  build=7,2,2,4)      died at 1567
+#   level 6  (xp=7936,  build=14,2,2,7)     died at 1876
+#   level 7  (xp=16128, build=24,3,3,10)    survives; last event at 1959
+#
+# Still no equipment and no powers: the point of this fixture is a character
+# that WALKS, and levels were the smallest knob that let it finish the route.
+# Changing the spawn instead would have sent patrol.rec's fixed input somewhere
+# else entirely.
 # ---------------------------------------------------------------------------
 mkdir -p "$SAVE_ROOT/1"
 cat > "$SAVE_ROOT/1/avatar.txt" <<'SAVE'
@@ -42,8 +59,8 @@ cat > "$SAVE_ROOT/1/avatar.txt" <<'SAVE'
 name=HashFixture
 permadeath=0
 class=Brute,
-xp=0
-build=1,1,1,1
+xp=16128
+build=24,3,3,10
 currency=0
 equipped_quantity=
 equipped=
@@ -106,7 +123,7 @@ SAVE
 # ---------------------------------------------------------------------------
 # slot 3 -- the beatdown fixture, for beatdown.rec.
 #
-# Same place, same kit, seven levels lower. This one is meant to LOSE. It exists
+# Same place, same kit, forty-four levels lower. This one is meant to STRUGGLE. It exists
 # for the low-HP warning, which is the riskiest thing P1.2 converted: it is a
 # looping named audio channel with three transitions, and it is the only sound
 # event in the engine that carries state across ticks. A queue that is cleared
@@ -114,12 +131,27 @@ SAVE
 # edge detector and emits only SFX_LOWHP_START and SFX_LOWHP_STOP. Nothing else
 # in the corpus drops the player's health far enough to fire either.
 #
-# Level 5 is the tuned value, and the window is narrow. At level 3 the player is
-# dead inside twenty seconds and the run is over before most of it happens; at
-# level 6 the warning never fires at all. At 5 the player survives the whole
-# recording, the low-HP loop starts and stops TWICE -- which is what proves the
-# edge detector re-arms rather than firing once and latching -- and a critical
-# kill and four shield-bash hits fall out of it as well.
+# Level 6 is the tuned value, and the window is narrow. P0.5d widened the enemy
+# activation radius from 10.770 tiles to a fixed 12, one more enemy wakes, and
+# every bound below moved by a level. Measured against beatdown at its full
+# 2956 ticks:
+#
+#   level 5  (xp=3840, build=7,2,2,4)    died at 1186 -- 59% of the run a corpse
+#   level 6  (xp=7936, build=10,2,2,5)   died at 1436
+#   level 6  (xp=7936, build=12,2,2,6)   survives, one low-HP cycle
+#   level 6  (xp=7936, build=14,2,2,7)   survives, one low-HP cycle  <-- chosen
+#   level 7  (xp=16128, build=24,3,3,10) survives, NO low-HP, NO hazard_hit
+#
+# At level 6 the player survives to the last tick, takes 68 attacks and 16 hits,
+# eats one enemy hazard and drops into the low-HP warning once.
+#
+# ONE cycle, not two. Until P0.5e this comment claimed the loop started and
+# stopped TWICE and that the second cycle was what proved the edge detector
+# re-arms rather than firing once and latching. That was true at level 5 before
+# P0.5d and is not true now, and no build in the surviving neighbourhood brings
+# it back. The re-arm property is currently NOT covered by anything. Do not put
+# lowhp_start=2 in the MANIFEST to paper over it -- a requirement that flickers
+# gets weakened rather than investigated. See plans/phase0/P0.5e.
 # ---------------------------------------------------------------------------
 mkdir -p "$SAVE_ROOT/3"
 cat > "$SAVE_ROOT/3/avatar.txt" <<'SAVE'
@@ -127,8 +159,8 @@ cat > "$SAVE_ROOT/3/avatar.txt" <<'SAVE'
 name=BeatdownFixture
 permadeath=0
 class=Brute,
-xp=3840
-build=7,2,2,4
+xp=7936
+build=14,2,2,7
 currency=0
 equipped_quantity=1,0,0,0,1,1,0,1,1,1,0,0,0,0,0,0,0,0,0,0
 equipped=7,0,0,0,8,11,0,4,5,6,0,0,0,0,0,0,0,0,0,0

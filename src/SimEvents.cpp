@@ -64,7 +64,8 @@ const char* SimEvent::typeName(int type) {
 
 SimEventQueue::SimEventQueue()
 	: queue()
-	, high_water(0) {
+	, high_water(0)
+	, total(0) {
 	for (int i = 0; i < SimEvent::TYPE_COUNT; ++i)
 		counts[i] = 0;
 }
@@ -79,6 +80,9 @@ void SimEventQueue::push(const SimEvent& e) {
 	queue.push_back(e);
 	if (queue.size() > high_water)
 		high_water = queue.size();
+	// Outside the range check on purpose: an out-of-range type is still activity, and liveness
+	// is the question getTotal() answers.
+	total++;
 	if (e.type >= 0 && e.type < SimEvent::TYPE_COUNT)
 		counts[e.type]++;
 }

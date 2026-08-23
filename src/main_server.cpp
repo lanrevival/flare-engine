@@ -32,6 +32,8 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include <cstdlib>
 
 #include "AnimationManager.h"
+#include "Avatar.h"
+#include "SharedGameResources.h"
 #include "CombatText.h"
 #include "CommonIncludes.h"
 #include "DeviceList.h"
@@ -243,10 +245,15 @@ static const int MAX_CATCHUP_TICKS = 5;
 static const unsigned long TRAJECTORY_SAMPLE_TICKS = 30;
 
 static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_every,
-                                    uint64_t* trajectory) {
+                                    uint64_t* trajectory, unsigned long* last_event_tick,
+                                    unsigned long* died_tick) {
 	bool done = false;
 	unsigned long total_ticks = 0;
 	uint64_t traj = WorldHash::init();
+
+	unsigned long prev_ev_total = sim_events->getTotal();
+	unsigned long last_ev_tick = 0;
+	unsigned long died_at = 0;
 
 	// The server renders nothing, so there is only one rate here: the shared simulation step.
 	// --max-fps is accepted and ignored on purpose; see parseServerArgs().
@@ -293,6 +300,21 @@ static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_
 			inpt->resetScroll();
 
 			total_ticks++;
+
+			// Liveness. A recording that has stopped simulating still produces a digest and
+			// still satisfies every 'requires' entry it satisfied earlier, because those ask
+			// whether an event EVER fired. This is the tick it last did. See plans/phase0/P0.5e.
+			unsigned long ev_total = sim_events->getTotal();
+			if (ev_total != prev_ev_total) {
+				prev_ev_total = ev_total;
+				last_ev_tick = total_ticks;
+			}
+
+			// The tick the player died on, if they did. First transition only -- a corpse does
+			// not come back, and the interesting number is when the recording stopped being
+			// about a player. See plans/phase0/P0.5e.
+			if (died_at == 0 && pc && !pc->stats.alive)
+				died_at = total_ticks;
 
 			// Per-tick digests make a divergence bisectable: diff two runs and the first
 			// differing line is the exact tick they parted.
@@ -342,6 +364,10 @@ static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_
 	traj = WorldHash::mixU64(traj, WorldHash::compute(total_ticks));
 	if (trajectory)
 		*trajectory = traj;
+	if (last_event_tick)
+		*last_event_tick = last_ev_tick;
+	if (died_tick)
+		*died_tick = died_at;
 
 	return total_ticks;
 }
@@ -484,7 +510,10 @@ int main(int argc, char *argv[]) {
 	}
 
 	uint64_t trajectory = WorldHash::init();
-	unsigned long ticks = serverMainLoop(args.max_ticks, args.hash_every, &trajectory);
+	unsigned long last_event_tick = 0;
+	unsigned long died_tick = 0;
+	unsigned long ticks = serverMainLoop(args.max_ticks, args.hash_every, &trajectory,
+	                                     &last_event_tick, &died_tick);
 
 	replay->finish();
 
@@ -507,6 +536,19 @@ int main(int argc, char *argv[]) {
 		printf("simevents");
 		for (int i = 0; i < SimEvent::TYPE_COUNT; ++i)
 			printf(" %s=%lu", SimEvent::typeName(i), sim_events->getCount(i));
+		// Two liveness fields, on the same line for the same reason the counts are here at all:
+		// a claim you have to remember to ask for is a claim nobody checks.
+		//
+		// died_tick is the gate run-replays.sh enforces (0 = the player survived). A fixture
+		// that dies mid-recording leaves a corpse for the rest of the run: P0.5d's beatdown
+		// died at 1186 of 2956 and every 'requires' entry still passed, because those ask only
+		// whether an event EVER fired.
+		//
+		// last_tick is diagnostic, not a gate. It is the tick of the last simulation event, and
+		// it is a poor liveness measure on its own -- smoke's last event is at 378 of 600 while
+		// its world keeps changing to the final tick. It is printed because it is what made the
+		// beatdown problem visible. See plans/phase0/P0.5e.
+		printf(" last_tick=%lu died_tick=%lu", last_event_tick, died_tick);
 		printf("\n");
 	}
 
