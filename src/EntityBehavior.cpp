@@ -90,7 +90,12 @@ void EntityBehavior::logic() {
 	}
 
 	if (!e->stats.hero_ally) {
-		if (Utils::calcDist(e->stats.pos, pc->stats.pos) <= settings->encounter_dist)
+		// SINGLE PLAYER ASSUMPTION. This is distance to *the* avatar. Phase 2 introduces more
+		// than one, and the rule has to become "within encounter_dist of any player", iterated
+		// in a deterministic player order. That is easier than it looks: `encountered` latches
+		// true and is never cleared, so activation is monotone -- a joining player can only wake
+		// more enemies, never put any back to sleep.
+		if (Utils::calcDist(e->stats.pos, pc->stats.pos) <= eset->combat.encounter_dist)
 			e->stats.encountered = true;
 
 		if (!e->stats.encountered)

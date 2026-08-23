@@ -150,18 +150,14 @@ void NullRenderDevice::commitFrame() {
 }
 
 void NullRenderDevice::windowResize() {
-	// NOT a no-op, and the reason is not graphics.
+	// Not a no-op. It no longer has anything to do with the AI: until P0.5d, leaving this empty
+	// left encounter_dist at 0 and no enemy ever acted, which is what every golden recorded
+	// before P0.5c was hashing. That gate now comes from mod data and the window size cannot
+	// reach the simulation at all -- run-replays.sh proves it every run.
 	//
-	// windowResizeInternal() is what computes settings->view_w/view_h and their halves, and
-	// Settings::updateScreenVars() derives encounter_dist from them. encounter_dist gates the
-	// ENTITY AI: EntityBehavior::logic() returns immediately for any enemy further away than it
-	// (EntityBehavior.cpp:93). Leave this empty and the server runs with encounter_dist = 0, so
-	// no enemy ever acts unless it is standing on the player's exact position -- which is what
-	// every replay golden recorded before P0.5c was hashing.
-	//
-	// The SDL devices call this from createContextInternal(); so does ours, for the same reason.
+	// It stays because the headless server still constructs the menus, and they read view_w and
+	// view_h. The SDL devices call this from createContextInternal(); so does ours.
 	windowResizeInternal();
-	settings->updateScreenVars();
 }
 
 void NullRenderDevice::setBackgroundColor(Color color) {

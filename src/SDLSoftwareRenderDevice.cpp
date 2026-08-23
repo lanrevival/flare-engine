@@ -681,7 +681,6 @@ void SDLSoftwareRenderDevice::windowResize() {
 	screen = SDL_CreateRGBSurface(0, settings->view_w, settings->view_h, bpp, rmask, gmask, bmask, amask);
 	texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, settings->view_w, settings->view_h);
 
-	settings->updateScreenVars();
 }
 
 void SDLSoftwareRenderDevice::setBackgroundColor(Color color) {

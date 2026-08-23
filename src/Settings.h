@@ -72,7 +72,6 @@ public:
 	void loadSettings();
 	void saveSettings();
 	void loadDefaults();
-	void updateScreenVars();
 	void logSettings();
 	void setCustomPathData();
 	void setGame();
@@ -180,8 +179,6 @@ public:
 	bool mouse_scaled; // mouse position is automatically scaled to view_w * view_h resolution
 
 	bool show_hud;
-
-	float encounter_dist;
 
 	bool soft_reset;
 

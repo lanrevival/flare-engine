@@ -118,6 +118,39 @@ while read -r name ticks slot requires; do
 	fi
 done < "$DIR/MANIFEST"
 
+# RESOLUTION INVARIANCE.
+#
+# A golden file cannot express "the monitor must not matter" -- it can only record one monitor's
+# answer. Until P0.5d, encounter_dist was derived from view_w/view_h, so it did, and the goldens
+# in this directory silently encoded the machine that recorded them: the same recording gave
+# 0x4630f00a4eedf12f with no config file and 0x4b876e551cb7be0d at 1920x1080. The two resolutions
+# below are the extremes of the measured range (encounter_dist 10.770 and 19.849).
+#
+# Two resolutions, one recording, one digest. If this fails, something view-derived has been
+# wired back into the simulation; find it, do NOT delete this check.
+echo "resolution invariance:"
+inv_prev=""
+for res in 1280x720 5120x1440; do
+	h="$(mktemp -d)"
+	mkdir -p "$h/.config/flare"
+	printf 'fullscreen=0\nresolution_w=%s\nresolution_h=%s\n' "${res%x*}" "${res#*x}" \
+		> "$h/.config/flare/settings.txt"
+	HOME="$h" ./tests/make-fixture.sh > /dev/null
+	inv=$(HOME="$h" ./flare-server --headless --data-path="$DATA_PATH" --mods="$MODS" \
+	        --load-slot=2 --replay="$DIR/melee.rec" --max-ticks=600 --hash 2>/dev/null \
+	      | grep '^0x' || true)
+	rm -rf "$h"
+	echo "  $res  $inv"
+	if [ -z "$inv" ]; then
+		echo "FAIL: no digest at $res"
+		fail=1
+	elif [ -n "$inv_prev" ] && [ "$inv" != "$inv_prev" ]; then
+		echo "FAIL: the simulation depends on the window size"
+		fail=1
+	fi
+	inv_prev="$inv"
+done
+
 if [ "$fail" -eq 0 ]; then
 	echo "all replays match"
 else

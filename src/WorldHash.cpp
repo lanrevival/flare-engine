@@ -149,6 +149,10 @@ uint64_t WorldHash::compute(unsigned long tick) {
 			if (!entitym->entities[i])
 				continue;
 			h = mixStatBlock(h, entitym->entities[i]->stats);
+			// Entities only -- the player goes through mixStatBlock() too and the flag is
+			// meaningless there. Covered so that an activation divergence shows up on the tick
+			// it happens instead of hundreds of ticks later as a position difference.
+			h = mixI32(h, entitym->entities[i]->stats.encountered ? 1 : 0);
 		}
 	}
 

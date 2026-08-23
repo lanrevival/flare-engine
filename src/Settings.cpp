@@ -64,7 +64,6 @@ Settings::Settings()
 	, touchscreen(false)
 	, mouse_scaled(true)
 	, show_hud(true)
-	, encounter_dist(0) // set in updateScreenVars()
 	, soft_reset(false)
 	, safe_video(false)
 	, no_lock_file(false)
@@ -250,18 +249,6 @@ void Settings::loadMobileDefaults() {
 		touchscreen = true;
 		fullscreen = true;
 		dpi_scaling = true;
-	}
-}
-
-/**
- * Some variables depend on VIEW_W and VIEW_H. Update them here.
- */
-void Settings::updateScreenVars() {
-	if (eset->tileset.tile_w > 0 && eset->tileset.tile_h > 0) {
-		if (eset->tileset.orientation == eset->tileset.TILESET_ISOMETRIC)
-			encounter_dist = sqrtf(powf(static_cast<float>(view_w/eset->tileset.tile_w), 2.f) + powf(static_cast<float>(view_h/eset->tileset.tile_h_half), 2.f)) / 2.f;
-		else if (eset->tileset.orientation == eset->tileset.TILESET_ORTHOGONAL)
-			encounter_dist = sqrtf(powf(static_cast<float>(view_w/eset->tileset.tile_w), 2.f) + powf(static_cast<float>(view_h/eset->tileset.tile_h), 2.f)) / 2.f;
 	}
 }
 

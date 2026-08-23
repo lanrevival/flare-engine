@@ -705,7 +705,6 @@ void SDLHardwareRenderDevice::windowResize() {
 	texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, settings->view_w, settings->view_h);
 	if (texture) SDL_SetRenderTarget(renderer, texture);
 
-	settings->updateScreenVars();
 }
 
 void SDLHardwareRenderDevice::setBackgroundColor(Color color) {
