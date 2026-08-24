@@ -43,6 +43,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuInventory.h"
 #include "MenuManager.h"
 #include "MessageEngine.h"
+#include "PlayerInventory.h"
 #include "PowerManager.h"
 #include "Rng.h"
 #include "Settings.h"
@@ -2346,7 +2347,7 @@ bool PowerManager::checkRequiredItems(const Power* pow, const StatBlock *src_sta
 				// We can set required quantity to 0 in order to not consume the item,
 				// but checking for presence of the item requires >0 quantity
 				int quantity = std::max(1, pow->required_items[i].quantity);
-				if (!menu->inv->inventory[MenuInventory::CARRIED].contain(pow->required_items[i].id, quantity)) {
+				if (!pinv->inventory[PlayerInventory::CARRIED].contain(pow->required_items[i].id, quantity)) {
 					return false;
 				}
 			}

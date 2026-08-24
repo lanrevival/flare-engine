@@ -81,8 +81,8 @@ void SaveLoad::saveGame() {
 	Utils::createSaveDir(game_slot);
 
 	// remove items with zero quantity from inventory
-	menu->inv->inventory[MenuInventory::EQUIPMENT].clean();
-	menu->inv->inventory[MenuInventory::CARRIED].clean();
+	pinv->inventory[PlayerInventory::EQUIPMENT].clean();
+	pinv->inventory[PlayerInventory::CARRIED].clean();
 
 	std::ofstream outfile;
 
@@ -138,15 +138,15 @@ void SaveLoad::saveGame() {
 		outfile << "\n";
 
 		// equipped gear
-		outfile << "equipped_quantity=" << menu->inv->inventory[MenuInventory::EQUIPMENT].getQuantities() << "\n";
-		outfile << "equipped=" << menu->inv->inventory[MenuInventory::EQUIPMENT].getItems() << "\n";
+		outfile << "equipped_quantity=" << pinv->inventory[PlayerInventory::EQUIPMENT].getQuantities() << "\n";
+		outfile << "equipped=" << pinv->inventory[PlayerInventory::EQUIPMENT].getItems() << "\n";
 
 		// active equipped set
 		outfile << "active_equipment_set=" << pinv->active_equipment_set << "\n";
 
 		// carried items
-		outfile << "carried_quantity=" << menu->inv->inventory[MenuInventory::CARRIED].getQuantities() << "\n";
-		outfile << "carried=" << menu->inv->inventory[MenuInventory::CARRIED].getItems() << "\n";
+		outfile << "carried_quantity=" << pinv->inventory[PlayerInventory::CARRIED].getQuantities() << "\n";
+		outfile << "carried=" << pinv->inventory[PlayerInventory::CARRIED].getItems() << "\n";
 
 		// spawn point
 		outfile << "spawn=" << mapr->respawn_map << "," << static_cast<int>(mapr->respawn_point.x) << "," << static_cast<int>(mapr->respawn_point.y) << "\n";
@@ -292,10 +292,10 @@ void SaveLoad::saveExtendedItems(bool save_storage_items) {
 
 			bool item_in_storage = false;
 			if (save_storage_items && menu) {
-				if (menu->inv && menu->inv->inventory[MenuInventory::EQUIPMENT].contain(i, 1)) {
+				if (menu->inv && pinv->inventory[PlayerInventory::EQUIPMENT].contain(i, 1)) {
 					item_in_storage = true;
 				}
-				else if (menu->inv && menu->inv->inventory[MenuInventory::CARRIED].contain(i, 1)) {
+				else if (menu->inv && pinv->inventory[PlayerInventory::CARRIED].contain(i, 1)) {
 					item_in_storage = true;
 				}
 				else if (menu->stash) {
@@ -454,21 +454,21 @@ void SaveLoad::loadGame() {
 				currency = Parse::toInt(infile.val);
 			}
 			else if (infile.key == "equipped") {
-				menu->inv->inventory[MenuInventory::EQUIPMENT].setItems(infile.val);
-				menu->inv->inventory[MenuInventory::EQUIPMENT].setForeign(false);
+				pinv->inventory[PlayerInventory::EQUIPMENT].setItems(infile.val);
+				pinv->inventory[PlayerInventory::EQUIPMENT].setForeign(false);
 			}
 			else if (infile.key == "equipped_quantity") {
-				menu->inv->inventory[MenuInventory::EQUIPMENT].setQuantities(infile.val);
+				pinv->inventory[PlayerInventory::EQUIPMENT].setQuantities(infile.val);
 			}
 			else if (infile.key == "active_equipment_set") {
 				menu->inv->applyEquipmentSet(Parse::toInt(infile.val));
 			}
 			else if (infile.key == "carried") {
-				menu->inv->inventory[MenuInventory::CARRIED].setItems(infile.val);
-				menu->inv->inventory[MenuInventory::CARRIED].setForeign(false);
+				pinv->inventory[PlayerInventory::CARRIED].setItems(infile.val);
+				pinv->inventory[PlayerInventory::CARRIED].setForeign(false);
 			}
 			else if (infile.key == "carried_quantity") {
-				menu->inv->inventory[MenuInventory::CARRIED].setQuantities(infile.val);
+				pinv->inventory[PlayerInventory::CARRIED].setQuantities(infile.val);
 			}
 			else if (infile.key == "spawn") {
 				mapr->teleport_mapname = Parse::popFirstString(infile.val);
@@ -711,8 +711,8 @@ void SaveLoad::applyPlayerData() {
 	menu->inv->fillEquipmentSlots();
 
 	// remove items with zero quantity from inventory
-	menu->inv->inventory[MenuInventory::EQUIPMENT].clean();
-	menu->inv->inventory[MenuInventory::CARRIED].clean();
+	pinv->inventory[PlayerInventory::EQUIPMENT].clean();
+	pinv->inventory[PlayerInventory::CARRIED].clean();
 
 	// Load stash
 	loadStash();

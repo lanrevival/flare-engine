@@ -42,6 +42,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuTouchControls.h"
 #include "MessageEngine.h"
 #include "Platform.h"
+#include "PlayerInventory.h"
 #include "PowerManager.h"
 #include "RenderDevice.h"
 #include "Settings.h"
@@ -393,13 +394,13 @@ void MenuActionBar::logic() {
 					}
 					else {
 						if (power->required_items[j].quantity == 0) {
-							if (!menu->inv->inventory[MenuInventory::CARRIED].contain(power->required_items[j].id, 1))
+							if (!pinv->inventory[PlayerInventory::CARRIED].contain(power->required_items[j].id, 1))
 								setItemCount(i, 0, IS_EQUIPPED);
 							else
 								setItemCount(i, 1, IS_EQUIPPED);
 						}
 						else {
-							setItemCount(i, menu->inv->inventory[MenuInventory::CARRIED].count(power->required_items[j].id), !IS_EQUIPPED);
+							setItemCount(i, pinv->inventory[PlayerInventory::CARRIED].count(power->required_items[j].id), !IS_EQUIPPED);
 						}
 					}
 

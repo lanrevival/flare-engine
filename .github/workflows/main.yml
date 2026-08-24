@@ -80,6 +80,49 @@ jobs:
           fi
           echo "OK: no global RNG call sites in src/"
 
+  inventory-guard:
+    # P1.3d-4 moved the item storage out of MenuInventory and into PlayerInventory, so that a
+    # character's possessions are not owned by a window. Nothing in the type system enforces that
+    # -- MenuInventory still holds a handle to the same two storages for rendering -- so this does.
+    # Run the same thing locally before pushing:
+    #
+    #   git grep -n 'inv->inventory\[' -- 'src/*.cpp' 'src/*.h' \
+    #     | grep -v '^src/MenuInventory\.' | sed 's/pinv->inventory\[//g' | grep 'inv->inventory\['
+    #
+    # WHY THE sed. 'pinv->inventory[' contains 'inv->inventory[', so the pattern matches the
+    # correct code too. Filtering with `grep -v pinv` instead is the obvious fix and it is WRONG:
+    # a line holding BOTH spellings -- the exact shape of a half-finished migration, e.g.
+    # `pinv->inventory[0] = menu->inv->inventory[0];` -- is then dropped whole and the guard goes
+    # blind on the one case it most needs to see. Deleting the good spelling first and matching
+    # what is left has no such hole. Verified against nine reintroduction forms, including that
+    # mixed line, `menu_inv->` (a parameter, which a `[^_[:alnum:]]` guard would have MISSED
+    # because of the underscore), a bare member `inv->`, and an arbitrary `gs->inv->`.
+    #
+    # It matches comments as well as code, deliberately, for the reason the RNG guard above gives.
+    # MenuInventory.cpp/.h are excluded because that class legitimately holds the handle.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Item storage is reached through pinv, not through a menu
+        run: |
+          hits=$(git grep -n 'inv->inventory\[' -- 'src/*.cpp' 'src/*.h' \
+                 | grep -v '^src/MenuInventory\.' \
+                 | sed 's/pinv->inventory\[//g' \
+                 | grep 'inv->inventory\[' || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo ""
+            echo "ERROR: item data is being reached through the inventory menu."
+            echo "The two storages belong to PlayerInventory. See src/PlayerInventory.h:"
+            echo "  menu->inv->inventory[MenuInventory::CARRIED] -> pinv->inventory[PlayerInventory::CARRIED]"
+            echo ""
+            echo "MenuInventory keeps a handle for RENDERING. It is not the way to ask what a"
+            echo "player is carrying, and after P1.3d-4c it will not hold the items at all."
+            exit 1
+          fi
+          echo "OK: no menu-routed item storage access in src/"
+
   replays:
     # Replays a corpus of recorded input and compares world-state digests against committed
     # goldens. This is the regression test Phases 1 and 2 lean on: almost every plan in them is a

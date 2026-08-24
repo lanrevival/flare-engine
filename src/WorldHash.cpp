@@ -141,11 +141,11 @@ uint64_t WorldHash::compute(unsigned long tick) {
 		h = mixI32(h, static_cast<int32_t>(pinv->active_equipment_set));
 
 		for (int area = 0; area < MenuInventory::CARRIED + 1; ++area) {
-			int slots = menu->inv->inventory[area].getSlotNumber();
+			int slots = pinv->inventory[area].getSlotNumber();
 			h = mixI32(h, slots);
 			for (int i = 0; i < slots; ++i) {
-				h = mixU64(h, static_cast<uint64_t>(menu->inv->inventory[area][i].item));
-				h = mixI32(h, menu->inv->inventory[area][i].quantity);
+				h = mixU64(h, static_cast<uint64_t>(pinv->inventory[area][i].item));
+				h = mixI32(h, pinv->inventory[area][i].quantity);
 			}
 		}
 	}

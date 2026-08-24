@@ -46,6 +46,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MessageEngine.h"
 #include "MenuMiniMap.h"
 #include "ModManager.h"
+#include "PlayerInventory.h"
 #include "PowerManager.h"
 #include "RenderDevice.h"
 #include "Rng.h"
@@ -1197,7 +1198,7 @@ std::string Avatar::getGfxFromType(const std::string& gfx_type) {
 	std::string gfx;
 
 	if (menu && menu->inv) {
-		MenuItemStorage& equipment = menu->inv->inventory[MenuInventory::EQUIPMENT];
+		MenuItemStorage& equipment = pinv->inventory[PlayerInventory::EQUIPMENT];
 
 		for (int i = 0; i < equipment.getSlotNumber(); i++) {
 			if (!menu->inv->isEquipSlotActive(i))

@@ -139,11 +139,11 @@ void CampaignManager::getSetStatusStrings(std::vector<std::string>& status_strin
 }
 
 bool CampaignManager::checkCurrency(int quantity) {
-	return menu->inv->inventory[MenuInventory::CARRIED].contain(eset->misc.currency_id, quantity);
+	return pinv->inventory[PlayerInventory::CARRIED].contain(eset->misc.currency_id, quantity);
 }
 
 bool CampaignManager::checkItem(ItemStack istack) {
-	if (menu->inv->inventory[MenuInventory::CARRIED].contain(istack.item, istack.quantity))
+	if (pinv->inventory[PlayerInventory::CARRIED].contain(istack.item, istack.quantity))
 		return true;
 	else
 		return menu->inv->equipmentContain(istack.item, istack.quantity);
@@ -168,7 +168,7 @@ void CampaignManager::removeItem(ItemStack istack) {
 		return;
 	}
 
-	int item_count = menu->inv->inventory[MenuInventory::CARRIED].count(istack.item) + menu->inv->inventory[MenuInventory::EQUIPMENT].count(istack.item);
+	int item_count = pinv->inventory[PlayerInventory::CARRIED].count(istack.item) + pinv->inventory[PlayerInventory::EQUIPMENT].count(istack.item);
 	int max_amount = std::min(item_count, istack.quantity);
 
 	if (menu->inv->remove(istack.item, max_amount)) {

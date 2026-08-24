@@ -136,8 +136,8 @@ void GameStatePlay::resetGame() {
 	pc->init();
 	pc->stats.currency = 0;
 	menu->act->clear(!MenuActionBar::CLEAR_SKIP_ITEMS);
-	menu->inv->inventory[0].clear();
-	menu->inv->inventory[1].clear();
+	pinv->inventory[0].clear();
+	pinv->inventory[1].clear();
 	menu->inv->changed_equipment = true;
 	pinv->currency = 0;
 	menu->questlog->clearAll();
@@ -613,7 +613,7 @@ void GameStatePlay::checkEquipmentChange() {
 		pc->loadAnimations();
 
 		if (pc->feet_index != -1) {
-			ItemID feet_id = menu->inv->inventory[MenuInventory::EQUIPMENT][pc->feet_index].item;
+			ItemID feet_id = pinv->inventory[PlayerInventory::EQUIPMENT][pc->feet_index].item;
 			if (items->isValid(feet_id))
 				pc->loadStepFX(items->items[feet_id]->stepfx);
 		}
@@ -658,7 +658,7 @@ void GameStatePlay::checkUsedItems() {
 		menu->inv->remove(powers->used_items[i], 1);
 	}
 	for (unsigned i=0; i<powers->used_equipped_items.size(); i++) {
-		menu->inv->inventory[MenuInventory::EQUIPMENT].remove(powers->used_equipped_items[i], 1);
+		pinv->inventory[PlayerInventory::EQUIPMENT].remove(powers->used_equipped_items[i], 1);
 		menu->inv->applyEquipment();
 	}
 	powers->used_items.clear();

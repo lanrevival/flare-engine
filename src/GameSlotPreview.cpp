@@ -36,6 +36,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "ModManager.h"
 #include "RenderDevice.h"
 #include "SharedResources.h"
+#include "PlayerInventory.h"
 #include "SharedGameResources.h"
 #include "StatBlock.h"
 #include "Utils.h"
@@ -231,9 +232,9 @@ void GameSlotPreview::loadGraphicsFromInventory(MenuInventory* menu_inv) {
 	std::vector<std::string> preview_gfx = default_gfx;
 
 	if (items && menu_inv) {
-		size_t storage_size = static_cast<size_t>(menu_inv->inventory[MenuInventory::EQUIPMENT].getSlotNumber());
+		size_t storage_size = static_cast<size_t>(pinv->inventory[PlayerInventory::EQUIPMENT].getSlotNumber());
 		for (size_t i = 0; i < storage_size; ++i) {
-			ItemID item_id = menu_inv->inventory[MenuInventory::EQUIPMENT].storage[i].item;
+			ItemID item_id = pinv->inventory[PlayerInventory::EQUIPMENT].storage[i].item;
 
 			if (item_id == 0)
 				continue;
