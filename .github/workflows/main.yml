@@ -125,6 +125,18 @@ jobs:
     #   'melee'    splits by ISA: both arm64 columns fire 'die', x86-64 fires 'critdie' instead.
     #              Enemies die in all three -- see the correction above.
     #   'beatdown' splits by OS:  both Linux columns miss the low-HP warning, macOS fires it.
+    #   'deathfull' splits by ISA too, and this one is the most concrete of the three. The death
+    #              penalty picks a random carried stack and removes ONE UNIT of it. The fixture
+    #              carries [Cloth Shirt, Cloth Pants, 750 currency], so the draw decides whether a
+    #              slot empties: macOS and arm64 Linux draw index 0 and the shirt is destroyed
+    #              (carried 3 -> 2), x86-64 Linux leaves 3 slots filled, which is only possible if
+    #              it drew index 2 -- the currency stack, 750 -> 749 -- because every other entry
+    #              has quantity 1. A player loses their shirt on one platform and a single gold
+    #              piece on the other, from identical input.
+    #              This is sim_rng, which is integer arithmetic and cannot diverge on its own. So
+    #              the stream must already have diverged upstream, in the combat on the map -- one
+    #              more reading that points at entities.
+    #              The 'carried' check found this on its first CI run. Do not weaken it.
     #
     # WHERE THE DIVERGENCE IS, AND IS NOT. This block used to add "every digest differs three ways,
     # INCLUDING 'smoke' -- plain movement already produces three different worlds", and conclude

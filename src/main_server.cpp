@@ -589,6 +589,13 @@ int main(int argc, char *argv[]) {
 		}
 		printf(" carried=%d", carried);
 
+		// Diagnostic, like last_tick -- NOT pinned in the MANIFEST. It is here because without it
+		// a death-penalty failure is unreadable: the penalty's random draw removes ONE UNIT of a
+		// randomly chosen stack, so drawing a 1-quantity item empties its slot and drawing the
+		// 750-strong currency stack does not. 'carried' alone shows the difference and cannot
+		// explain it. Currency is already hashed, so this is not new coverage, only new legibility.
+		printf(" currency=%d", (menu && menu->inv) ? menu->inv->currency : -1);
+
 
 		printf("\n");
 	}

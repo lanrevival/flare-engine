@@ -49,6 +49,12 @@
 #           because it looted a stack, 'death' on 1 because the currency stack survives the
 #           penalty, and 'deathfull' on 2 because the test mod's random-item branch destroyed one
 #           of the three stacks it started with.
+#           KNOWN PLATFORM SPLIT on 'deathfull': x86-64 Linux reports 3, not 2. The penalty removes
+#           ONE UNIT of a randomly drawn stack, and that fixture carries [shirt, pants, 750
+#           currency]. macOS and arm64 Linux draw index 0 and the shirt's slot empties; x86-64 can
+#           only still hold 3 stacks if it drew the currency, since everything else has quantity 1.
+#           Same family as the 'die' entry above -- the number here is right and the platforms
+#           genuinely differ. See .github/workflows/main.yml. Do NOT change the 2.
 # equipset  which equipment set must be active when the run ends.
 #           A different question from 'equipped': that one is how much gear EXISTS, this one is
 #           how much of it the character is WEARING. MenuInventory::isEquipSlotActive() returns
