@@ -41,6 +41,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuManager.h"
 #include "MenuPowers.h"
 #include "MessageEngine.h"
+#include "PlayerInventory.h"
 #include "PowerManager.h"
 #include "Rng.h"
 #include "Settings.h"
@@ -60,8 +61,6 @@ MenuInventory::MenuInventory()
 	, equipmentSetPrevious(NULL)
 	, equipmentSetNext(NULL)
 	, equipmentSetLabel(NULL)
-	, MAX_EQUIPPED(4)
-	, MAX_CARRIED(64)
 	, carried_cols(4)
 	, carried_rows(4)
 	, tap_to_activate_timer(Settings::SIM_TICK_HZ / 3)
@@ -70,9 +69,7 @@ MenuInventory::MenuInventory()
 	, preview(NULL)
 	, preview_enabled(false)
 	, sort_enabled(false)
-	, active_equipment_set(0)
-	, max_equipment_set(0)
-	, currency(0)
+	, inventory(NULL)
 	, drag_prev_src(-1)
 	, changed_equipment(true)
 	, inv_ctrl(CTRL_NONE)
@@ -85,6 +82,13 @@ MenuInventory::MenuInventory()
 	std::string raw_previous;
 	std::string raw_next;
 	std::string raw_label;
+
+	// Which item type each equipment slot takes, and which equipment set it belongs to. Parsed
+	// here because that is where menus/inventory.txt is read, but handed straight to
+	// PlayerInventory below -- they are properties of a character, not of a window. See D1 in
+	// plans/phase1/P1.3-VERIFICATION.md for why the parse has not moved with them.
+	std::vector<size_t> parsed_slot_type;
+	std::vector<unsigned int> parsed_equipment_set;
 
 	// Load config settings
 	FileParser infile;
@@ -133,8 +137,8 @@ MenuInventory::MenuInventory()
 
 				equipped_area.push_back(area);
 				equipped_pos.push_back(pos);
-				slot_type.push_back(slt_type);
-				equipment_set.push_back(eq_set);
+				parsed_slot_type.push_back(slt_type);
+				parsed_equipment_set.push_back(eq_set);
 			}
 			// @ATTR carried_area|point|Position of the first normal inventory slot.
 			else if(infile.key == "carried_area") {
@@ -172,9 +176,6 @@ MenuInventory::MenuInventory()
 		infile.close();
 	}
 
-	MAX_EQUIPPED = static_cast<int>(equipped_area.size());
-	MAX_CARRIED = carried_cols * carried_rows;
-
 	carried_area.w = carried_cols * eset->resolutions.icon_size;
 	carried_area.h = carried_rows * eset->resolutions.icon_size;
 
@@ -183,22 +184,18 @@ MenuInventory::MenuInventory()
 
 	label_currency.setColor(font->getColor(FontEngine::COLOR_MENU_NORMAL));
 
-	equip_slot_enabled.resize(MAX_EQUIPPED, true);
+	// Hand the parsed shape to the character's inventory, then bind this menu to it. The order
+	// matters and the second line is the one to read twice: `inventory` is a POINTER INTO
+	// pinv->inventory, not a copy of it. Everything below in this file, and every menu->inv->
+	// caller outside it, is reading and writing the same two storages the simulation owns.
+	pinv->init(equipped_area, parsed_slot_type, parsed_equipment_set, carried_area, carried_cols, carried_rows);
+	inventory = pinv->inventory;
 
-	inventory[EQUIPMENT].initFromList(MAX_EQUIPPED, equipped_area, slot_type);
-	inventory[CARRIED].initGrid(MAX_CARRIED, carried_area, carried_cols);
-
-	for (int i = 0; i < MAX_EQUIPPED; i++) {
+	for (int i = 0; i < pinv->MAX_EQUIPPED; i++) {
 		tablist.add(inventory[EQUIPMENT].slots[i]);
 	}
-	for (int i = 0; i < MAX_CARRIED; i++) {
+	for (int i = 0; i < pinv->MAX_CARRIED; i++) {
 		tablist.add(inventory[CARRIED].slots[i]);
-	}
-
-	for (size_t i=0; i<equipment_set.size(); i++) {
-		if (equipment_set[i] > max_equipment_set) {
-			max_equipment_set = equipment_set[i];
-		}
 	}
 
 	// create equipment swap buttons
@@ -236,12 +233,12 @@ MenuInventory::MenuInventory()
 		equipmentSetLabel->setFromLabelInfo(Parse::popLabelInfo(raw_label));
 
 		std::stringstream label;
-		label << active_equipment_set << "/" << max_equipment_set;
+		label << pinv->active_equipment_set << "/" << pinv->max_equipment_set;
 		equipmentSetLabel->setText(label.str());
 		equipmentSetLabel->setColor(font->getColor(FontEngine::COLOR_MENU_NORMAL));
 	}
 
-	if (max_equipment_set > 0) {
+	if (pinv->max_equipment_set > 0) {
 		applyEquipmentSet(1);
 	}
 
@@ -274,7 +271,7 @@ MenuInventory::MenuInventory()
 void MenuInventory::align() {
 	Menu::align();
 
-	for (int i=0; i<MAX_EQUIPPED; i++) {
+	for (int i=0; i<pinv->MAX_EQUIPPED; i++) {
 		equipped_area[i].x = equipped_pos[i].x + window_area.x;
 		equipped_area[i].y = equipped_pos[i].y + window_area.y;
 	}
@@ -329,8 +326,8 @@ void MenuInventory::applyDeathPenalty() {
 
 		// remove a % of currency
 		if (eset->death_penalty.currency > 0) {
-			if (currency > 0)
-				removeCurrency(static_cast<int>((static_cast<float>(currency) * eset->death_penalty.currency) / 100.f));
+			if (pinv->currency > 0)
+				removeCurrency(static_cast<int>((static_cast<float>(pinv->currency) * eset->death_penalty.currency) / 100.f));
 			death_message += msg->getv("Lost %s%% of %s.", Utils::floatToString(eset->death_penalty.currency, eset->number_format.death_penalty).c_str(), eset->loot.currency.c_str()) + ' ';
 		}
 
@@ -354,13 +351,13 @@ void MenuInventory::applyDeathPenalty() {
 		if (eset->death_penalty.item) {
 			std::vector<ItemID> removable_items;
 			removable_items.clear();
-			for (int i=0; i < MAX_EQUIPPED; i++) {
+			for (int i=0; i < pinv->MAX_EQUIPPED; i++) {
 				if (!inventory[EQUIPMENT][i].empty() && items->isValid(inventory[EQUIPMENT][i].item)) {
 					if (!items->items[inventory[EQUIPMENT][i].item]->quest_item)
 						removable_items.push_back(inventory[EQUIPMENT][i].item);
 				}
 			}
-			for (int i=0; i < MAX_CARRIED; i++) {
+			for (int i=0; i < pinv->MAX_CARRIED; i++) {
 				if (!inventory[CARRIED][i].empty() && items->isValid(inventory[CARRIED][i].item)) {
 					if (!items->items[inventory[CARRIED][i].item]->quest_item)
 						removable_items.push_back(inventory[CARRIED][i].item);
@@ -385,7 +382,7 @@ void MenuInventory::logic() {
 	//
 	// Also simulation state written by a menu, and also still here for the reason above: the
 	// count comes from inventory[CARRIED], which nothing outside this class owns yet. P1.3d.
-	pc->stats.currency = currency = inventory[CARRIED].count(eset->misc.currency_id);
+	pc->stats.currency = pinv->currency = inventory[CARRIED].count(eset->misc.currency_id);
 
 	if (visible) {
 		tablist.logic();
@@ -462,7 +459,7 @@ void MenuInventory::render() {
 	label_inventory.render();
 
 	if (!label_currency.isHidden()) {
-		label_currency.setText(msg->getv("%d %s", currency, eset->loot.currency.c_str()));
+		label_currency.setText(msg->getv("%d %s", pinv->currency, eset->loot.currency.c_str()));
 		label_currency.render();
 	}
 
@@ -540,7 +537,7 @@ void MenuInventory::renderTooltips(const Point& position) {
 		tip_data = inventory[area].checkTooltip(position, &pc->stats, ItemManager::PLAYER_INV, ItemManager::TOOLTIP_INPUT_HINT);
 	}
 	else if (area == EQUIPMENT && inventory[area][slot].empty()) {
-		tip_data.addText(msg->get(items->getItemType(slot_type[slot]).name));
+		tip_data.addText(msg->get(items->getItemType(pinv->slot_type[slot]).name));
 	}
 
 	tooltipm->push(tip_data, position, TooltipData::STYLE_FLOAT);
@@ -641,7 +638,7 @@ bool MenuInventory::drop(const Point& position, ItemStack stack) {
 		// make sure the item is going to the correct slot
 		// we match slot_type to stack.item's type to place items in the proper slots
 		// also check to see if the hero meets the requirements
-		if (items->isValid(stack.item) && slot_type[slot] == items->items[stack.item]->type && items->requirementsMet(&pc->stats, stack.item) && pc->stats.humanoid && equip_slot_enabled[slot]) {
+		if (items->isValid(stack.item) && pinv->slot_type[slot] == items->items[stack.item]->type && items->requirementsMet(&pc->stats, stack.item) && pc->stats.humanoid && pinv->isEquipSlotEnabled(slot)) {
 			if (inventory[area][slot].item == stack.item) {
 				// Merge the stacks
 				success = add(stack, area, slot, !ADD_PLAY_SOUND, !ADD_AUTO_EQUIP);
@@ -716,7 +713,7 @@ bool MenuInventory::drop(const Point& position, ItemStack stack) {
 				inventory[EQUIPMENT][drag_prev_slot].empty()
 				&& inventory[CARRIED][slot].item != stack.item
 				&& items->isValid(inventory[CARRIED][slot].item)
-				&& items->items[inventory[CARRIED][slot].item]->type == slot_type[drag_prev_slot]
+				&& items->items[inventory[CARRIED][slot].item]->type == pinv->slot_type[drag_prev_slot]
 				&& items->requirementsMet(&pc->stats, inventory[CARRIED][slot].item)
 			)
 			{
@@ -908,14 +905,14 @@ bool MenuInventory::add(ItemStack stack, int area, int slot, bool play_sound, bo
 
 		// if this item would disable non-empty slots, don't auto-equip it
 		for (size_t i = 0; i < items->items[stack.item]->disable_slots.size(); ++i) {
-			for (int j = 0; j < MAX_EQUIPPED; ++j) {
-				if (!inventory[EQUIPMENT].storage[j].empty() && slot_type[j] == items->items[stack.item]->disable_slots[i]) {
+			for (int j = 0; j < pinv->MAX_EQUIPPED; ++j) {
+				if (!inventory[EQUIPMENT].storage[j].empty() && pinv->slot_type[j] == items->items[stack.item]->disable_slots[i]) {
 					disabled_slots_empty = false;
 				}
 			}
 		}
 
-		if (equip_slot >= 0 && equip_slot_enabled[equip_slot] && disabled_slots_empty) {
+		if (equip_slot >= 0 && pinv->isEquipSlotEnabled(equip_slot) && disabled_slots_empty) {
 			area = EQUIPMENT;
 			slot = equip_slot;
 		}
@@ -932,7 +929,7 @@ bool MenuInventory::add(ItemStack stack, int area, int slot, bool play_sound, bo
 				if (max_q > 0)
 					slots_to_clear = leftover.quantity + (leftover.quantity % max_q) / max_q;
 
-				for (int i = MAX_CARRIED-1; i >=0; --i) {
+				for (int i = pinv->MAX_CARRIED-1; i >=0; --i) {
 					if (items->items[inventory[CARRIED].storage[i].item]->quest_item)
 						continue;
 
@@ -1182,7 +1179,7 @@ void MenuInventory::applyEquipment() {
 			pc->stats.primary_additional[j] = 0;
 		}
 
-		for (int i = 0; i < MAX_EQUIPPED; i++) {
+		for (int i = 0; i < pinv->MAX_EQUIPPED; i++) {
 			if (isEquipSlotActive(i)) {
 				item_id = inventory[EQUIPMENT].storage[i].item;
 				if (!items->isValid(item_id))
@@ -1203,7 +1200,7 @@ void MenuInventory::applyEquipment() {
 
 		// determine which item sets are active and count the number of items for each active set
 		std::vector<ItemSetID>::iterator it;
-		for (int i=0; i<MAX_EQUIPPED; i++) {
+		for (int i=0; i<pinv->MAX_EQUIPPED; i++) {
 			ItemStack& stack = inventory[EQUIPMENT].storage[i];
 
 			if (items->isValid(stack.item) && isEquipSlotActive(i) && items->items[stack.item]->set > 0) {
@@ -1236,11 +1233,11 @@ void MenuInventory::applyEquipment() {
 		}
 
 		// check that each equipped item fit requirements and is in the proper type of slot
-		for (int i = 0; i < MAX_EQUIPPED; i++) {
+		for (int i = 0; i < pinv->MAX_EQUIPPED; i++) {
 			ItemStack& stack = inventory[EQUIPMENT].storage[i];
 
 			if (items->isValid(stack.item)) {
-				if ((isEquipSlotActive(i) && !items->requirementsMet(&pc->stats, stack.item)) || (!stack.empty() && slot_type[i] != items->items[stack.item]->type)) {
+				if ((isEquipSlotActive(i) && !items->requirementsMet(&pc->stats, stack.item)) || (!stack.empty() && pinv->slot_type[i] != items->items[stack.item]->type)) {
 					add(stack, CARRIED, ItemStorage::NO_SLOT, ADD_PLAY_SOUND, !ADD_AUTO_EQUIP);
 					stack.clear();
 					checkRequired = true;
@@ -1273,11 +1270,11 @@ void MenuInventory::applyEquipment() {
 
 
 	// enable all slots by default
-	for (int i = 0; i < MAX_EQUIPPED; ++i) {
-		setEquipSlotEnabled(i, true);
+	for (int i = 0; i < pinv->MAX_EQUIPPED; ++i) {
+		pinv->setEquipSlotEnabled(i, true);
 	}
 	// disable any incompatible slots, unequipping items if neccessary
-	for (int i = 0; i < MAX_EQUIPPED; ++i) {
+	for (int i = 0; i < pinv->MAX_EQUIPPED; ++i) {
 		item_id = inventory[EQUIPMENT][i].item;
 
 		if (items->isValid(item_id) && isEquipSlotActive(i)) {
@@ -1329,7 +1326,7 @@ void MenuInventory::applyItemStats() {
 	pc->stats.item_base_abs.min = pc->stats.item_base_abs.max = 0;
 
 	// apply stats from all items
-	for (int i=0; i<MAX_EQUIPPED; i++) {
+	for (int i=0; i<pinv->MAX_EQUIPPED; i++) {
 		if (isEquipSlotActive(i)) {
 			ItemID item_id = inventory[EQUIPMENT].storage[i].item;
 			if (!items->isValid(item_id))
@@ -1430,23 +1427,23 @@ void MenuInventory::applyBonus(const BonusData* bdata) {
 }
 
 void MenuInventory::applyEquipmentSet(unsigned set) {
-	unsigned prev_equipment_set = active_equipment_set;
+	unsigned prev_equipment_set = pinv->active_equipment_set;
 
-	if (set > 0 && set <= max_equipment_set) {
-		active_equipment_set = set;
+	if (set > 0 && set <= pinv->max_equipment_set) {
+		pinv->active_equipment_set = set;
 		updateEquipmentSetWidgets();
 	}
 
-	if (active_equipment_set > 0 && prev_equipment_set != active_equipment_set) {
+	if (pinv->active_equipment_set > 0 && prev_equipment_set != pinv->active_equipment_set) {
 		if (!visible && menu && menu->hudlog) {
-			menu->hudlog->add(msg->getv("Equipped set %d.", static_cast<int>(active_equipment_set)), MenuHUDLog::MSG_NORMAL);
+			menu->hudlog->add(msg->getv("Equipped set %d.", static_cast<int>(pinv->active_equipment_set)), MenuHUDLog::MSG_NORMAL);
 		}
 	}
 }
 
 void MenuInventory::applyNextEquipmentSet() {
-	if (active_equipment_set < max_equipment_set) {
-		applyEquipmentSet(active_equipment_set+1);
+	if (pinv->active_equipment_set < pinv->max_equipment_set) {
+		applyEquipmentSet(pinv->active_equipment_set+1);
 	}
 	else {
 		applyEquipmentSet(1);
@@ -1454,11 +1451,11 @@ void MenuInventory::applyNextEquipmentSet() {
 }
 
 void MenuInventory::applyPreviousEquipmentSet() {
-	if (active_equipment_set > 1) {
-		applyEquipmentSet(active_equipment_set-1);
+	if (pinv->active_equipment_set > 1) {
+		applyEquipmentSet(pinv->active_equipment_set-1);
 	}
 	else {
-		applyEquipmentSet(max_equipment_set);
+		applyEquipmentSet(pinv->max_equipment_set);
 	}
 }
 
@@ -1467,7 +1464,7 @@ void MenuInventory::updateEquipmentSetWidgets() {
 	Widget* current_tablist_widget = tablist.getWidgetByIndex(tablist.getCurrent());
 	bool reset_tablist_cursor = false;
 
-	for (int i=0; i<MAX_EQUIPPED; i++) {
+	for (int i=0; i<pinv->MAX_EQUIPPED; i++) {
 		if (isEquipSlotActive(i)) {
 			if (!first_active_slot) {
 				first_active_slot = inventory[EQUIPMENT].slots[i];
@@ -1486,8 +1483,8 @@ void MenuInventory::updateEquipmentSetWidgets() {
 
 	if (!equipmentSetButton.empty()) {
 		for (size_t i=0; i<equipmentSetButton.size(); i++) {
-			if (active_equipment_set > 0) {
-				if (i == active_equipment_set-1) {
+			if (pinv->active_equipment_set > 0) {
+				if (i == pinv->active_equipment_set-1) {
 					equipmentSetButton[i]->enabled = false;
 					if (current_tablist_widget && equipmentSetButton[i] == current_tablist_widget) {
 						reset_tablist_cursor = true;
@@ -1507,7 +1504,7 @@ void MenuInventory::updateEquipmentSetWidgets() {
 
 	if (equipmentSetLabel) {
 		std::stringstream label;
-		label << active_equipment_set << "/" << max_equipment_set;
+		label << pinv->active_equipment_set << "/" << pinv->max_equipment_set;
 		equipmentSetLabel->setText(label.str());
 		equipmentSetLabel->setColor(font->getColor(FontEngine::COLOR_MENU_NORMAL));
 	}
@@ -1516,21 +1513,8 @@ void MenuInventory::updateEquipmentSetWidgets() {
 }
 
 
-/** Sets the slot's usability and mirrors it onto the widget so the UI matches. */
-void MenuInventory::setEquipSlotEnabled(int slot, bool enabled) {
-	if (slot < 0 || slot >= static_cast<int>(equip_slot_enabled.size()))
-		return;
-
-	equip_slot_enabled[slot] = enabled;
-
-	// The widget still needs it: a disabled WidgetSlot draws differently and refuses clicks.
-	// Presentation follows the state, never the other way round.
-	if (slot < static_cast<int>(inventory[EQUIPMENT].slots.size()))
-		inventory[EQUIPMENT].slots[slot]->enabled = enabled;
-}
-
 bool MenuInventory::applyEquipmentSetDelta(int delta) {
-	if (delta == 0 || max_equipment_set == 0)
+	if (delta == 0 || pinv->max_equipment_set == 0)
 		return false;
 
 	if (delta > 0)
@@ -1544,7 +1528,7 @@ bool MenuInventory::applyEquipmentSetDelta(int delta) {
 }
 
 bool MenuInventory::isEquipSlotActive(size_t equipped) {
-	if (equipment_set[equipped] == 0 || equipment_set[equipped]==active_equipment_set) {
+	if (pinv->equipment_set[equipped] == 0 || pinv->equipment_set[equipped]==pinv->active_equipment_set) {
 		return true;
 	}
 
@@ -1556,7 +1540,7 @@ int MenuInventory::getEquippedCount() {
 }
 
 int MenuInventory::getTotalSlotCount() {
-	return MAX_CARRIED + MAX_EQUIPPED;
+	return pinv->MAX_CARRIED + pinv->MAX_EQUIPPED;
 }
 
 void MenuInventory::clearHighlight() {
@@ -1569,9 +1553,9 @@ void MenuInventory::clearHighlight() {
  */
 void MenuInventory::fillEquipmentSlots() {
 	// create temporary array
-	ItemStack *equip_stack = new ItemStack[MAX_EQUIPPED];
+	ItemStack *equip_stack = new ItemStack[pinv->MAX_EQUIPPED];
 
-	for (int i = 0; i < MAX_EQUIPPED; ++i) {
+	for (int i = 0; i < pinv->MAX_EQUIPPED; ++i) {
 		// initialize array
 		// if an item is set, ensure the quantity is >= 1
 		equip_stack[i] = inventory[EQUIPMENT].storage[i];
@@ -1584,7 +1568,7 @@ void MenuInventory::fillEquipmentSlots() {
 		inventory[EQUIPMENT].storage[i].clear();
 
 		// if items were in the correct slot, put them back
-		if (!equip_stack[i].empty() && inventory[EQUIPMENT].storage[i].empty() && items->isValid(equip_stack[i].item) && items->items[equip_stack[i].item]->type == slot_type[i]) {
+		if (!equip_stack[i].empty() && inventory[EQUIPMENT].storage[i].empty() && items->isValid(equip_stack[i].item) && items->items[equip_stack[i].item]->type == pinv->slot_type[i]) {
 			inventory[EQUIPMENT].storage[i] = equip_stack[i];
 			equip_stack[i].clear();
 		}
@@ -1592,15 +1576,15 @@ void MenuInventory::fillEquipmentSlots() {
 
 	// for items that weren't in a matching slot, try to find one
 	// if all else fails, add them to the inventory
-	for (int i = 0; i < MAX_EQUIPPED; ++i) {
+	for (int i = 0; i < pinv->MAX_EQUIPPED; ++i) {
 		if (equip_stack[i].empty() || !items->isValid(equip_stack[i].item))
 			continue;
 
 		bool found_slot = false;
-		for (int j = 0; j < MAX_EQUIPPED; ++j) {
+		for (int j = 0; j < pinv->MAX_EQUIPPED; ++j) {
 			// search for empty slot with needed type
 			if (inventory[EQUIPMENT].storage[j].empty()) {
-				if (items->items[equip_stack[i].item]->type == slot_type[j]) {
+				if (items->items[equip_stack[i].item]->type == pinv->slot_type[j]) {
 					inventory[EQUIPMENT].storage[j] = equip_stack[i];
 					found_slot = true;
 					break;
@@ -1622,9 +1606,9 @@ int MenuInventory::getMaxPurchasable(ItemStack item, int vendor_tab) {
 		return 0;
 
 	if (vendor_tab == ItemManager::VENDOR_BUY)
-		return currency / items->items[item.item]->getPrice(ItemManager::USE_VENDOR_RATIO);
+		return pinv->currency / items->items[item.item]->getPrice(ItemManager::USE_VENDOR_RATIO);
 	else if (vendor_tab == ItemManager::VENDOR_SELL)
-		return currency / items->items[item.item]->getSellPrice(item.can_buyback);
+		return pinv->currency / items->items[item.item]->getSellPrice(item.can_buyback);
 	else if (vendor_tab == ItemManager::VENDOR_CRAFT)
 		return items->items[item.item]->getCraftCount();
 	else
@@ -1638,11 +1622,11 @@ int MenuInventory::getEquipSlotFromItem(ItemID item, bool only_empty_slots) {
 	int equip_slot = -1;
 
 	// find first empty(or just first) slot for item to equip
-	for (int i = 0; i < MAX_EQUIPPED; i++) {
+	for (int i = 0; i < pinv->MAX_EQUIPPED; i++) {
 		if (!isEquipSlotActive(i))
 			continue;
 
-		if (slot_type[i] == items->items[item]->type) {
+		if (pinv->slot_type[i] == items->items[item]->type) {
 			if (inventory[EQUIPMENT].storage[i].empty()) {
 				// empty and matching, no need to search more
 				equip_slot = i;
@@ -1678,15 +1662,15 @@ PowerID MenuInventory::getPowerMod(PowerID meta_power) {
 }
 
 void MenuInventory::disableEquipmentSlot(size_t disable_slot_type) {
-	for (int i=0; i<MAX_EQUIPPED; ++i) {
-		if (isEquipSlotActive(i) && slot_type[i] == disable_slot_type) {
+	for (int i=0; i<pinv->MAX_EQUIPPED; ++i) {
+		if (isEquipSlotActive(i) && pinv->slot_type[i] == disable_slot_type) {
 			if (!inventory[EQUIPMENT].storage[i].empty()) {
 				add(inventory[EQUIPMENT].storage[i], CARRIED, ItemStorage::NO_SLOT, ADD_PLAY_SOUND, !ADD_AUTO_EQUIP);
 				inventory[EQUIPMENT].storage[i].clear();
 				updateEquipment(i);
 				applyEquipment();
 			}
-			setEquipSlotEnabled(i, false);
+			pinv->setEquipSlotEnabled(i, false);
 		}
 	}
 }
@@ -1707,7 +1691,7 @@ bool MenuInventory::canActivateItem(ItemID item) {
 
 int MenuInventory::getEquippedSetCount(size_t set_id) {
 	int quantity = 0;
-	for (int i=0; i<MAX_EQUIPPED; i++) {
+	for (int i=0; i<pinv->MAX_EQUIPPED; i++) {
 		ItemID item_id = inventory[EQUIPMENT].storage[i].item;
 		if (items->isValid(item_id) && isEquipSlotActive(i)) {
 			if (items->items[item_id]->set == set_id) {
@@ -1770,7 +1754,7 @@ bool MenuInventory::canPlaceItemOnActionbar(const Point& position) {
 // same as ItemStorage::contain(), but accounts for active equipment set
 bool MenuInventory::equipmentContain(ItemID item, int quantity) {
 	int total_quantity = 0;
-	for (int i = 0; i < MAX_EQUIPPED; ++i) {
+	for (int i = 0; i < pinv->MAX_EQUIPPED; ++i) {
 		if (!isEquipSlotActive(i))
 			continue;
 

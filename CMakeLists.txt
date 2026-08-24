@@ -194,6 +194,7 @@ Set (FLARE_SOURCES
 	./src/NullSoundManager.cpp
 	./src/NPCManager.cpp
 	./src/PlayerCommand.cpp
+	./src/PlayerInventory.cpp
 	./src/PowerManager.cpp
 	./src/QuestLog.cpp
 	./src/RenderDevice.cpp
@@ -321,6 +322,7 @@ Set (FLARE_HEADERS
 	./src/NullSoundManager.h
 	./src/NPCManager.h
 	./src/PlayerCommand.h
+	./src/PlayerInventory.h
 	./src/PowerManager.h
 	./src/QuestLog.h
 	./src/RenderDevice.h

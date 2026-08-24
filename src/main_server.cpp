@@ -33,6 +33,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 #include "AnimationManager.h"
 #include "Avatar.h"
+#include "PlayerInventory.h"
 #include "SharedGameResources.h"
 #include "CombatText.h"
 #include "CommonIncludes.h"
@@ -554,15 +555,22 @@ int main(int argc, char *argv[]) {
 
 		// How many equipment slots still hold something. Third liveness field, and the one that
 		// speaks to P1.3's own stated failure mode: "a subtle error means players lose gear".
+		//
+		// Read through pinv, deliberately, while WorldHash.cpp still reads the same storages
+		// through menu->inv. P1.3d-4a made MenuInventory::inventory a POINTER INTO this array
+		// rather than a second one, and a commit that got that wrong produces byte-identical
+		// goldens -- measured, all nine, so "nothing moved" is that bug's symptom too. One reader
+		// on each side of the alias is what makes the pair falsifiable: give the menu its own
+		// copy and these counters go to 0 while the digest does not notice.
 		// The digest covers equipment contents, but a golden can only say "different", and the
 		// obvious way for a refactor of the inventory to go wrong is for gear to quietly stop
 		// arriving or quietly fall out. tests/replays/MANIFEST pins this per row, so that is a
 		// named number a reviewer can read rather than a hex digest nobody can interpret.
 		int equipped = 0;
-		if (menu && menu->inv) {
-			int slots = menu->inv->inventory[MenuInventory::EQUIPMENT].getSlotNumber();
+		if (pinv) {
+			int slots = pinv->inventory[PlayerInventory::EQUIPMENT].getSlotNumber();
 			for (int i = 0; i < slots; ++i) {
-				if (!menu->inv->inventory[MenuInventory::EQUIPMENT][i].empty())
+				if (!pinv->inventory[PlayerInventory::EQUIPMENT][i].empty())
 					equipped++;
 			}
 		}
@@ -572,7 +580,7 @@ int main(int argc, char *argv[]) {
 		// different questions: 'equipped' is how much gear exists, 'equipset' is how much of it
 		// the character is actually wearing. MenuInventory::isEquipSlotActive() returns false for
 		// every slot when this is 0, so the two numbers can disagree completely.
-		printf(" equipset=%d", (menu && menu->inv) ? static_cast<int>(menu->inv->active_equipment_set) : -1);
+		printf(" equipset=%d", pinv ? static_cast<int>(pinv->active_equipment_set) : -1);
 
 		// How many carried slots hold something. The COUNTERPART to 'equipped', and the pair is
 		// the point: P1.3d-4 moves the item storage out of the menus, and the way that goes wrong
@@ -580,10 +588,10 @@ int main(int argc, char *argv[]) {
 		// an item that moves from the carried area to an equipment slot must make one go down as
 		// the other goes up, and a duplicate shows as both going up.
 		int carried = 0;
-		if (menu && menu->inv) {
-			int cslots = menu->inv->inventory[MenuInventory::CARRIED].getSlotNumber();
+		if (pinv) {
+			int cslots = pinv->inventory[PlayerInventory::CARRIED].getSlotNumber();
 			for (int i = 0; i < cslots; ++i) {
-				if (!menu->inv->inventory[MenuInventory::CARRIED][i].empty())
+				if (!pinv->inventory[PlayerInventory::CARRIED][i].empty())
 					carried++;
 			}
 		}
@@ -594,7 +602,7 @@ int main(int argc, char *argv[]) {
 		// randomly chosen stack, so drawing a 1-quantity item empties its slot and drawing the
 		// 750-strong currency stack does not. 'carried' alone shows the difference and cannot
 		// explain it. Currency is already hashed, so this is not new coverage, only new legibility.
-		printf(" currency=%d", (menu && menu->inv) ? menu->inv->currency : -1);
+		printf(" currency=%d", pinv ? pinv->currency : -1);
 
 
 		printf("\n");

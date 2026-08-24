@@ -43,20 +43,6 @@ private:
 	void updateEquipment(int slot);
 	void updateEquipmentSetWidgets();
 
-	/** Whether an equipment slot may hold an item.
-	 *
-	 * This was WidgetSlot::enabled -- a widget flag that the simulation read to decide whether an
-	 * item could be equipped (MenuInventory.cpp:653 and :927). An item could not go into a slot
-	 * because a UI object said no. It worked headless only by accident, because the null render
-	 * device still allocates the widgets.
-	 *
-	 * The vector is the truth now and the widget is a display of it, which is the direction the
-	 * dependency has to run. Written only through setEquipSlotEnabled(). P1.3d-2 moves this to
-	 * PlayerInventory with the rest of the state.
-	 */
-	std::vector<bool> equip_slot_enabled;
-	void setEquipSlotEnabled(int slot, bool enabled);
-
 	WidgetLabel label_inventory;
 	WidgetLabel label_currency;
 	WidgetButton *button_close;
@@ -67,9 +53,6 @@ private:
 	WidgetButton* equipmentSetPrevious;
 	WidgetButton* equipmentSetNext;
 	WidgetLabel* equipmentSetLabel;
-
-	int MAX_EQUIPPED;
-	int MAX_CARRIED;
 
 	// label and widget positions
 	Rect help_pos;
@@ -181,13 +164,15 @@ public:
 
 	Rect carried_area;
 	std::vector<Rect> equipped_area;
-	std::vector<size_t> slot_type;
-	std::vector<unsigned int> equipment_set;
 
-	MenuItemStorage inventory[2];
-	unsigned active_equipment_set;
-	unsigned max_equipment_set;
-	int currency;
+	/** Points at PlayerInventory::inventory. NOT a second array -- see PlayerInventory.h.
+	 *
+	 * A pointer rather than a reference so the declaration stays a one-liner and every
+	 * inventory[EQUIPMENT] in this class and its ~60 callers keeps compiling untouched. That is
+	 * deliberate: it keeps this commit a pure ownership move. P1.3d-4b deletes this member and
+	 * points the simulation-side callers at pinv directly.
+	 */
+	MenuItemStorage* inventory;
 	int drag_prev_src;
 
 	bool changed_equipment;

@@ -26,6 +26,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuActionBar.h"
 #include "MenuPowers.h"
 #include "NPCManager.h"
+#include "PlayerInventory.h"
 #include "PowerManager.h"
 #include "XPScaling.h"
 #include "SharedGameResources.h"
@@ -43,6 +44,7 @@ MapRenderer *mapr = NULL;
 MenuActionBar *menu_act= NULL;
 MenuPowers *menu_powers = NULL;
 NPCManager *npcs = NULL;
+PlayerInventory *pinv = NULL;
 PowerManager *powers = NULL;
 FogOfWar *fow = NULL;
 XPScaling *xp_scaling = NULL;

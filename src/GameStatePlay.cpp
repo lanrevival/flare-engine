@@ -68,6 +68,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "NPC.h"
 #include "NPCManager.h"
 #include "PlayerCommand.h"
+#include "PlayerInventory.h"
 #include "PowerManager.h"
 #include "QuestLog.h"
 #include "RenderDevice.h"
@@ -109,6 +110,9 @@ GameStatePlay::GameStatePlay()
 	entitym = new EntityManager();
 	enemyg = new EnemyGroupManager();
 	hazards = new HazardManager();
+	// Before the menus, and destroyed after them: MenuInventory's constructor hands this object
+	// the inventory shape it parses out of menus/inventory.txt, and then binds itself to it.
+	pinv = new PlayerInventory();
 	menu = new MenuManager();
 	npcs = new NPCManager();
 	quests = new QuestLog(menu->questlog);
@@ -135,7 +139,7 @@ void GameStatePlay::resetGame() {
 	menu->inv->inventory[0].clear();
 	menu->inv->inventory[1].clear();
 	menu->inv->changed_equipment = true;
-	menu->inv->currency = 0;
+	pinv->currency = 0;
 	menu->questlog->clearAll();
 	quests->createQuestList();
 	menu->hudlog->clear();
@@ -1244,6 +1248,7 @@ GameStatePlay::~GameStatePlay() {
 	delete pc;
 	delete mapr;
 	delete menu;
+	delete pinv;
 	delete loot;
 	delete camp;
 	delete items;
@@ -1258,6 +1263,7 @@ GameStatePlay::~GameStatePlay() {
 	// NULL-ify shared game resources
 	pc = NULL;
 	menu = NULL;
+	pinv = NULL;
 	camp = NULL;
 	enemyg = NULL;
 	entitym = NULL;

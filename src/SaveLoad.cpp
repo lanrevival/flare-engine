@@ -51,6 +51,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "ModManager.h"
 #include "NPC.h"
 #include "Platform.h"
+#include "PlayerInventory.h"
 #include "PowerManager.h"
 #include "SaveLoad.h"
 #include "Settings.h"
@@ -141,7 +142,7 @@ void SaveLoad::saveGame() {
 		outfile << "equipped=" << menu->inv->inventory[MenuInventory::EQUIPMENT].getItems() << "\n";
 
 		// active equipped set
-		outfile << "active_equipment_set=" << menu->inv->active_equipment_set << "\n";
+		outfile << "active_equipment_set=" << pinv->active_equipment_set << "\n";
 
 		// carried items
 		outfile << "carried_quantity=" << menu->inv->inventory[MenuInventory::CARRIED].getQuantities() << "\n";

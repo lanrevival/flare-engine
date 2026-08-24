@@ -34,6 +34,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuManager.h"
 #include "MenuInventory.h"
 #include "MessageEngine.h"
+#include "PlayerInventory.h"
 #include "Rng.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
@@ -149,7 +150,7 @@ bool CampaignManager::checkItem(ItemStack istack) {
 }
 
 void CampaignManager::removeCurrency(int quantity) {
-	int max_amount = std::min(quantity, menu->inv->currency);
+	int max_amount = std::min(quantity, pinv->currency);
 
 	if (max_amount > 0) {
 		menu->inv->removeCurrency(max_amount);

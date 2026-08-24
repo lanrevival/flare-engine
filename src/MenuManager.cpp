@@ -53,6 +53,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MessageEngine.h"
 #include "ModManager.h"
 #include "NPC.h"
+#include "PlayerInventory.h"
 #include "PowerManager.h"
 #include "RenderDevice.h"
 #include "Settings.h"
@@ -1839,7 +1840,7 @@ void MenuManager::pushMatchingItemsOf(const Point& hov_pos) {
 		std::vector<ItemID> matching_ids;
 
 		for (size_t i = 0; i < inv->equipped_area.size(); i++) {
-			if (inv->isEquipSlotActive(i) && !inv->inventory[MenuInventory::EQUIPMENT].storage[i].empty() && inv->slot_type[i] == items->items[hov_stack.item]->type) {
+			if (inv->isEquipSlotActive(i) && !inv->inventory[MenuInventory::EQUIPMENT].storage[i].empty() && pinv->slot_type[i] == items->items[hov_stack.item]->type) {
 				matching_ids.push_back(inv->inventory[MenuInventory::EQUIPMENT].storage[i].item);
 			}
 		}
@@ -1859,7 +1860,7 @@ void MenuManager::pushMatchingItemsOf(const Point& hov_pos) {
 				if (tip_index >= eset->tooltips.visible_max)
 					break; // can't show any more tooltips
 
-				if (inv->isEquipSlotActive(i) && !inv->inventory[MenuInventory::EQUIPMENT].storage[i].empty() && inv->slot_type[i] == items->items[hov_stack.item]->type) {
+				if (inv->isEquipSlotActive(i) && !inv->inventory[MenuInventory::EQUIPMENT].storage[i].empty() && pinv->slot_type[i] == items->items[hov_stack.item]->type) {
 					Point match_pos(inv->equipped_area[i].x, inv->equipped_area[i].y);
 
 					TooltipData match = inv->inventory[MenuInventory::EQUIPMENT].checkTooltip(match_pos, &pc->stats, ItemManager::PLAYER_INV, !ItemManager::TOOLTIP_INPUT_HINT);

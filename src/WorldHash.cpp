@@ -29,6 +29,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MapRenderer.h"
 #include "MenuInventory.h"
 #include "MenuManager.h"
+#include "PlayerInventory.h"
 #include "SharedGameResources.h"
 #include "StatBlock.h"
 #include "Utils.h"
@@ -134,8 +135,10 @@ uint64_t WorldHash::compute(unsigned long tick) {
 		// Which equipment set is active, not just what is in the slots. Measured gap: a probe
 		// that vanished items from the digest showed contents ARE covered (melee notices a loss
 		// in both storage areas), but this scalar was not hashed at all, so a swap between two
-		// equally-full sets was invisible. P1.3d moves it into PlayerInventory; cover it first.
-		h = mixI32(h, static_cast<int32_t>(menu->inv->active_equipment_set));
+		// equally-full sets was invisible.
+		// It lives on PlayerInventory now. The guard above still asks about the menu because the
+		// storages below still do; P1.3d-4b is where both stop.
+		h = mixI32(h, static_cast<int32_t>(pinv->active_equipment_set));
 
 		for (int area = 0; area < MenuInventory::CARRIED + 1; ++area) {
 			int slots = menu->inv->inventory[area].getSlotNumber();
