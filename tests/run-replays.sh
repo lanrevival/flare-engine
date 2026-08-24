@@ -128,7 +128,7 @@ for m in tests/mods/*/; do
 done
 
 fail=0
-while read -r name rec ticks slot mods survives equipped equipset requires; do
+while read -r name rec ticks slot mods survives equipped carried equipset requires; do
 	case "$name" in ''|\#*) continue ;; esac
 
 	golden="$DIR/$name.$TAG.hash"
@@ -208,6 +208,28 @@ while read -r name rec ticks slot mods survives equipped equipset requires; do
 		echo "     got: $events"
 		echo "     gear arriving or falling out is what P1.3 says the danger is. Find out which"
 		echo "     slot changed -- do NOT edit the number in $DIR/MANIFEST to match."
+		fail=1
+		continue
+	fi
+
+	# CARRIED, checked with 'equipped' rather than after it, because the PAIR is the check and
+	# neither number is worth much alone. P1.3d-4 moves the item storage out of the menus, and the
+	# way that goes wrong is one copy of the data quietly becoming two. Measured on the 'invdrag'
+	# row below, by sabotaging MenuInventory::activate() in each direction:
+	#
+	#   healthy, the item moves     equipped=1  carried=0     <- the only combination that passes
+	#   the item is COPIED          equipped=1  carried=1     <- caught by this check
+	#   the item is LOST in transit equipped=0  carried=0     <- caught by the check above
+	#
+	# A digest moves in all three cases and cannot tell them apart. These two numbers can.
+	got_carried=$(echo "$events" | tr ' ' '\n' | sed -n 's/^carried=//p')
+	[ -n "$got_carried" ] || got_carried="?"
+
+	if [ "$carried" != "$got_carried" ]; then
+		echo "FAIL $name: $got_carried carried slots filled at the end, and this row says $carried"
+		echo "     got: $events"
+		echo "     read this together with 'equipped' above: both rising is an item duplicated,"
+		echo "     both falling is one destroyed. Do NOT edit the number in $DIR/MANIFEST."
 		fail=1
 		continue
 	fi

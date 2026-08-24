@@ -374,4 +374,47 @@ time_played=0
 engine_version=1.15.52
 SAVE
 
-echo "wrote $SAVE_ROOT/{1,2,3,4,5,6,7}/avatar.txt"
+# ---------------------------------------------------------------------------
+# slot 8 -- the DRAG-AND-DROP fixture, for invdrag.rec.
+#
+# Naked, carrying one Cloth Shirt, standing in the same empty room slot 7 uses. The row that
+# boots this one opens the inventory menu and drags the shirt from the carried area onto the
+# chest slot, with the mouse, through MenuManager's real drag machinery.
+#
+# WHY THIS IS THE ONE THAT MATTERS for P1.3d-4. The plan's own risk note says a subtle error
+# means players lose gear, and the validator's warning is sharper: one copy of the data,
+# referenced from both sides, because a second copy desynchronises and the symptom is vanishing
+# items. Neither 'equipped' nor 'carried' can see that alone. TOGETHER they can:
+#
+#   a move       carried 1 -> 0  AND  equipped 0 -> 1
+#   a loss       carried 1 -> 0       equipped stays 0
+#   a duplicate  carried stays 1      equipped 0 -> 1
+#
+# All three are distinguishable, and only the first passes.
+#
+# The save loads the shirt straight into the carried area -- SaveLoad calls setItems() on the
+# storage directly and never goes near the auto-equip branch, which is what makes this row
+# independent of the 'autoequip' one rather than a second copy of it.
+# ---------------------------------------------------------------------------
+mkdir -p "$SAVE_ROOT/8"
+cat > "$SAVE_ROOT/8/avatar.txt" <<'SAVE'
+## flare-engine save file ##
+name=DragFixture
+permadeath=0
+class=Brute,
+xp=0
+build=1,1,1,1
+currency=0
+equipped_quantity=
+equipped=
+carried_quantity=0,0,0,0,1
+carried=0,0,0,0,4
+spawn=maps/test_equipswap.txt,8,8
+actionbar=0,0,0,0,0,0,0,0,0,0,0,0
+powers=
+campaign=
+time_played=0
+engine_version=1.15.52
+SAVE
+
+echo "wrote $SAVE_ROOT/{1,2,3,4,5,6,7,8}/avatar.txt"

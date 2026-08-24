@@ -574,6 +574,22 @@ int main(int argc, char *argv[]) {
 		// every slot when this is 0, so the two numbers can disagree completely.
 		printf(" equipset=%d", (menu && menu->inv) ? static_cast<int>(menu->inv->active_equipment_set) : -1);
 
+		// How many carried slots hold something. The COUNTERPART to 'equipped', and the pair is
+		// the point: P1.3d-4 moves the item storage out of the menus, and the way that goes wrong
+		// is one copy of the data becoming two. A single number cannot see that. Two can --
+		// an item that moves from the carried area to an equipment slot must make one go down as
+		// the other goes up, and a duplicate shows as both going up.
+		int carried = 0;
+		if (menu && menu->inv) {
+			int cslots = menu->inv->inventory[MenuInventory::CARRIED].getSlotNumber();
+			for (int i = 0; i < cslots; ++i) {
+				if (!menu->inv->inventory[MenuInventory::CARRIED][i].empty())
+					carried++;
+			}
+		}
+		printf(" carried=%d", carried);
+
+
 		printf("\n");
 	}
 

@@ -1,4 +1,4 @@
-# name  rec  ticks  slot  mods  survives  equipped  equipset  requires
+# name  rec  ticks  slot  mods  survives  equipped  carried  equipset  requires
 #
 # name      identifies the ROW, and names the golden file. Unique.
 # rec       which input recording to replay, without the .rec suffix. NOT the same thing as the
@@ -10,7 +10,8 @@
 # slot      which save game tests/make-fixture.sh writes that the run boots from.
 #           1 = movement, 2 = combat, 3 = beatdown, 4 = death, 5 = death with every penalty
 #           on, 6 = naked, on a bare test map that hands it something to wear, 7 = slot 2's
-#           character in an empty room, so a set swap is the only thing that can happen.
+#           character in an empty room, so a set swap is the only thing that can happen,
+#           8 = naked, carrying one shirt, in that same room, to drag it onto the chest slot.
 # mods      EXTRA mods appended to the default list, or '-' for none. Mods in tests/mods/ are
 #           linked into the data path by tests/run-replays.sh. Order matters -- later mods
 #           override earlier ones, so an override has to land last, which appending guarantees.
@@ -35,6 +36,19 @@
 #           below is only a test at all because its fixture starts at 0 and must end at 1.
 #           melee and beatdown are 6 at both ends, which is the assertion that 2956 ticks of
 #           combat do not quietly cost the player a slot.
+# carried   how many carried slots must still hold something when the run ends.
+#           Read this WITH 'equipped'; the pair is the check and neither number is worth much
+#           alone. P1.3d-4 moves the item storage out of the menus and the way that goes wrong is
+#           one copy of the data quietly becoming two. Measured on 'invdrag' by sabotaging
+#           MenuInventory::activate() in each direction:
+#               the item moves      equipped 0->1  carried 1->0   the only combination that passes
+#               the item is COPIED  equipped 0->1  carried stays 1
+#               the item is LOST    equipped stays 0  carried 1->0
+#           A digest moves in all three and cannot tell them apart.
+#           The other rows are pinned too, and several say something specific: 'melee' ends on 1
+#           because it looted a stack, 'death' on 1 because the currency stack survives the
+#           penalty, and 'deathfull' on 2 because the test mod's random-item branch destroyed one
+#           of the three stacks it started with.
 # equipset  which equipment set must be active when the run ends.
 #           A different question from 'equipped': that one is how much gear EXISTS, this one is
 #           how much of it the character is WEARING. MenuInventory::isEquipSlotActive() returns
@@ -64,11 +78,12 @@
 #           Leave it. Relaxing it to 'die or critdie' would make the label honest by deleting the
 #           detector.
 
-smoke     smoke     600   1  -  yes  0  1  map_event,step
-patrol    patrol    2000  1  -  yes  0  1  map_event,step
-melee     melee     2956  2  -  yes  6  1  map_event,attack,hit,die,step,levelup,loot,power
-beatdown  beatdown  2956  3  -  yes  6  1  map_event,attack,hit,step,power,hazard_hit,lowhp_start,lowhp_stop
-death     patrol    1400  4  -  no   0  1  map_event,step,hit,lowhp_start
-deathfull deathfull 1400  5  test_deathpenalty  no   0  1  map_event,step,hit,lowhp_start
-autoequip autoequip 900   6  test_autoequip     yes  1  1  map_event,step
-equipswap equipswap 900   7  test_equipswap     yes  6  2  map_event,step
+smoke     smoke     600   1  -  yes  0  0  1  map_event,step
+patrol    patrol    2000  1  -  yes  0  0  1  map_event,step
+melee     melee     2956  2  -  yes  6  1  1  map_event,attack,hit,die,step,levelup,loot,power
+beatdown  beatdown  2956  3  -  yes  6  0  1  map_event,attack,hit,step,power,hazard_hit,lowhp_start,lowhp_stop
+death     patrol    1400  4  -  no   0  1  1  map_event,step,hit,lowhp_start
+deathfull deathfull 1400  5  test_deathpenalty  no   0  2  1  map_event,step,hit,lowhp_start
+autoequip autoequip 900   6  test_autoequip     yes  1  0  1  map_event,step
+equipswap equipswap 900   7  test_equipswap     yes  6  0  2  map_event,step
+invdrag   invdrag   900   8  test_equipswap     yes  1  0  1  map_event,step
