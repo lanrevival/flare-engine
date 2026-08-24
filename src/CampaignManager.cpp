@@ -146,14 +146,14 @@ bool CampaignManager::checkItem(ItemStack istack) {
 	if (pinv->inventory[PlayerInventory::CARRIED].contain(istack.item, istack.quantity))
 		return true;
 	else
-		return menu->inv->equipmentContain(istack.item, istack.quantity);
+		return pinv->equipmentContain(istack.item, istack.quantity);
 }
 
 void CampaignManager::removeCurrency(int quantity) {
 	int max_amount = std::min(quantity, pinv->currency);
 
 	if (max_amount > 0) {
-		menu->inv->removeCurrency(max_amount);
+		pinv->removeCurrency(max_amount);
 		pc->logMsg(msg->getv("%d %s removed.", max_amount, eset->loot.currency.c_str()), Avatar::MSG_UNIQUE);
 		items->playSound(eset->misc.currency_id);
 	}

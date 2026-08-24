@@ -88,8 +88,6 @@ public:
 	static const bool ADD_AUTO_EQUIP = true;
 	static const bool IS_DRAGGING = true;
 
-	static const bool ONLY_EMPTY_SLOTS = true;
-
 	explicit MenuInventory();
 	~MenuInventory();
 	void align();
@@ -122,7 +120,6 @@ public:
 	bool remove(ItemID item, int quantity);
 	void removeFromPrevSlot(int quantity);
 	void addCurrency(int count);
-	void removeCurrency(int count);
 	bool buy(ItemStack stack, int tab, bool dragging);
 	bool sell(ItemStack stack);
 
@@ -135,7 +132,6 @@ public:
 	void applyEquipmentSet(unsigned set);
 	void applyNextEquipmentSet();
 	void applyPreviousEquipmentSet();
-	bool isEquipSlotActive(size_t equipped);
 
 	int getEquippedCount();
 	int getTotalSlotCount();
@@ -146,21 +142,11 @@ public:
 
 	int getMaxPurchasable(ItemStack item, int vendor_tab);
 
-	PowerID getPowerMod(PowerID meta_power);
-
 	void disableEquipmentSlot(size_t slot_type);
-
-	bool canActivateItem(ItemID item);
-
-	int getEquippedSetCount(size_t set_id);
 
 	bool canEquipItem(const Point& position);
 	bool canUseItem(const Point& position);
 	bool canPlaceItemOnActionbar(const Point& position);
-
-	bool equipmentContain(ItemID item, int quantity);
-
-	int getEquipSlotFromItem(ItemID item, bool only_empty_slots);
 
 	Rect carried_area;
 	std::vector<Rect> equipped_area;

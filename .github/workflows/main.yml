@@ -123,6 +123,27 @@ jobs:
           fi
           echo "OK: no menu-routed item storage access in src/"
 
+      - name: The character answers questions about its own possessions, not the window
+        run: |
+          # P1.3d-4b-2 moved seven read-only inventory queries to PlayerInventory. Unlike the
+          # storage check above, the compiler already enforces the call side: the declarations are
+          # gone from MenuInventory, so `menu->inv->isEquipSlotActive(...)` no longer builds. What
+          # the compiler CANNOT catch is somebody putting a forwarder back on MenuInventory to
+          # "fix" a build error, which would quietly restore the coupling. That is what this checks,
+          # and it is the whole reason it looks at the header rather than at call sites.
+          moved='isEquipSlotActive|equipmentContain|getEquippedSetCount|getEquipSlotFromItem|canActivateItem|getPowerMod|removeCurrency|ONLY_EMPTY_SLOTS'
+          hits=$(grep -nE "$moved" src/MenuInventory.h || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo
+            echo "MenuInventory.h names something that belongs to PlayerInventory now."
+            echo "These moved in P1.3d-4b-2 and must not come back, not even as forwarders:"
+            echo "  $moved"
+            echo "Call them on pinv instead. See plans/phase1/P1.3d-4-player-inventory.md."
+            exit 1
+          fi
+          echo "OK: MenuInventory.h claims none of the moved inventory queries"
+
   replays:
     # Replays a corpus of recorded input and compares world-state digests against committed
     # goldens. This is the regression test Phases 1 and 2 lean on: almost every plan in them is a

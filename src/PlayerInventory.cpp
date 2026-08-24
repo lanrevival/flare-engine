@@ -20,7 +20,13 @@ FLARE.  If not, see http://www.gnu.org/licenses/
  * class PlayerInventory
  */
 
+#include "Avatar.h"
+#include "EngineSettings.h"
+#include "ItemManager.h"
 #include "PlayerInventory.h"
+#include "SharedGameResources.h"
+#include "SharedResources.h"
+#include "StatBlock.h"
 #include "WidgetSlot.h"
 
 PlayerInventory::PlayerInventory()
@@ -77,4 +83,103 @@ void PlayerInventory::setEquipSlotEnabled(int slot, bool enabled) {
 }
 
 PlayerInventory::~PlayerInventory() {
+}
+
+bool PlayerInventory::isEquipSlotActive(size_t equipped) const {
+	// equipment_set 0 means "in every set", so such a slot is active whichever set is selected.
+	return equipment_set[equipped] == 0 || equipment_set[equipped] == active_equipment_set;
+}
+
+bool PlayerInventory::equipmentContain(ItemID item, int quantity) const {
+	int total_quantity = 0;
+	for (int i = 0; i < MAX_EQUIPPED; ++i) {
+		if (!isEquipSlotActive(i))
+			continue;
+
+		if (inventory[EQUIPMENT].storage[i].item == item)
+			total_quantity += inventory[EQUIPMENT].storage[i].quantity;
+
+		if (total_quantity >= quantity)
+			return true;
+	}
+	return false;
+}
+
+int PlayerInventory::getEquippedSetCount(size_t set_id) const {
+	int quantity = 0;
+	for (int i = 0; i < MAX_EQUIPPED; i++) {
+		ItemID item_id = inventory[EQUIPMENT].storage[i].item;
+		if (items->isValid(item_id) && isEquipSlotActive(i)) {
+			if (items->items[item_id]->set == set_id) {
+				quantity++;
+			}
+		}
+	}
+	return quantity;
+}
+
+int PlayerInventory::getEquipSlotFromItem(ItemID item, bool only_empty_slots) const {
+	// -2 and -1 are different answers and callers rely on it: -2 is "this character may not wear
+	// that", -1 is "may, but has no free slot of the right type".
+	if (!items->isValid(item) || !items->requirementsMet(&pc->stats, item))
+		return -2;
+
+	int equip_slot = -1;
+
+	// find first empty (or just first) slot for item to equip
+	for (int i = 0; i < MAX_EQUIPPED; i++) {
+		if (!isEquipSlotActive(i))
+			continue;
+
+		if (slot_type[i] == items->items[item]->type) {
+			if (inventory[EQUIPMENT].storage[i].empty()) {
+				// empty and matching, no need to search more
+				equip_slot = i;
+				break;
+			}
+			else if (!only_empty_slots && equip_slot == -1) {
+				// non-empty and matching
+				equip_slot = i;
+			}
+		}
+	}
+
+	return equip_slot;
+}
+
+bool PlayerInventory::canActivateItem(ItemID item) const {
+	if (!items->isValid(item))
+		return false;
+
+	if (!items->items[item]->script.empty())
+		return true;
+	if (!items->items[item]->book.empty())
+		return true;
+	if (items->items[item]->power > 0 && getEquipSlotFromItem(item, !ONLY_EMPTY_SLOTS) == -1)
+		return true;
+
+	return false;
+}
+
+PowerID PlayerInventory::getPowerMod(PowerID meta_power) const {
+	for (int i = 0; i < inventory[EQUIPMENT].getSlotNumber(); ++i) {
+		if (!isEquipSlotActive(i))
+			continue;
+
+		ItemID id = inventory[EQUIPMENT].storage[i].item;
+		if (!items->isValid(id))
+			continue;
+
+		for (size_t j = 0; j < items->items[id]->replace_power.size(); j++) {
+			if (items->items[id]->replace_power[j].first == meta_power && items->items[id]->replace_power[j].second != meta_power) {
+				return items->items[id]->replace_power[j].second;
+			}
+		}
+	}
+
+	return 0;
+}
+
+void PlayerInventory::removeCurrency(int count) {
+	inventory[CARRIED].remove(eset->misc.currency_id, count);
 }

@@ -849,7 +849,7 @@ void GameStatePlay::updateActionBar(unsigned index) {
 	for (unsigned i = index; i < menu->act->slots_count; i++) {
 		if (menu->act->hotkeys[i] == 0) continue;
 
-		PowerID id = menu->inv->getPowerMod(menu->act->hotkeys_mod[i]);
+		PowerID id = pinv->getPowerMod(menu->act->hotkeys_mod[i]);
 		if (id > 0) {
 			menu->act->hotkeys_mod[i] = id;
 			return updateActionBar(i);

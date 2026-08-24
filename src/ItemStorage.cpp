@@ -90,7 +90,7 @@ void ItemStorage::setForeign(bool is_foreign) {
 	}
 }
 
-int ItemStorage::getSlotNumber() {
+int ItemStorage::getSlotNumber() const {
 	return slot_number;
 }
 

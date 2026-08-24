@@ -615,7 +615,7 @@ void SaveLoad::loadClass(int index) {
 	std::string equipment = hero_class.equipment;
 	while (!equipment.empty()) {
 		stack = Parse::toItemQuantityPair(Parse::popFirstString(equipment));
-		int equip_slot = menu->inv->getEquipSlotFromItem(stack.item, MenuInventory::ONLY_EMPTY_SLOTS);
+		int equip_slot = pinv->getEquipSlotFromItem(stack.item, PlayerInventory::ONLY_EMPTY_SLOTS);
 		menu->inv->add(stack, MenuInventory::EQUIPMENT, equip_slot, !MenuInventory::ADD_PLAY_SOUND, !MenuInventory::ADD_AUTO_EQUIP);
 	}
 
@@ -624,7 +624,7 @@ void SaveLoad::loadClass(int index) {
 		std::string equipment_set = hero_class.equipment_sets[i].second;
 		while (!equipment_set.empty()) {
 			stack = Parse::toItemQuantityPair(Parse::popFirstString(equipment_set));
-			int equip_slot = menu->inv->getEquipSlotFromItem(stack.item, MenuInventory::ONLY_EMPTY_SLOTS);
+			int equip_slot = pinv->getEquipSlotFromItem(stack.item, PlayerInventory::ONLY_EMPTY_SLOTS);
 			menu->inv->add(stack, MenuInventory::EQUIPMENT, equip_slot, !MenuInventory::ADD_PLAY_SOUND, !MenuInventory::ADD_AUTO_EQUIP);
 		}
 

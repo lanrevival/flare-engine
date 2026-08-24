@@ -57,6 +57,11 @@ public:
 	static const int EQUIPMENT = 0;
 	static const int CARRIED = 1;
 
+	// Argument to getEquipSlotFromItem(). MenuInventory used to declare this; it does not any
+	// more, and there is deliberately no alias left behind -- a second spelling of a constant that
+	// selects between two opposite search behaviours is exactly the thing that drifts.
+	static const bool ONLY_EMPTY_SLOTS = true;
+
 	PlayerInventory();
 	~PlayerInventory();
 
@@ -76,6 +81,34 @@ public:
 	 */
 	bool isEquipSlotEnabled(int slot) const;
 	void setEquipSlotEnabled(int slot, bool enabled);
+
+	/** Questions a character can be asked about what it is carrying.
+	 *
+	 * All read-only, all previously methods on MenuInventory, all moved here unchanged by
+	 * P1.3d-4b-2. The mutators -- add(), remove(), applyEquipment(), the equipment-set switches --
+	 * did NOT come with them, and the reason is worth stating so nobody "finishes the job" by
+	 * dragging them across: add() calls menu_act->addPower() and applyEquipment() calls
+	 * menu->pow->clearBonusLevels(). Those are not redraws that could be dropped; the action bar's
+	 * contents and MenuPowers' bonus levels are real state that two other classes still own.
+	 * Moving the mutators now would only trade "inventory reaches through a menu" for
+	 * "PlayerInventory reaches through a menu", which is not progress. They move when
+	 * P1.3e extracts ActionBarState and MenuPowers gives up its bonus levels.
+	 *
+	 * isEquipSlotActive() is the one to read carefully: an equipment_set of 0 means the slot is
+	 * shared by every set, so it is active always. Drop that clause and a character with no
+	 * equipment sets defined at all is wearing nothing.
+	 */
+	bool isEquipSlotActive(size_t equipped) const;
+	bool equipmentContain(ItemID item, int quantity) const;
+	int getEquippedSetCount(size_t set_id) const;
+	int getEquipSlotFromItem(ItemID item, bool only_empty_slots) const;
+	bool canActivateItem(ItemID item) const;
+	PowerID getPowerMod(PowerID meta_power) const;
+
+	/** The one mutator that came across, because it has no UI in it at all: it is a single call
+	 * into the carried storage. addCurrency() stayed behind -- it goes through add().
+	 */
+	void removeCurrency(int count);
 
 	MenuItemStorage inventory[2];
 

@@ -1840,7 +1840,7 @@ void MenuManager::pushMatchingItemsOf(const Point& hov_pos) {
 		std::vector<ItemID> matching_ids;
 
 		for (size_t i = 0; i < inv->equipped_area.size(); i++) {
-			if (inv->isEquipSlotActive(i) && !pinv->inventory[PlayerInventory::EQUIPMENT].storage[i].empty() && pinv->slot_type[i] == items->items[hov_stack.item]->type) {
+			if (pinv->isEquipSlotActive(i) && !pinv->inventory[PlayerInventory::EQUIPMENT].storage[i].empty() && pinv->slot_type[i] == items->items[hov_stack.item]->type) {
 				matching_ids.push_back(pinv->inventory[PlayerInventory::EQUIPMENT].storage[i].item);
 			}
 		}
@@ -1860,7 +1860,7 @@ void MenuManager::pushMatchingItemsOf(const Point& hov_pos) {
 				if (tip_index >= eset->tooltips.visible_max)
 					break; // can't show any more tooltips
 
-				if (inv->isEquipSlotActive(i) && !pinv->inventory[PlayerInventory::EQUIPMENT].storage[i].empty() && pinv->slot_type[i] == items->items[hov_stack.item]->type) {
+				if (pinv->isEquipSlotActive(i) && !pinv->inventory[PlayerInventory::EQUIPMENT].storage[i].empty() && pinv->slot_type[i] == items->items[hov_stack.item]->type) {
 					Point match_pos(inv->equipped_area[i].x, inv->equipped_area[i].y);
 
 					TooltipData match = pinv->inventory[PlayerInventory::EQUIPMENT].checkTooltip(match_pos, &pc->stats, ItemManager::PLAYER_INV, !ItemManager::TOOLTIP_INPUT_HINT);

@@ -244,7 +244,7 @@ void GameSlotPreview::loadGraphicsFromInventory(MenuInventory* menu_inv) {
 				continue;
 			}
 
-			if (!menu_inv->isEquipSlotActive(i)) {
+			if (!pinv->isEquipSlotActive(i)) {
 				continue;
 			}
 

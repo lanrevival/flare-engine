@@ -1578,7 +1578,7 @@ TooltipData ItemManager::getTooltip(ItemStack stack, StatBlock *stats, int conte
 	}
 
 	if (item->set > 0) {
-		int set_count = menu->inv->getEquippedSetCount(item->set);
+		int set_count = pinv->getEquippedSetCount(item->set);
 
 		// item set bonuses
 		ItemSet* item_set = item_sets[item->set];
@@ -1619,7 +1619,7 @@ void ItemManager::getTooltipInputHint(TooltipData& tip, ItemStack stack, int con
 		tip.addColoredText('\n' + msg->get("Tap icon again for more options"), font->getColor(FontEngine::COLOR_ITEM_BONUS));
 	}
 	else if (inpt->mode == InputState::MODE_JOYSTICK) {
-		if (context == PLAYER_INV && menu->inv->canActivateItem(stack.item)) {
+		if (context == PLAYER_INV && pinv->canActivateItem(stack.item)) {
 			show_activate_msg = true;
 			activate_bind_str = inpt->getGamepadBindingString(Input::MENU_ACTIVATE);
 		}
@@ -1627,7 +1627,7 @@ void ItemManager::getTooltipInputHint(TooltipData& tip, ItemStack stack, int con
 		more_bind_str = inpt->getGamepadBindingString(Input::ACCEPT);
 	}
 	else if (!inpt->usingMouse()) {
-		if (context == PLAYER_INV && menu->inv->canActivateItem(stack.item)) {
+		if (context == PLAYER_INV && pinv->canActivateItem(stack.item)) {
 			show_activate_msg = true;
 			activate_bind_str = inpt->getBindingString(Input::MENU_ACTIVATE);
 		}
@@ -1635,7 +1635,7 @@ void ItemManager::getTooltipInputHint(TooltipData& tip, ItemStack stack, int con
 		more_bind_str = inpt->getBindingString(Input::ACCEPT);
 	}
 	else {
-		if (context == PLAYER_INV && menu->inv->canActivateItem(stack.item)) {
+		if (context == PLAYER_INV && pinv->canActivateItem(stack.item)) {
 			show_activate_msg = true;
 			activate_bind_str = inpt->getBindingString(Input::MAIN2);
 		}
@@ -1650,7 +1650,7 @@ void ItemManager::getTooltipInputHint(TooltipData& tip, ItemStack stack, int con
 		if (items[stack.item] && !items[stack.item]->book.empty() && items[stack.item]->book_is_readable) {
 			tip.addColoredText(msg->getv("Press [%s] to read", activate_bind_str.c_str()), font->getColor(FontEngine::COLOR_ITEM_BONUS));
 		}
-		else if (menu->inv->canActivateItem(stack.item)) {
+		else if (pinv->canActivateItem(stack.item)) {
 			tip.addColoredText(msg->getv("Press [%s] to use", activate_bind_str.c_str()), font->getColor(FontEngine::COLOR_ITEM_BONUS));
 		}
 	}

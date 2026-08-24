@@ -64,7 +64,9 @@ public:
 	void setItems(const std::string& s);
 	void setQuantities(const std::string& s);
 	void setForeign(bool is_foreign);
-	int getSlotNumber();
+	// const because PlayerInventory's read-only queries ask for it. Additive: every existing
+	// non-const caller still compiles.
+	int getSlotNumber() const;
 	std::string getItems();
 	std::string getQuantities();
 	ItemStack add(ItemStack stack, int slot);
