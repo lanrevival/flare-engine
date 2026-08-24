@@ -133,6 +133,14 @@ while read -r name rec ticks slot mods survives equipped carried equipset requir
 
 	golden="$DIR/$name.$TAG.hash"
 
+	# Every behavioural check below records into this and NONE of them short-circuits the rest.
+	# They used to 'continue' on the first failure, and that hid real findings: 'beatdown' fails
+	# its coverage requirement on Linux, so its gear numbers were never printed -- and they differ
+	# too (macOS loots nothing and ends with 0 carried slots, x86-64 Linux loots twice and ends
+	# with 1). One divergence was masking another. The digest is still skipped when any of them
+	# fails, because a hex mismatch on top of a known behavioural failure tells nobody anything.
+	row_fail=0
+
 	# The 'mods' column is EXTRA mods appended to the default list, or '-' for none. Order
 	# matters: later mods override earlier ones, so a test override has to land last.
 	row_mods="$MODS"
@@ -164,8 +172,7 @@ while read -r name rec ticks slot mods survives equipped carried equipset requir
 			echo "     got: $events"
 			echo "     the recording no longer does what its name says. Fix the recording or"
 			echo "     the fixture -- do NOT weaken the 'requires' column in $DIR/MANIFEST."
-			fail=1
-			continue
+			row_fail=1
 		fi
 	fi
 
@@ -208,8 +215,7 @@ while read -r name rec ticks slot mods survives equipped carried equipset requir
 		echo "     got: $events"
 		echo "     gear arriving or falling out is what P1.3 says the danger is. Find out which"
 		echo "     slot changed -- do NOT edit the number in $DIR/MANIFEST to match."
-		fail=1
-		continue
+		row_fail=1
 	fi
 
 	# CARRIED, checked with 'equipped' rather than after it, because the PAIR is the check and
@@ -230,8 +236,7 @@ while read -r name rec ticks slot mods survives equipped carried equipset requir
 		echo "     got: $events"
 		echo "     read this together with 'equipped' above: both rising is an item duplicated,"
 		echo "     both falling is one destroyed. Do NOT edit the number in $DIR/MANIFEST."
-		fail=1
-		continue
+		row_fail=1
 	fi
 
 	# WHICH SET, checked with the count above, because they fail differently. A refactor that
@@ -250,8 +255,7 @@ while read -r name rec ticks slot mods survives equipped carried equipset requir
 		echo "     got: $events"
 		echo "     the character is wearing a different half of its equipment than this row"
 		echo "     expects -- do NOT edit the number in $DIR/MANIFEST to match."
-		fail=1
-		continue
+		row_fail=1
 	fi
 
 	died=$(echo "$events" | tr ' ' '\n' | sed -n 's/^died_tick=//p')
@@ -263,16 +267,20 @@ while read -r name rec ticks slot mods survives equipped carried equipset requir
 		echo "     passes because each one fired before the death. Re-tune the fixture in"
 		echo "     tests/make-fixture.sh -- do NOT lower the tick budget in $DIR/MANIFEST,"
 		echo "     do NOT weaken the 'requires' column, and do NOT flip this row to survives=no."
-		fail=1
-		continue
+		row_fail=1
 	fi
 
 	if [ "$survives" = "no" ] && [ "$died" = "0" ]; then
 		echo "FAIL $name: the player survived $ticks ticks, and this row says survives=no"
-		echo "     this row exists to reach code that only runs on death -- the death penalty in"
-		echo "     MenuInventory::logic(). A fixture that stopped dying has disarmed it silently,"
+		echo "     this row exists to reach code that only runs on death -- the death penalty,"
+		echo "     now MenuInventory::applyDeathPenalty(). A fixture that stopped dying has"
+		echo "     disarmed it silently,"
 		echo "     which is the same failure as a survives=yes row that started dying."
 		echo "     Re-tune the fixture in tests/make-fixture.sh; do NOT flip this row to yes."
+		row_fail=1
+	fi
+
+	if [ "$row_fail" != "0" ]; then
 		fail=1
 		continue
 	fi

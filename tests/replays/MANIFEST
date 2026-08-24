@@ -55,6 +55,10 @@
 #           only still hold 3 stacks if it drew the currency, since everything else has quantity 1.
 #           Same family as the 'die' entry above -- the number here is right and the platforms
 #           genuinely differ. See .github/workflows/main.yml. Do NOT change the 2.
+#           'beatdown' splits the same way and was INVISIBLE until run-replays.sh stopped
+#           short-circuiting: it fails its coverage requirement on Linux, so its gear numbers were
+#           never reached. macOS loots nothing there and ends on 0; x86-64 Linux loots twice and
+#           ends on 1. One divergence was masking another. Do NOT change the 0 either.
 # equipset  which equipment set must be active when the run ends.
 #           A different question from 'equipped': that one is how much gear EXISTS, this one is
 #           how much of it the character is WEARING. MenuInventory::isEquipSlotActive() returns

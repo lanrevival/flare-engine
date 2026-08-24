@@ -137,6 +137,12 @@ jobs:
     #              the stream must already have diverged upstream, in the combat on the map -- one
     #              more reading that points at entities.
     #              The 'carried' check found this on its first CI run. Do not weaken it.
+    #   'beatdown' splits on 'carried' TOO, and that was hidden: the row fails its coverage
+    #              requirement on Linux, and run-replays.sh used to stop at a row's first failure,
+    #              so the gear numbers were never printed. macOS loots nothing and ends with 0
+    #              carried slots; x86-64 Linux loots twice and ends with 1. One divergence was
+    #              masking another, which is why the script now reports every behavioural check
+    #              for a row before it gives up on it.
     #
     # WHERE THE DIVERGENCE IS, AND IS NOT. This block used to add "every digest differs three ways,
     # INCLUDING 'smoke' -- plain movement already produces three different worlds", and conclude
