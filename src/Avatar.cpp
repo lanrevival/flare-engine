@@ -1197,7 +1197,7 @@ std::string Avatar::getGfxFromType(const std::string& gfx_type) {
 	feet_index = -1;
 	std::string gfx;
 
-	if (menu && menu->inv) {
+	if (pinv) {
 		ItemStorage& equipment = pinv->inventory[PlayerInventory::EQUIPMENT];
 
 		for (int i = 0; i < equipment.getSlotNumber(); i++) {
