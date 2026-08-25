@@ -612,7 +612,7 @@ void GameStatePlay::checkTitle() {
 void GameStatePlay::checkEquipmentChange() {
 	if (menu->inv->changed_equipment) {
 		// force the actionbar to update when we change gear
-		menu->act->updated = true;
+		pab->updated = true;
 
 		pc->loadAnimations();
 
@@ -675,21 +675,21 @@ void GameStatePlay::checkUsedItems() {
 void GameStatePlay::checkNotifications() {
 	if (pc->newLevelNotification || menu->chr->getUnspent() > 0) {
 		pc->newLevelNotification = false;
-		menu->act->requires_attention[MenuActionBar::MENU_CHARACTER] = !menu->chr->visible;
+		pab->requires_attention[MenuActionBar::MENU_CHARACTER] = !menu->chr->visible;
 	}
 	if (menu->pow->newPowerNotification) {
 		menu->pow->newPowerNotification = false;
-		menu->act->requires_attention[MenuActionBar::MENU_POWERS] = !menu->pow->visible;
+		pab->requires_attention[MenuActionBar::MENU_POWERS] = !menu->pow->visible;
 	}
 	if (quests->newQuestNotification) {
 		quests->newQuestNotification = false;
-		menu->act->requires_attention[MenuActionBar::MENU_LOG] = !menu->questlog->visible && !pc->questlog_dismissed;
+		pab->requires_attention[MenuActionBar::MENU_LOG] = !menu->questlog->visible && !pc->questlog_dismissed;
 		pc->questlog_dismissed = false;
 	}
 
 	// if the player is transformed into a creature, don't notifications for the powers menu
 	if (pc->stats.transformed) {
-		menu->act->requires_attention[MenuActionBar::MENU_POWERS] = false;
+		pab->requires_attention[MenuActionBar::MENU_POWERS] = false;
 	}
 }
 
@@ -846,16 +846,16 @@ void GameStatePlay::checkSaveEvent() {
  * Recursively update the action bar powers based on equipment
  */
 void GameStatePlay::updateActionBar(unsigned index) {
-	if (menu->act->slots_count == 0 || index > menu->act->slots_count - 1) return;
+	if (pab->slots_count == 0 || index > pab->slots_count - 1) return;
 
 	if (items->items.empty()) return;
 
-	for (unsigned i = index; i < menu->act->slots_count; i++) {
-		if (menu->act->hotkeys[i] == 0) continue;
+	for (unsigned i = index; i < pab->slots_count; i++) {
+		if (pab->hotkeys[i] == 0) continue;
 
-		PowerID id = pinv->getPowerMod(menu->act->hotkeys_mod[i]);
+		PowerID id = pinv->getPowerMod(pab->hotkeys_mod[i]);
 		if (id > 0) {
-			menu->act->hotkeys_mod[i] = id;
+			pab->hotkeys_mod[i] = id;
 			return updateActionBar(i);
 		}
 	}
@@ -995,15 +995,15 @@ void GameStatePlay::logic() {
 		if (!pc->stats.humanoid && menu->pow->visible) menu->closeRight();
 		// save ActionBar state and lock slots from removing/replacing power
 		for (int i = 0; i < MenuActionBar::SLOT_MAX ; i++) {
-			menu->act->hotkeys_temp[i] = menu->act->hotkeys[i];
-			menu->act->hotkeys[i] = 0;
+			pab->hotkeys_temp[i] = pab->hotkeys[i];
+			pab->hotkeys[i] = 0;
 		}
 		int count = MenuActionBar::SLOT_MAIN1;
 		// put creature powers on action bar
 		for (size_t i=0; i<pc->charmed_stats->powers_ai.size(); i++) {
 			if (powers->isValid(pc->charmed_stats->powers_ai[i].id) && powers->powers[pc->charmed_stats->powers_ai[i].id]->beacon != true) {
-				menu->act->hotkeys[count] = pc->charmed_stats->powers_ai[i].id;
-				menu->act->locked[count] = true;
+				pab->hotkeys[count] = pc->charmed_stats->powers_ai[i].id;
+				pab->locked[count] = true;
 				count++;
 				if (count == MenuActionBar::SLOT_MAX)
 					count = 0;
@@ -1013,13 +1013,13 @@ void GameStatePlay::logic() {
 			}
 		}
 		if (pc->stats.manual_untransform && powers->isValid(pc->untransform_power)) {
-			menu->act->hotkeys[count] = pc->untransform_power;
-			menu->act->locked[count] = true;
+			pab->hotkeys[count] = pc->untransform_power;
+			pab->locked[count] = true;
 		}
 		else if (pc->stats.manual_untransform && pc->untransform_power == 0)
 			Utils::logError("GameStatePlay: Untransform power not found, you can't untransform manually");
 
-		menu->act->updated = true;
+		pab->updated = true;
 
 		// reapply equipment if the transformation allows it
 		if (pc->stats.transform_with_equipment)
@@ -1031,11 +1031,11 @@ void GameStatePlay::logic() {
 
 		// restore ActionBar state
 		for (int i = 0; i < MenuActionBar::SLOT_MAX; i++) {
-			menu->act->hotkeys[i] = menu->act->hotkeys_temp[i];
-			menu->act->locked[i] = false;
+			pab->hotkeys[i] = pab->hotkeys_temp[i];
+			pab->locked[i] = false;
 		}
 
-		menu->act->updated = true;
+		pab->updated = true;
 
 		// also reapply equipment here, to account items that give bonuses to base stats
 		menu->inv->applyEquipment();
@@ -1064,12 +1064,12 @@ void GameStatePlay::logic() {
 	}
 
 	// update the action bar as it may have been changed by items
-	if (menu->act->updated) {
-		menu->act->updated = false;
+	if (pab->updated) {
+		pab->updated = false;
 
 		// set all hotkeys to their base powers
-		for (unsigned i = 0; i < menu->act->slots_count; i++) {
-			menu->act->hotkeys_mod[i] = menu->act->hotkeys[i];
+		for (unsigned i = 0; i < pab->slots_count; i++) {
+			pab->hotkeys_mod[i] = pab->hotkeys[i];
 		}
 
 		updateActionBar(UPDATE_ACTIONBAR_ALL);

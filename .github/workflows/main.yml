@@ -144,6 +144,33 @@ jobs:
           fi
           echo "OK: MenuInventory.h claims none of the moved inventory queries"
 
+      - name: Hotkey state is reached through pab, not through a menu, in the sim-side consumers
+        run: |
+          # P1.3e-b repointed GameStatePlay, SaveLoad and EntityManager off menu->act-> / menu_act->
+          # and onto pab-> for ActionBarState's seven fields. Unlike the inventory storage check
+          # above, this is scoped to those three files, not all of src/: menu->act->clear(),
+          # ->set() and ->checkAction() are METHOD calls that legitimately still go through the
+          # menu (they move in P1.3e-c, or never -- checkAction() needs widgets and runs headless
+          # never), and MenuInventory.cpp's addPower(), MenuPowers.cpp and MenuManager.cpp are UI
+          # that never moves. A blanket ban across src/*.cpp would flag all of those. Matching only
+          # the seven field names, word-bounded, is what tells a legitimate method call apart from
+          # a reintroduced field read without needing a file-wide exclusion list.
+          fields='slots_count|hotkeys_temp|hotkeys_mod|hotkeys|locked|requires_attention|updated'
+          hits=$(grep -nE "(menu->act->|menu_act->)($fields)\b" \
+                 src/GameStatePlay.cpp src/SaveLoad.cpp src/EntityManager.cpp || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo ""
+            echo "ERROR: action bar state is being reached through the action bar menu."
+            echo "These seven fields belong to ActionBarState. See src/ActionBarState.h:"
+            echo "  menu->act->hotkeys[i] -> pab->hotkeys[i]"
+            echo ""
+            echo "menu->act->clear()/set()/checkAction() are unaffected -- those are method calls,"
+            echo "not field reads, and P1.3e-b did not move them."
+            exit 1
+          fi
+          echo "OK: no menu-routed action bar state access in the sim-side consumers"
+
   replays:
     # Replays a corpus of recorded input and compares world-state digests against committed
     # goldens. This is the regression test Phases 1 and 2 lean on: almost every plan in them is a

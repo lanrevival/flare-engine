@@ -21,6 +21,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Animation.h"
 #include "AnimationManager.h"
 #include "AnimationSet.h"
+#include "ActionBarState.h"
 #include "Avatar.h"
 #include "CampaignManager.h"
 #include "EnemyGroupManager.h"
@@ -206,9 +207,9 @@ void EntityManager::handleNewMap () {
 	}
 
 	// load entities that can be spawn by powers in the action bar
-	if (menu_act != NULL) {
-		for (size_t i = 0; i < menu_act->hotkeys.size(); i++) {
-			PowerID power_index = menu_act->hotkeys[i];
+	if (pab != NULL) {
+		for (size_t i = 0; i < pab->hotkeys.size(); i++) {
+			PowerID power_index = pab->hotkeys[i];
 			if (power_index != 0) {
 				const std::string& spawn_type = powers->powers[power_index]->spawn_type;
 				if (!spawn_type.empty() && spawn_type != "untransform") {

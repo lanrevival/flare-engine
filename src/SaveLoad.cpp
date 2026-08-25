@@ -28,6 +28,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
  *
  */
 
+#include "ActionBarState.h"
 #include "Avatar.h"
 #include "CampaignManager.h"
 #include "CommonIncludes.h"
@@ -157,10 +158,10 @@ void SaveLoad::saveGame() {
 		menu->pow->clearActionBarBonusLevels();
 		outfile << "actionbar=";
 		for (unsigned i = 0; i < static_cast<unsigned>(MenuActionBar::SLOT_MAX); i++) {
-			if (i < menu->act->slots_count)
+			if (i < pab->slots_count)
 			{
-				if (pc->stats.transformed) outfile << menu->act->hotkeys_temp[i];
-				else outfile << menu->act->hotkeys[i];
+				if (pc->stats.transformed) outfile << pab->hotkeys_temp[i];
+				else outfile << pab->hotkeys[i];
 			}
 			else
 			{
@@ -220,7 +221,7 @@ void SaveLoad::saveGame() {
 			}
 		}
 
-		outfile << "questlog_dismissed=" << !menu->act->requires_attention[MenuActionBar::MENU_LOG] << "\n";
+		outfile << "questlog_dismissed=" << !pab->requires_attention[MenuActionBar::MENU_LOG] << "\n";
 
 		outfile << "stash_tab=" << menu->stash->getTab();
 
