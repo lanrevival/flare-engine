@@ -28,10 +28,11 @@ FLARE.  If not, see http://www.gnu.org/licenses/
  * the wrong owner the moment there is more than one player and only one of them has a screen.
  *
  * There is exactly ONE copy of this data. MenuActionBar's `hotkeys`, `hotkeys_temp`, `hotkeys_mod`,
- * `locked`, `requires_attention`, `updated` and `slots_count` are REFERENCES bound to the members
- * below, not copies of them -- MenuActionBar.cpp's ~90 uses of e.g. `hotkeys[i]` still compile and
- * still mean the same storage, unchanged. That is deliberate and it is this class's whole point:
- * two copies desynchronise and the symptom is a hotkey silently reverting.
+ * `locked`, `prevent_changing`, `requires_attention`, `updated` and `slots_count` are REFERENCES
+ * bound to the members below, not copies of them -- MenuActionBar.cpp's ~90 uses of e.g.
+ * `hotkeys[i]` still compile and still mean the same storage, unchanged. That is deliberate and it
+ * is this class's whole point: two copies desynchronise and the symptom is a hotkey silently
+ * reverting.
  *
  * `requires_attention` and `updated` are presentation, not simulation, and they move here anyway:
  * `requires_attention[MENU_LOG]` is serialised as `questlog_dismissed` (SaveLoad.cpp), and the save
@@ -39,13 +40,33 @@ FLARE.  If not, see http://www.gnu.org/licenses/
  * See P1.3e-actionbar-state.md's "open question" -- this was a judgment call, not a measurement,
  * and is recorded as one.
  *
- * What is NOT here, on purpose: `addPower()`, `clear()`, `set()`, `clearSlot()`, `checkAction()`.
+ * `prevent_changing` joined in P1.3e-c, one step later than the other seven: it wasn't obviously
+ * needed until addPower() turned out to require it (see below) to be genuinely usable without a
+ * live MenuActionBar, not just movable in name. It grows INCREMENTALLY, unlike the four sized once
+ * by initSlots() -- MenuActionBar::addSlot() resizes it slot-by-slot as menus/actionbar.txt parses,
+ * and that code did not need to change at all: resize()/[index]= behave identically through a
+ * reference.
+ *
+ * What is NOT here, on purpose: `clear()`, `checkAction()`, and half of `addPower()`.
  * `checkAction()` reads widget click state and never runs on a headless server at all -- it stays
- * on MenuActionBar permanently, not as a shortcut. The mutators are split later, in P1.3e-c, on the
- * same precedent PlayerInventory::setEquipSlotEnabled() already set: `addPower()`'s common path
- * (id != 0, target_id == 0) is pure array writes, but its other branch touches a widget through
- * clearSlot(), so it cannot simply move today without either dragging that widget touch along or
- * silently dropping it.
+ * on MenuActionBar permanently, not as a shortcut. `clear()` calls MenuActionBar's own clearSlot()
+ * (the widget-touching one) for every slot it clears, and its two callers (GameStatePlay's
+ * resetGame(), EventManager's class-switch) still go through a live menu today -- moving it isn't
+ * needed for anything currently blocked, so it stays, deferred rather than rushed.
+ *
+ * addPower()'s split follows a real seam, not the wart PlayerInventory::setEquipSlotEnabled() has:
+ * MenuActionBar::addPower(id, target_id)'s two branches are MUTUALLY EXCLUSIVE, not entangled.
+ * `id == 0` means "clear whichever slot holds target_id" -- the ONLY branch that touches a widget,
+ * via clearSlot() -- and PowerID 0 always means "no power", so powers->isValid(0) is false and the
+ * function returns right after that branch either way; the assignment logic below it never runs in
+ * the same call. `id != 0` means "place power `id` on a slot" and never touched a widget even in
+ * the original, single-class version -- it only ever set hotkeys[i] and relied on the next logic()
+ * tick to redraw the icon, same as this class's version does now. So this class implements ONLY the
+ * `id != 0` path. It is not a general-purpose addPower() with a documented gap; the `id == 0` path
+ * is a DIFFERENT operation that has never been asked of this class, by anything, and isn't
+ * implemented speculatively. If a future caller needs it, that is when it gets added and tested --
+ * not before, because untested-by-construction code is exactly what this project keeps finding
+ * costs more than it saves.
  */
 
 #ifndef ACTION_BAR_STATE_H
@@ -61,6 +82,10 @@ public:
 	// include MenuActionBar.h, the same reasoning PlayerInventory::EQUIPMENT/CARRIED already gives.
 	static const int MENU_COUNT = 4;
 
+	// Argument to set(). MenuActionBar::SET_SKIP_EMPTY no longer exists -- deleted, not aliased,
+	// the same call PlayerInventory::ONLY_EMPTY_SLOTS already made for the same reason.
+	static const bool SET_SKIP_EMPTY = true;
+
 	ActionBarState();
 
 	/** Sizes the four per-slot arrays. Called once, from MenuActionBar's constructor, after it has
@@ -69,11 +94,33 @@ public:
 	 */
 	void initSlots(unsigned _slots_count);
 
+	/** Empties one slot: hotkeys[slot], hotkeys_temp[slot], hotkeys_mod[slot] and locked[slot] all
+	 * go to their unset values. Nothing else -- MenuActionBar's own clearSlot() calls this and then
+	 * does the widget-side reset (icon, cooldown flash, item count) that this class has no way to
+	 * do and no need to: the next logic() tick redraws every slot's icon from hotkeys_mod anyway.
+	 */
+	void clearSlot(size_t slot);
+
+	/** Places power `id` on a slot: MAIN1/MAIN2 first, then 0-9, skipping slots menus/actionbar.txt
+	 * marked un-droppable (prevent_changing) and, when target_id is 0, skipping duplicates of a
+	 * power already on the bar. Only the `id != 0` half of MenuActionBar::addPower() -- see this
+	 * file's header comment for why the other half isn't here.
+	 */
+	void addPower(const PowerID id, const PowerID target_id);
+
+	/** Binds power_id[i] to hotkeys[i] for each valid, non-passive, actionbar-eligible power.
+	 * skip_empty leaves an already-occupied slot alone rather than overwriting it. Moved outright
+	 * from MenuActionBar -- unlike addPower() and clearSlot(), this never touched a widget even in
+	 * the original.
+	 */
+	void set(std::vector<PowerID> power_id, bool skip_empty);
+
 	unsigned slots_count;
 	std::vector<PowerID> hotkeys;       // refers to power_index in PowerManager
 	std::vector<PowerID> hotkeys_temp;  // saved here during shapeshifting, restored after
 	std::vector<PowerID> hotkeys_mod;   // hotkeys, with item/bonus modifications applied
 	std::vector<bool> locked;           // slot can't be dragged out from under a transform
+	std::vector<bool> prevent_changing; // slot can't be reassigned at all; a mod-authored constant
 
 	// Sized to MENU_COUNT, not slots_count -- one flag per menu button, not per hotkey slot.
 	std::vector<bool> requires_attention;

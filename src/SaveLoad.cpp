@@ -492,7 +492,7 @@ void SaveLoad::loadGame() {
 				for (int i = 0; i < MenuActionBar::SLOT_MAX; i++) {
 					hotkeys[i] = powers->verifyID(Parse::popFirstInt(infile.val), &infile, PowerManager::ALLOW_ZERO_ID);
 				}
-				menu->act->set(hotkeys, !MenuActionBar::SET_SKIP_EMPTY);
+				pab->set(hotkeys, !ActionBarState::SET_SKIP_EMPTY);
 			}
 			else if (infile.key == "transformed") {
 				pc->stats.transform_type = Parse::popFirstString(infile.val);
@@ -649,7 +649,7 @@ void SaveLoad::loadClass(int index) {
 		hero_class.hotkeys[i] = powers->verifyID(hero_class.hotkeys[i], NULL, PowerManager::ALLOW_ZERO_ID);
 	}
 
-	menu->act->set(hero_class.hotkeys, !MenuActionBar::SET_SKIP_EMPTY);
+	pab->set(hero_class.hotkeys, !ActionBarState::SET_SKIP_EMPTY);
 
 	// campaign statuses
 	for (size_t i = 0; i < hero_class.statuses.size(); ++i) {

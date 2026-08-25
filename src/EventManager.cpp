@@ -16,6 +16,7 @@ You should have received a copy of the GNU General Public License along with
 FLARE.  If not, see http://www.gnu.org/licenses/
 */
 
+#include "ActionBarState.h"
 #include "Avatar.h"
 #include "CampaignManager.h"
 #include "EntityManager.h"
@@ -1303,7 +1304,7 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 
 				menu_act->clear(MenuActionBar::CLEAR_SKIP_ITEMS);
 				if (pc_class && !use_engine_defaults) {
-					menu->act->set(pc_class->hotkeys, MenuActionBar::SET_SKIP_EMPTY);
+					pab->set(pc_class->hotkeys, ActionBarState::SET_SKIP_EMPTY);
 				}
 				menu->pow->newPowerNotification = false;
 

@@ -69,6 +69,7 @@ MenuActionBar::MenuActionBar()
 	, hotkeys_temp(pab->hotkeys_temp)
 	, hotkeys_mod(pab->hotkeys_mod)
 	, locked(pab->locked)
+	, prevent_changing(pab->prevent_changing)
 	, requires_attention(pab->requires_attention)
 	, drag_prev_slot(-1)
 	, updated(pab->updated)
@@ -274,11 +275,11 @@ void MenuActionBar::align() {
 }
 
 void MenuActionBar::clearSlot(size_t slot) {
-	hotkeys[slot] = 0;
-	hotkeys_temp[slot] = 0;
-	hotkeys_mod[slot] = 0;
+	// hotkeys/hotkeys_temp/hotkeys_mod/locked live on pab now; this is the widget-only remainder
+	// -- see ActionBarState::clearSlot() for the part that moved.
+	pab->clearSlot(slot);
+
 	slot_item_count[slot] = -1;
-	locked[slot] = false;
 	slot_activated[slot] = false;
 	slot_fail_cooldown[slot].setDuration(Settings::SIM_TICK_HZ);
 	slot_fail_cooldown[slot].reset(Timer::END);
@@ -806,23 +807,6 @@ void MenuActionBar::checkMenu(bool &menu_c, bool &menu_i, bool &menu_p, bool &me
 	}
 }
 
-/**
- * Set all hotkeys at once e.g. when loading a game
- */
-void MenuActionBar::set(std::vector<PowerID> power_id, bool skip_empty) {
-	for (unsigned i = 0; i < slots_count; i++) {
-		if (!powers->isValid(power_id[i]))
-			continue;
-
-		if (!powers->powers[power_id[i]] || powers->powers[power_id[i]]->no_actionbar)
-			continue;
-
-		if (!skip_empty || hotkeys[i] == 0)
-			hotkeys[i] = power_id[i];
-	}
-	updated = true;
-}
-
 void MenuActionBar::setItemCount(unsigned index, int count, bool is_equipped) {
 	if (index >= slots_count || !slots[index]) return;
 
@@ -866,60 +850,26 @@ bool MenuActionBar::isWithinMenus(const Point& mouse) {
  * So a target_id of 0 will place the power in an empty slot, if available
  */
 void MenuActionBar::addPower(const PowerID id, const PowerID target_id) {
-	if (id == 0 && target_id != 0) {
-		// clear all slots that match target_id
-		for (unsigned i = 0; i < 12; ++i) {
-			if (hotkeys[i] == target_id && !prevent_changing[i]) {
-				clearSlot(i);
-				updated = true;
+	// The two branches below are mutually exclusive, not entangled: PowerID 0 always means "no
+	// power", so id == 0 always falls straight through to a return either way -- the original code
+	// (before this was two classes) reached the same outcome via powers->isValid(0) being false.
+	// That is what makes the split clean: "clear slots holding target_id" (this branch, the only
+	// one that touches a widget) and "place power id on a slot" (ActionBarState::addPower(), which
+	// never touched a widget even in the original -- see its header comment) never run in the same
+	// call, so nothing needs to hand off state between them.
+	if (id == 0) {
+		if (target_id != 0) {
+			for (unsigned i = 0; i < 12; ++i) {
+				if (hotkeys[i] == target_id && !prevent_changing[i]) {
+					clearSlot(i);
+					updated = true;
+				}
 			}
 		}
-	}
-
-	if (!powers->isValid(id))
 		return;
-
-	// some powers are explicitly prevented from being placed on the actionbar
-	if (powers->powers[id]->no_actionbar)
-		return;
-
-	// can't put passive powers on the action bar
-	if (powers->powers[id]->passive)
-		return;
-
-	// if we're not replacing an existing power, avoid placing duplicate powers
-	if (target_id == 0) {
-		for (unsigned i = 0; i < static_cast<unsigned>(SLOT_MAX); ++i) {
-			if (hotkeys[i] == id)
-				return;
-		}
 	}
 
-	// MAIN slots have priority
-	for (unsigned i=10; i<12; ++i) {
-		if (hotkeys[i] == target_id) {
-			if (target_id == 0 && prevent_changing[i]) {
-				continue;
-			}
-			hotkeys[i] = id;
-			updated = true;
-			if (target_id == 0)
-				return;
-		}
-	}
-
-	// now try 0-9 slots
-	for (unsigned i=0; i<10; ++i) {
-		if (hotkeys[i] == target_id) {
-			if (target_id == 0 && prevent_changing[i]) {
-				continue;
-			}
-			hotkeys[i] = id;
-			updated = true;
-			if (target_id == 0)
-				return;
-		}
-	}
+	pab->addPower(id, target_id);
 }
 
 Point MenuActionBar::getSlotPos(size_t slot) {

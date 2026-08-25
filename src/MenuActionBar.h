@@ -83,7 +83,6 @@ public:
 
 	static const bool REORDER = true;
 	static const bool CLEAR_SKIP_ITEMS = true;
-	static const bool SET_SKIP_EMPTY = true;
 
 	MenuActionBar();
 	~MenuActionBar();
@@ -98,7 +97,6 @@ public:
 	void drop(const Point& mouse, PowerID power_index, bool rearranging);
 	void actionReturn(PowerID power_index);
 	void remove(const Point& mouse);
-	void set(std::vector<PowerID> power_id, bool skip_empty);
 	void clearSlot(size_t slot);
 	void clear(bool skip_items);
 	Point getSlotPos(size_t slot);
@@ -124,7 +122,7 @@ public:
 	std::vector<PowerID>& hotkeys_temp; // temp for shapeshifting
 	std::vector<PowerID>& hotkeys_mod; // hotkeys can be changed by items
 	std::vector<bool>& locked; // if slot is locked, you cannot drop it
-	std::vector<bool> prevent_changing;
+	std::vector<bool>& prevent_changing;
 	std::vector<WidgetSlot *> slots; // hotkey slots
 	WidgetSlot *menus[MENU_COUNT]; // menu buttons
 	std::string menu_titles[MENU_COUNT];
