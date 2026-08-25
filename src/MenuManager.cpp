@@ -1180,7 +1180,7 @@ void MenuManager::logic() {
 
 		// highlight matching inventory slots based on what we're dragging
 		if (inv->visible && (mouse_dragging || keyboard_dragging)) {
-			pinv->inventory[PlayerInventory::EQUIPMENT].highlightMatching(drag_stack.item);
+			inv->inventory[MenuInventory::EQUIPMENT].highlightMatching(drag_stack.item);
 		}
 
 		// handle dropping
@@ -1376,9 +1376,9 @@ void MenuManager::dragAndDropWithKeyboard() {
 		WidgetSlot * inv_slot;
 
 		if (slot_index < inv->getEquippedCount())
-			inv_slot = pinv->inventory[PlayerInventory::EQUIPMENT].slots[slot_index];
+			inv_slot = inv->inventory[MenuInventory::EQUIPMENT].slots[slot_index];
 		else if (slot_index < inv->getTotalSlotCount())
-			inv_slot = pinv->inventory[PlayerInventory::CARRIED].slots[slot_index - inv->getEquippedCount()];
+			inv_slot = inv->inventory[MenuInventory::CARRIED].slots[slot_index - inv->getEquippedCount()];
 		else
 			inv_slot = NULL;
 
@@ -1545,8 +1545,8 @@ void MenuManager::resetDrag() {
 		stash->tabs[i].stock.drag_prev_slot = -1;
 	}
 	inv->drag_prev_src = -1;
-	pinv->inventory[PlayerInventory::EQUIPMENT].drag_prev_slot = -1;
-	pinv->inventory[PlayerInventory::CARRIED].drag_prev_slot = -1;
+	inv->inventory[MenuInventory::EQUIPMENT].drag_prev_slot = -1;
+	inv->inventory[MenuInventory::CARRIED].drag_prev_slot = -1;
 
 	keyboard_dragging = false;
 	mouse_dragging = false;
@@ -1710,12 +1710,12 @@ void MenuManager::handleKeyboardTooltips() {
 		int slot_index = inv->getCurrentTabList()->getCurrent();
 
 		if (slot_index < inv->getEquippedCount()) {
-			keydrag_pos.x = pinv->inventory[PlayerInventory::EQUIPMENT].slots[slot_index]->pos.x;
-			keydrag_pos.y = pinv->inventory[PlayerInventory::EQUIPMENT].slots[slot_index]->pos.y;
+			keydrag_pos.x = inv->inventory[MenuInventory::EQUIPMENT].slots[slot_index]->pos.x;
+			keydrag_pos.y = inv->inventory[MenuInventory::EQUIPMENT].slots[slot_index]->pos.y;
 		}
 		else if (slot_index < inv->getTotalSlotCount()) {
-			keydrag_pos.x = pinv->inventory[PlayerInventory::CARRIED].slots[slot_index - inv->getEquippedCount()]->pos.x;
-			keydrag_pos.y = pinv->inventory[PlayerInventory::CARRIED].slots[slot_index - inv->getEquippedCount()]->pos.y;
+			keydrag_pos.x = inv->inventory[MenuInventory::CARRIED].slots[slot_index - inv->getEquippedCount()]->pos.x;
+			keydrag_pos.y = inv->inventory[MenuInventory::CARRIED].slots[slot_index - inv->getEquippedCount()]->pos.y;
 		}
 		else {
 			Widget *temp_widget = inv->getCurrentTabList()->getWidgetByIndex(slot_index);
@@ -1821,7 +1821,7 @@ void MenuManager::pushMatchingItemsOf(const Point& hov_pos) {
 	if (inv->visible && Utils::isWithinRect(inv->window_area, hov_pos)) {
 		area = inv->areaOver(hov_pos);
 		if (area == MenuInventory::CARRIED)
-			hov_stack = pinv->inventory[area].getItemStackAtPos(hov_pos);
+			hov_stack = inv->inventory[area].getItemStackAtPos(hov_pos);
 	}
 	else if (vendor->visible && Utils::isWithinRect(vendor->window_area, hov_pos)) {
 		area = vendor->getTab();
@@ -1863,7 +1863,7 @@ void MenuManager::pushMatchingItemsOf(const Point& hov_pos) {
 				if (pinv->isEquipSlotActive(i) && !pinv->inventory[PlayerInventory::EQUIPMENT].storage[i].empty() && pinv->slot_type[i] == items->items[hov_stack.item]->type) {
 					Point match_pos(inv->equipped_area[i].x, inv->equipped_area[i].y);
 
-					TooltipData match = pinv->inventory[PlayerInventory::EQUIPMENT].checkTooltip(match_pos, &pc->stats, ItemManager::PLAYER_INV, !ItemManager::TOOLTIP_INPUT_HINT);
+					TooltipData match = inv->inventory[MenuInventory::EQUIPMENT].checkTooltip(match_pos, &pc->stats, ItemManager::PLAYER_INV, !ItemManager::TOOLTIP_INPUT_HINT);
 					match.addColoredText(msg->get("Equipped"), font->getColor(FontEngine::COLOR_ITEM_FLAVOR));
 
 					tooltipm->push(match, hov_pos, TooltipData::STYLE_FLOAT, tip_index);

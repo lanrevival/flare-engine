@@ -1198,13 +1198,13 @@ std::string Avatar::getGfxFromType(const std::string& gfx_type) {
 	std::string gfx;
 
 	if (menu && menu->inv) {
-		MenuItemStorage& equipment = pinv->inventory[PlayerInventory::EQUIPMENT];
+		ItemStorage& equipment = pinv->inventory[PlayerInventory::EQUIPMENT];
 
 		for (int i = 0; i < equipment.getSlotNumber(); i++) {
 			if (!pinv->isEquipSlotActive(i))
 				continue;
 
-			ItemType& equip_item_type = items->getItemType(equipment.slot_type[i]);
+			ItemType& equip_item_type = items->getItemType(pinv->slot_type[i]);
 
 			if (items->isValid(equipment[i].item) && gfx_type == equip_item_type.id) {
 				gfx = items->items[equipment[i].item]->gfx;

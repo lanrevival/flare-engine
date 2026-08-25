@@ -33,6 +33,12 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "TooltipData.h"
 #include "WidgetSlot.h"
 
+// data starts NULL, allocated lazily by initGrid()/initFromList() -- not here -- so that a
+// not-yet-initialized MenuItemStorage copies safely (NULL data, owns_data false) when
+// std::vector<MenuStashTab> grows via push_back. Allocating eagerly here would give every
+// temporary a live owned ItemStorage before init, and the vector's shallow copy on reallocation
+// would leave two MenuItemStorages both believing they own (and will delete) the same one --
+// exactly the double-free ItemStorage's own storage(NULL)-until-init() already avoids.
 MenuItemStorage::MenuItemStorage()
 	: grid_area()
 	, nb_cols(0)
@@ -42,11 +48,24 @@ MenuItemStorage::MenuItemStorage()
 	, current_slot(NULL)
 	, max_quantity_is_one(false)
 	, click_subtracts_item(true)
+	, data(NULL)
+	, owns_data(false)
 {
 }
 
+void MenuItemStorage::bind(ItemStorage* external) {
+	if (owns_data)
+		delete data;
+	data = external;
+	owns_data = false;
+}
+
 void MenuItemStorage::initGrid(int _slot_number, const Rect& _area, int _nb_cols) {
-	ItemStorage::init( _slot_number);
+	if (!data) {
+		data = new ItemStorage();
+		owns_data = true;
+	}
+	data->init(_slot_number);
 	grid_area = _area;
 	grid_pos.x = _area.x;
 	grid_pos.y = _area.y;
@@ -64,7 +83,11 @@ void MenuItemStorage::initGrid(int _slot_number, const Rect& _area, int _nb_cols
 }
 
 void MenuItemStorage::initFromList(int _slot_number, const std::vector<Rect>& _area, const std::vector<size_t>& _slot_type) {
-	ItemStorage::init( _slot_number);
+	if (!data) {
+		data = new ItemStorage();
+		owns_data = true;
+	}
+	data->init(_slot_number);
 	for (int i = 0; i < _slot_number; i++) {
 		WidgetSlot *slot = new WidgetSlot(WidgetSlot::NO_ICON, WidgetSlot::HIGHLIGHT_NORMAL);
 		slot->pos = _area[i];
@@ -73,6 +96,82 @@ void MenuItemStorage::initFromList(int _slot_number, const std::vector<Rect>& _a
 	}
 	nb_cols = 0;
 	slot_type = _slot_type;
+}
+
+ItemStack& MenuItemStorage::operator[](int slot) {
+	return (*data)[slot];
+}
+
+int MenuItemStorage::getSlotNumber() const {
+	return data->getSlotNumber();
+}
+
+void MenuItemStorage::setItems(const std::string& s) {
+	data->setItems(s);
+}
+
+void MenuItemStorage::setQuantities(const std::string& s) {
+	data->setQuantities(s);
+}
+
+void MenuItemStorage::setForeign(bool is_foreign) {
+	data->setForeign(is_foreign);
+}
+
+std::string MenuItemStorage::getItems() {
+	return data->getItems();
+}
+
+std::string MenuItemStorage::getQuantities() {
+	return data->getQuantities();
+}
+
+ItemStack MenuItemStorage::add(ItemStack stack, int slot) {
+	return data->add(stack, slot);
+}
+
+void MenuItemStorage::subtract(int slot, int quantity) {
+	data->subtract(slot, quantity);
+}
+
+bool MenuItemStorage::remove(ItemID item, int quantity) {
+	return data->remove(item, quantity);
+}
+
+void MenuItemStorage::sort(int mode) {
+	data->sort(mode);
+}
+
+void MenuItemStorage::sortNext() {
+	data->sortNext();
+}
+
+void MenuItemStorage::clear() {
+	data->clear();
+}
+
+void MenuItemStorage::clean() {
+	data->clean();
+}
+
+bool MenuItemStorage::empty() {
+	return data->empty();
+}
+
+bool MenuItemStorage::full(ItemStack stack) {
+	return data->full(stack);
+}
+
+int MenuItemStorage::count(ItemID item) {
+	return data->count(item);
+}
+
+bool MenuItemStorage::contain(ItemID item, int quantity) {
+	return data->contain(item, quantity);
+}
+
+void MenuItemStorage::refreshSortTooltip() {
+	data->refreshSortTooltip();
 }
 
 void MenuItemStorage::setPos(int x, int y) {
@@ -86,13 +185,13 @@ void MenuItemStorage::setPos(int x, int y) {
 }
 
 void MenuItemStorage::render() {
-	for (int i=0; i<slot_number; i++) {
-		if (items->isValid(storage[i].item)) {
-			slots[i]->setIcon(items->items[storage[i].item]->icon, items->getItemIconOverlay(storage[i].item));
+	for (int i=0; i<data->getSlotNumber(); i++) {
+		if (items->isValid(data->storage[i].item)) {
+			slots[i]->setIcon(items->items[data->storage[i].item]->icon, items->getItemIconOverlay(data->storage[i].item));
 			if (max_quantity_is_one)
 				slots[i]->setAmount(1, 1);
 			else
-				slots[i]->setAmount(storage[i].quantity, items->items[storage[i].item]->max_quantity);
+				slots[i]->setAmount(data->storage[i].quantity, items->items[data->storage[i].item]->max_quantity);
 		}
 		else {
 			slots[i]->setIcon(WidgetSlot::NO_ICON, WidgetSlot::NO_OVERLAY);
@@ -118,8 +217,8 @@ TooltipData MenuItemStorage::checkTooltip(const Point& position, StatBlock *stat
 	TooltipData tip;
 	int slot = slotOver(position);
 
-	if (slot > -1 && storage[slot].item > 0) {
-		return items->getTooltip(storage[slot], stats, context, input_hint);
+	if (slot > -1 && data->storage[slot].item > 0) {
+		return items->getTooltip(data->storage[slot], stats, context, input_hint);
 	}
 	return tip;
 }
@@ -143,7 +242,7 @@ ItemStack MenuItemStorage::click(const Point& position) {
 	}
 
 	if (drag_prev_slot > -1) {
-		item = storage[drag_prev_slot];
+		item = data->storage[drag_prev_slot];
 		if (inpt->mode == InputState::MODE_TOUCHSCREEN) {
 			if (!slots[drag_prev_slot]->in_focus && !item.empty()) {
 				slots[drag_prev_slot]->in_focus = true;
@@ -185,14 +284,14 @@ void MenuItemStorage::itemReturn(ItemStack stack) {
 }
 
 void MenuItemStorage::highlightMatching(ItemID item_id) {
-	for (int i=0; i<slot_number; i++) {
+	for (int i=0; i<data->getSlotNumber(); i++) {
 		if (slots[i]->visible && items->isValid(item_id) && slot_type[i] == items->items[item_id]->type)
 			slots[i]->highlight = true;
 	}
 }
 
 void MenuItemStorage::highlightClear() {
-	for (int i=0; i<slot_number; i++) {
+	for (int i=0; i<data->getSlotNumber(); i++) {
 		slots[i]->highlight = false;
 	}
 }
@@ -200,7 +299,7 @@ void MenuItemStorage::highlightClear() {
 ItemStack MenuItemStorage::getItemStackAtPos(const Point& position) {
 	int slot_over = slotOver(position);
 	if (slot_over > -1) {
-		return storage[slot_over];
+		return data->storage[slot_over];
 	}
 	return ItemStack();
 }
@@ -209,4 +308,6 @@ MenuItemStorage::~MenuItemStorage() {
 	for (size_t i = 0; i < slots.size(); ++i) {
 		delete slots[i];
 	}
+	if (owns_data)
+		delete data;
 }

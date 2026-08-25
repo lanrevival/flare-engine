@@ -214,7 +214,7 @@ MenuStash::MenuStash()
 		if (button_sort) {
 			button_sort->setBasePos(sort_pos.x, sort_pos.y, Utils::ALIGN_TOPLEFT);
 			for (size_t i = 0; i < tabs.size(); ++i) {
-				tabs[i].stock.sort_tooltip = &button_sort->tooltip;
+				tabs[i].stock.data->sort_tooltip = &button_sort->tooltip;
 			}
 			if (!tabs.empty()) {
 				tabs[0].stock.refreshSortTooltip();

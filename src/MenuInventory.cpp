@@ -70,7 +70,6 @@ MenuInventory::MenuInventory()
 	, preview(NULL)
 	, preview_enabled(false)
 	, sort_enabled(false)
-	, inventory(NULL)
 	, drag_prev_src(-1)
 	, changed_equipment(true)
 	, inv_ctrl(CTRL_NONE)
@@ -185,12 +184,17 @@ MenuInventory::MenuInventory()
 
 	label_currency.setColor(font->getColor(FontEngine::COLOR_MENU_NORMAL));
 
-	// Hand the parsed shape to the character's inventory, then bind this menu to it. The order
-	// matters and the second line is the one to read twice: `inventory` is a POINTER INTO
-	// pinv->inventory, not a copy of it. Everything below in this file, and every menu->inv->
-	// caller outside it, is reading and writing the same two storages the simulation owns.
-	pinv->init(equipped_area, parsed_slot_type, parsed_equipment_set, carried_area, carried_cols, carried_rows);
-	inventory = pinv->inventory;
+	// Hand the parsed shape to the character's inventory -- it sizes its own two ItemStorages --
+	// then bind this menu's widget-bearing views to point AT that data (P1.3d-4c). `inventory` is
+	// NOT a copy: MenuItemStorage::bind() makes each element read and write the same storage
+	// pinv->inventory[...] owns. Everything below in this file, and every menu->inv-> caller
+	// outside it, is reading and writing the same two storages the simulation owns; only the
+	// widget slots themselves (created by initFromList()/initGrid() below) belong to this menu.
+	pinv->init(equipped_area, parsed_slot_type, parsed_equipment_set, carried_cols, carried_rows);
+	inventory[EQUIPMENT].bind(&pinv->inventory[EQUIPMENT]);
+	inventory[CARRIED].bind(&pinv->inventory[CARRIED]);
+	inventory[EQUIPMENT].initFromList(pinv->MAX_EQUIPPED, equipped_area, parsed_slot_type);
+	inventory[CARRIED].initGrid(pinv->MAX_CARRIED, carried_area, carried_cols);
 
 	for (int i = 0; i < pinv->MAX_EQUIPPED; i++) {
 		tablist.add(inventory[EQUIPMENT].slots[i]);
@@ -261,7 +265,7 @@ MenuInventory::MenuInventory()
 			button_sort->setBasePos(sort_pos.x, sort_pos.y, Utils::ALIGN_TOPLEFT);
 			tablist.add(button_sort);
 
-			inventory[CARRIED].sort_tooltip = &button_sort->tooltip;
+			inventory[CARRIED].data->sort_tooltip = &button_sort->tooltip;
 			inventory[CARRIED].refreshSortTooltip();
 		}
 	}
@@ -769,7 +773,7 @@ void MenuInventory::activate(const Point& position) {
 	}
 	// equip an item
 	else if (pc->stats.humanoid && !items->getItemType(items->items[stack.item]->type).name.empty()) {
-		int equip_slot = pinv->getEquipSlotFromItem(inventory[CARRIED].storage[slot].item, !PlayerInventory::ONLY_EMPTY_SLOTS);
+		int equip_slot = pinv->getEquipSlotFromItem(inventory[CARRIED].data->storage[slot].item, !PlayerInventory::ONLY_EMPTY_SLOTS);
 
 		if (equip_slot >= 0) {
 			ItemStack active_stack = click(position);
@@ -851,7 +855,7 @@ void MenuInventory::removeFromPrevSlot(int quantity) {
 	if (drag_prev_src > -1 && inventory[drag_prev_src].drag_prev_slot > -1) {
 		int drag_prev_slot = inventory[drag_prev_src].drag_prev_slot;
 		inventory[drag_prev_src].subtract(drag_prev_slot, quantity);
-		if (inventory[drag_prev_src].storage[drag_prev_slot].empty()) {
+		if (inventory[drag_prev_src].data->storage[drag_prev_slot].empty()) {
 			if (drag_prev_src == EQUIPMENT)
 				updateEquipment(inventory[EQUIPMENT].drag_prev_slot);
 		}
@@ -973,10 +977,16 @@ void MenuInventory::updateEquipment(int slot) {
  * Given the equipped items, calculate the hero's stats
  */
 // Thin wrapper since P1.3d-4b-3 -- the real logic is PlayerInventory::applyEquipment() now. This
-// preserves the one thing that was genuinely MenuInventory's: refreshing the new-game/continue
-// screen's character preview, if one exists. See PlayerInventory.h for the full accounting.
+// preserves two things that were genuinely MenuInventory's: pulling the per-slot enabled state
+// PlayerInventory::applyEquipment() just recomputed into the equipment widgets (P1.3d-4c --
+// PlayerInventory::setEquipSlotEnabled() used to push this directly, see PlayerInventory.h), and
+// refreshing the new-game/continue screen's character preview, if one exists.
 void MenuInventory::applyEquipment() {
 	pinv->applyEquipment();
+
+	for (int i = 0; i < pinv->MAX_EQUIPPED; i++) {
+		inventory[EQUIPMENT].slots[i]->enabled = pinv->isEquipSlotEnabled(i);
+	}
 
 	if (preview)
 		preview->loadGraphicsFromInventory(this);

@@ -23,22 +23,20 @@ FLARE.  If not, see http://www.gnu.org/licenses/
  * a player's possessions were owned by a window -- fine for one local player, wrong the moment
  * there are eight and only one of them is looking at a screen.
  *
- * There is exactly ONE copy of this data. MenuInventory::inventory is a pointer INTO the array
- * below, not a second array, and that is the single most important property of this class: two
- * copies desynchronise and the symptom is items disappearing.
+ * There is exactly ONE copy of this data. MenuInventory::inventory (P1.3d-4c) is a MenuItemStorage
+ * array bound, via MenuItemStorage::bind(), to point AT the array below -- not a second array, and
+ * that is the single most important property of this class: two copies desynchronise and the
+ * symptom is items disappearing. inventory[] itself is a plain ItemStorage, not a MenuItemStorage:
+ * P1.3d-4c is what removed the std::vector<WidgetSlot*> that used to ride along on it, by making
+ * MenuItemStorage HOLD an ItemStorage instead of BEING one. The simulation keeps the ItemStorage,
+ * the menu keeps the widgets.
  *
- * Two things here are honestly out of place and are scheduled, not overlooked:
- *
- *   - MenuItemStorage carries a std::vector<WidgetSlot*>. So the simulation currently owns
- *     widgets. That is a wart. P1.3d-4c is what removes it, by making MenuItemStorage HOLD an
- *     ItemStorage instead of BEING one; the simulation keeps the ItemStorage and the menu keeps
- *     the widgets. Doing it in this step as well would have made one unreviewable commit out of
- *     two reviewable ones.
- *   - init() takes screen rectangles, because how many equipment slots a character has is
- *     currently the number of rectangles somebody drew in menus/inventory.txt. That is D1 in
- *     plans/phase1/P1.3-VERIFICATION.md and it is P1.3d-4d's problem. It is not a resolution
- *     dependency -- icon_size and the grid dimensions are mod constants, measured -- but it does
- *     mean this class cannot yet be built without a menu layout file.
+ * One thing here is honestly out of place and is scheduled, not overlooked: init() takes screen
+ * rectangles, because how many equipment slots a character has is currently the number of
+ * rectangles somebody drew in menus/inventory.txt. That is D1 in plans/phase1/P1.3-VERIFICATION.md
+ * and it is P1.3d-4d's problem. It is not a resolution dependency -- icon_size and the grid
+ * dimensions are mod constants, measured -- but it does mean this class cannot yet be built
+ * without a menu layout file.
  */
 
 #ifndef PLAYER_INVENTORY_H
@@ -46,7 +44,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 #include "CommonIncludes.h"
 #include "ItemManager.h"
-#include "MenuItemStorage.h"
+#include "ItemStorage.h"
 #include "Utils.h"
 
 class PlayerInventory {
@@ -65,19 +63,25 @@ public:
 	PlayerInventory();
 	~PlayerInventory();
 
-	/** Sizes and builds the two storages. Called once, from MenuInventory's constructor, after it
-	 * has parsed menus/inventory.txt -- see the note about D1 above.
+	/** Sizes the two storages. Called once, from MenuInventory's constructor, after it has parsed
+	 * menus/inventory.txt -- see the note about D1 above. equipped_area is still a vector of
+	 * screen Rects rather than a plain count for the same reason: D1 is what number of equipment
+	 * slots means before P1.3d-4d, and it is "however many rects the mod drew." carried_area
+	 * dropped out of this signature in P1.3d-4c -- MenuItemStorage's own initGrid() is what needed
+	 * it, for widget positions this class no longer allocates.
 	 */
 	void init(const std::vector<Rect>& equipped_area, const std::vector<size_t>& _slot_type,
 			  const std::vector<unsigned int>& _equipment_set,
-			  const Rect& carried_area, int carried_cols, int carried_rows);
+			  int carried_cols, int carried_rows);
 
 	/** Whether an equipment slot may hold an item.
 	 *
 	 * This was WidgetSlot::enabled until 17a15ffa -- a widget flag the simulation read to decide
 	 * whether an item could be equipped. It became a vector on MenuInventory then, and it belongs
-	 * here now. Written only through setEquipSlotEnabled(), which also updates the widget, so the
-	 * dependency runs state -> presentation and never back.
+	 * here now, as data only (P1.3d-4c removed the WidgetSlot push this method used to do).
+	 * MenuInventory::applyEquipment() pulls this into the equipment slots' widgets after every
+	 * call to PlayerInventory::applyEquipment(), the only place setEquipSlotEnabled() is called
+	 * from -- so the dependency still runs state -> presentation, just pulled instead of pushed.
 	 */
 	bool isEquipSlotEnabled(int slot) const;
 	void setEquipSlotEnabled(int slot, bool enabled);
@@ -163,7 +167,7 @@ public:
 
 	std::queue<ItemStack> drop_stack;
 
-	MenuItemStorage inventory[2];
+	ItemStorage inventory[2];
 
 	// Which item type each equipment slot accepts, and which equipment set it belongs to (0 means
 	// shared across all sets). Parallel to inventory[EQUIPMENT], one entry per slot.

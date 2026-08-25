@@ -100,6 +100,15 @@ jobs:
     #
     # It matches comments as well as code, deliberately, for the reason the RNG guard above gives.
     # MenuInventory.cpp/.h are excluded because that class legitimately holds the handle.
+    # MenuManager.cpp is excluded too, since P1.3d-4c: it is the drag-and-drop/tooltip hub across
+    # every menu, and its `inv` member IS the MenuInventory instance -- `inv->inventory[...]` there
+    # is the same handle, reached one hop further out, for the same widget-level reasons
+    # (highlightMatching(), .slots[], drag_prev_slot, checkTooltip(), getItemStackAtPos()). Before
+    # P1.3d-4c this didn't need an exclusion: those call sites went through pinv->inventory[...],
+    # which the sed already tolerates, because PlayerInventory::inventory was still MenuItemStorage-
+    # typed and had those widget methods too. P1.3d-4c is what split the types apart -- pinv's
+    # storage lost render()/slots/click() and kept only ItemStorage's data methods -- which is what
+    # forced MenuManager.cpp to name the actual widget owner instead.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
@@ -108,6 +117,7 @@ jobs:
         run: |
           hits=$(git grep -n 'inv->inventory\[' -- 'src/*.cpp' 'src/*.h' \
                  | grep -v '^src/MenuInventory\.' \
+                 | grep -v '^src/MenuManager\.cpp:' \
                  | sed 's/pinv->inventory\[//g' \
                  | grep 'inv->inventory\[' || true)
           if [ -n "$hits" ]; then
@@ -117,8 +127,10 @@ jobs:
             echo "The two storages belong to PlayerInventory. See src/PlayerInventory.h:"
             echo "  menu->inv->inventory[MenuInventory::CARRIED] -> pinv->inventory[PlayerInventory::CARRIED]"
             echo ""
-            echo "MenuInventory keeps a handle for RENDERING. It is not the way to ask what a"
-            echo "player is carrying, and after P1.3d-4c it will not hold the items at all."
+            echo "MenuInventory keeps a MenuItemStorage handle for RENDERING (bound, since"
+            echo "P1.3d-4c, to PlayerInventory's ItemStorage via MenuItemStorage::bind() -- not a"
+            echo "second copy). It is not the way to ask what a player is carrying: pinv->inventory"
+            echo "is plain ItemStorage now and has no widget methods to reach through a menu for."
             exit 1
           fi
           echo "OK: no menu-routed item storage access in src/"

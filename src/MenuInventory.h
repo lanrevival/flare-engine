@@ -156,14 +156,13 @@ public:
 	Rect carried_area;
 	std::vector<Rect> equipped_area;
 
-	/** Points at PlayerInventory::inventory. NOT a second array -- see PlayerInventory.h.
-	 *
-	 * A pointer rather than a reference so the declaration stays a one-liner and every
-	 * inventory[EQUIPMENT] in this class and its ~60 callers keeps compiling untouched. That is
-	 * deliberate: it keeps this commit a pure ownership move. P1.3d-4b deletes this member and
-	 * points the simulation-side callers at pinv directly.
+	/** Widget-bearing views onto PlayerInventory::inventory, bound (not copied) in the constructor
+	 * via MenuItemStorage::bind() -- see PlayerInventory.h and P1.3d-4c. Every inventory[EQUIPMENT]
+	 * / inventory[CARRIED] call site in this class keeps compiling and reading/writing the same
+	 * data as before; only the type of the member changed, from a pointer into pinv's array to an
+	 * owned array of views bound to it.
 	 */
-	MenuItemStorage* inventory;
+	MenuItemStorage inventory[2];
 	int drag_prev_src;
 
 	bool changed_equipment;

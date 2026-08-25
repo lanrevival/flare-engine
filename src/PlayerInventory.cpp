@@ -34,7 +34,6 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "SharedGameResources.h"
 #include "SharedResources.h"
 #include "StatBlock.h"
-#include "WidgetSlot.h"
 
 PlayerInventory::PlayerInventory()
 	: active_equipment_set(0)
@@ -50,7 +49,7 @@ PlayerInventory::PlayerInventory()
 
 void PlayerInventory::init(const std::vector<Rect>& equipped_area, const std::vector<size_t>& _slot_type,
 						   const std::vector<unsigned int>& _equipment_set,
-						   const Rect& carried_area, int carried_cols, int carried_rows) {
+						   int carried_cols, int carried_rows) {
 	slot_type = _slot_type;
 	equipment_set = _equipment_set;
 
@@ -59,8 +58,8 @@ void PlayerInventory::init(const std::vector<Rect>& equipped_area, const std::ve
 
 	equip_slot_enabled.resize(MAX_EQUIPPED, true);
 
-	inventory[EQUIPMENT].initFromList(MAX_EQUIPPED, equipped_area, slot_type);
-	inventory[CARRIED].initGrid(MAX_CARRIED, carried_area, carried_cols);
+	inventory[EQUIPMENT].init(MAX_EQUIPPED);
+	inventory[CARRIED].init(MAX_CARRIED);
 
 	for (size_t i = 0; i < equipment_set.size(); i++) {
 		if (equipment_set[i] > max_equipment_set) {
@@ -81,12 +80,6 @@ void PlayerInventory::setEquipSlotEnabled(int slot, bool enabled) {
 		return;
 
 	equip_slot_enabled[slot] = enabled;
-
-	// The widget still needs it: a disabled WidgetSlot draws differently and refuses clicks.
-	// Presentation follows the state, never the other way round. This is the one place the
-	// simulation touches a widget, and P1.3d-4c is what deletes it.
-	if (slot < static_cast<int>(inventory[EQUIPMENT].slots.size()))
-		inventory[EQUIPMENT].slots[slot]->enabled = enabled;
 }
 
 PlayerInventory::~PlayerInventory() {
