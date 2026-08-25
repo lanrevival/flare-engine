@@ -190,7 +190,35 @@ MenuInventory::MenuInventory()
 	// pinv->inventory[...] owns. Everything below in this file, and every menu->inv-> caller
 	// outside it, is reading and writing the same two storages the simulation owns; only the
 	// widget slots themselves (created by initFromList()/initGrid() below) belong to this menu.
-	pinv->init(equipped_area, parsed_slot_type, parsed_equipment_set, carried_cols, carried_rows);
+	//
+	// P1.3d-4d: pinv->loadEquipmentData() tries engine/equipment.txt first -- if the mod chain has
+	// one, it is authoritative for slot count/type/set and carrying capacity, and the
+	// equipment_slot=/carried_cols/carried_rows values just parsed above supply screen position
+	// ONLY, matched to it by file order (see PlayerInventory::loadEquipmentData()). If it doesn't
+	// exist, pinv->init() below falls back to exactly today's behaviour, unchanged.
+	bool has_equipment_data = pinv->loadEquipmentData();
+	if (has_equipment_data) {
+		if (equipped_area.size() != pinv->slot_type.size()) {
+			Utils::logError("MenuInventory: menus/inventory.txt has %d equipment_slot lines, but engine/equipment.txt defines %d slots. Screen positions were matched by line order up to the shorter of the two; extra slots on either side have no counterpart.",
+							 static_cast<int>(equipped_area.size()), static_cast<int>(pinv->slot_type.size()));
+		}
+		for (size_t i = 0; i < equipped_area.size() && i < pinv->slot_type.size(); ++i) {
+			if (parsed_slot_type[i] != pinv->slot_type[i] || static_cast<unsigned int>(parsed_equipment_set[i]) != pinv->equipment_set[i]) {
+				Utils::logError("MenuInventory: equipment_slot line %d in menus/inventory.txt doesn't match engine/equipment.txt's equip_slot line %d. The two files must list equipment slots in the same order.",
+								 static_cast<int>(i + 1), static_cast<int>(i + 1));
+			}
+		}
+		equipped_area.resize(pinv->MAX_EQUIPPED);
+		equipped_pos.resize(pinv->MAX_EQUIPPED);
+
+		if (pinv->MAX_CARRIED != carried_cols * carried_rows) {
+			Utils::logError("MenuInventory: engine/equipment.txt declares %d carried_slots, but menus/inventory.txt's carried_cols x carried_rows is %d. The character's real carrying capacity is the former; the grid drawn on screen may not match it.",
+							 pinv->MAX_CARRIED, carried_cols * carried_rows);
+		}
+	}
+	else {
+		pinv->init(equipped_area, parsed_slot_type, parsed_equipment_set, carried_cols, carried_rows);
+	}
 	inventory[EQUIPMENT].bind(&pinv->inventory[EQUIPMENT]);
 	inventory[CARRIED].bind(&pinv->inventory[CARRIED]);
 	inventory[EQUIPMENT].initFromList(pinv->MAX_EQUIPPED, equipped_area, parsed_slot_type);

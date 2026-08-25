@@ -24,6 +24,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Avatar.h"
 #include "EffectManager.h"
 #include "EngineSettings.h"
+#include "FileParser.h"
 #include "ItemManager.h"
 #include "MessageEngine.h"
 #include "PlayerInventory.h"
@@ -34,6 +35,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "SharedGameResources.h"
 #include "SharedResources.h"
 #include "StatBlock.h"
+#include "UtilsParsing.h"
 
 PlayerInventory::PlayerInventory()
 	: active_equipment_set(0)
@@ -66,6 +68,57 @@ void PlayerInventory::init(const std::vector<Rect>& equipped_area, const std::ve
 			max_equipment_set = equipment_set[i];
 		}
 	}
+}
+
+// P1.3d-4d. engine/equipment.txt is optional -- most mods don't have it yet, including every
+// third-party mod that predates this change, and that is by design: if it's absent, this returns
+// false and the caller (MenuInventory's constructor) falls back to deriving equipment shape from
+// menus/inventory.txt exactly as it always has, unchanged. If it's present, it is authoritative:
+// this class's shape no longer depends on any screen rectangle. See
+// plans/phase1/P1.3d-4d-equipment-data.md for why the file exists and what still lives in
+// menus/inventory.txt (screen positions only, matched back to these slots by file order).
+bool PlayerInventory::loadEquipmentData() {
+	FileParser infile;
+	if (!infile.open("engine/equipment.txt", FileParser::MOD_FILE, FileParser::ERROR_NONE))
+		return false;
+
+	std::vector<size_t> new_slot_type;
+	std::vector<unsigned int> new_equipment_set;
+	int new_carried = 0;
+
+	while (infile.next()) {
+		if (infile.key == "equip_slot") {
+			new_slot_type.push_back(items->getItemTypeIndexByString(Parse::popFirstString(infile.val)));
+			new_equipment_set.push_back(static_cast<unsigned int>(Parse::popFirstInt(infile.val)));
+		}
+		else if (infile.key == "carried_slots") {
+			new_carried = Parse::toInt(infile.val);
+		}
+		else {
+			infile.error("PlayerInventory: '%s' is not a valid key.", infile.key.c_str());
+		}
+	}
+	infile.close();
+
+	slot_type = new_slot_type;
+	equipment_set = new_equipment_set;
+
+	MAX_EQUIPPED = static_cast<int>(slot_type.size());
+	MAX_CARRIED = new_carried;
+
+	equip_slot_enabled.resize(MAX_EQUIPPED, true);
+
+	inventory[EQUIPMENT].init(MAX_EQUIPPED);
+	inventory[CARRIED].init(MAX_CARRIED);
+
+	max_equipment_set = 0;
+	for (size_t i = 0; i < equipment_set.size(); i++) {
+		if (equipment_set[i] > max_equipment_set) {
+			max_equipment_set = equipment_set[i];
+		}
+	}
+
+	return true;
 }
 
 bool PlayerInventory::isEquipSlotEnabled(int slot) const {

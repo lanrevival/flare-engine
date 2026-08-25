@@ -369,7 +369,7 @@ jobs:
         os: [ ubuntu-24.04, ubuntu-24.04-arm ]
         compiler: [ { cc: gcc, cxx: g++ }, { cc: clang, cxx: clang++ } ]
     env:
-      FLARE_GAME_COMMIT: af6eee6d339ac98011864bfe89da837fe7769c28
+      FLARE_GAME_COMMIT: 1ef2b59c649f9a853ee59081f3cac6ef53c60348
       FLARE_GOLDEN_SUFFIX: ${{ matrix.compiler.cc }}
     steps:
       - uses: actions/checkout@v7.0.1

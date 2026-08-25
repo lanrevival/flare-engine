@@ -31,12 +31,13 @@ FLARE.  If not, see http://www.gnu.org/licenses/
  * MenuItemStorage HOLD an ItemStorage instead of BEING one. The simulation keeps the ItemStorage,
  * the menu keeps the widgets.
  *
- * One thing here is honestly out of place and is scheduled, not overlooked: init() takes screen
- * rectangles, because how many equipment slots a character has is currently the number of
- * rectangles somebody drew in menus/inventory.txt. That is D1 in plans/phase1/P1.3-VERIFICATION.md
- * and it is P1.3d-4d's problem. It is not a resolution dependency -- icon_size and the grid
- * dimensions are mod constants, measured -- but it does mean this class cannot yet be built
- * without a menu layout file.
+ * D1 (plans/phase1/P1.3-VERIFICATION.md) -- how many equipment slots a character has used to be
+ * however many rectangles a mod author drew in menus/inventory.txt -- is resolved by P1.3d-4d for
+ * any mod that defines engine/equipment.txt: loadEquipmentData() reads slot type/set and carrying
+ * capacity from it directly, no screen rectangle involved, and this class can be built with no
+ * menu layout file at all. init() still exists, and still takes screen rectangles, as the fallback
+ * for a mod chain that has no engine/equipment.txt -- every mod that predates this change, so the
+ * old behaviour has to keep working exactly as it did. See plans/phase1/P1.3d-4d-equipment-data.md.
  */
 
 #ifndef PLAYER_INVENTORY_H
@@ -73,6 +74,14 @@ public:
 	void init(const std::vector<Rect>& equipped_area, const std::vector<size_t>& _slot_type,
 			  const std::vector<unsigned int>& _equipment_set,
 			  int carried_cols, int carried_rows);
+
+	/** P1.3d-4d. Reads engine/equipment.txt, if the mod chain has one, as the authoritative source
+	 * for equipment slots/sets and carrying capacity -- no screen rectangle involved. Returns
+	 * whether the file existed; MenuInventory's constructor calls this before init() and only
+	 * falls back to init()'s menus/inventory.txt-derived path if it returns false. See
+	 * plans/phase1/P1.3d-4d-equipment-data.md.
+	 */
+	bool loadEquipmentData();
 
 	/** Whether an equipment slot may hold an item.
 	 *
