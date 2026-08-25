@@ -195,6 +195,42 @@ jobs:
           fi
           echo "OK: no menu-routed power bonus-level access in the sim-side consumers"
 
+      - name: Inventory mutators are reached through pinv, not through a menu
+        run: |
+          # P1.3d-4b-3 moved add()/remove()/addCurrency()/applyEquipment()/applyDeathPenalty()/
+          # fillEquipmentSlots() off MenuInventory and onto PlayerInventory (pinv), now that P1.3e
+          # (pab) and P1.3g (pbs) removed the two things that used to force them through a menu.
+          # MenuInventory keeps thin wrappers for add()/remove()/applyEquipment() -- see
+          # PlayerInventory.h -- used by its own drop()/activate()/buy()/itemReturn() and by
+          # MenuManager/MenuPowers, none of which this guard touches. What it bans is a sim-side
+          # file reaching those wrappers instead of calling pinv-> directly.
+          #
+          # remove() is checked separately: GameStatePlay.cpp keeps exactly ONE call through the
+          # wrapper, documented at its call site, because MenuInventory's activated_item/
+          # activated_slot special case (which pinv->remove() deliberately does not have) is what
+          # makes a right-click item activation consume the exact slot the player clicked. That is
+          # the only sanctioned exception in the whole tree -- if this count is ever 0, the comment
+          # protecting it was deleted along with the call; if it's ever >1, a new one snuck in.
+          moved='add|addCurrency|applyEquipment\(\)|applyDeathPenalty|fillEquipmentSlots'
+          hits=$(grep -nE "menu->inv->($moved)\(" \
+                 src/CampaignManager.cpp src/PowerManager.cpp src/EventManager.cpp \
+                 src/GameStatePlay.cpp src/SaveLoad.cpp src/EntityManager.cpp || true)
+          removehits=$(grep -nE 'menu->inv->remove\(' \
+                 src/CampaignManager.cpp src/PowerManager.cpp src/EventManager.cpp \
+                 src/SaveLoad.cpp src/EntityManager.cpp || true)
+          removecount_gsp=$(grep -cE 'menu->inv->remove\(' src/GameStatePlay.cpp || true)
+          if [ -n "$hits" ] || [ -n "$removehits" ] || [ "$removecount_gsp" -ne 1 ]; then
+            echo "$hits"
+            echo "$removehits"
+            echo "GameStatePlay.cpp menu->inv->remove() count: $removecount_gsp (expected 1)"
+            echo ""
+            echo "ERROR: inventory mutator state is being reached through the inventory menu."
+            echo "These belong to PlayerInventory now. See src/PlayerInventory.h:"
+            echo "  menu->inv->add(...) -> pinv->add(...)"
+            exit 1
+          fi
+          echo "OK: no menu-routed inventory mutator access in the sim-side consumers"
+
   replays:
     # Replays a corpus of recorded input and compares world-state digests against committed
     # goldens. This is the regression test Phases 1 and 2 lean on: almost every plan in them is a

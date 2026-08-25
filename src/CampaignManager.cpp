@@ -171,7 +171,7 @@ void CampaignManager::removeItem(ItemStack istack) {
 	int item_count = pinv->inventory[PlayerInventory::CARRIED].count(istack.item) + pinv->inventory[PlayerInventory::EQUIPMENT].count(istack.item);
 	int max_amount = std::min(item_count, istack.quantity);
 
-	if (menu->inv->remove(istack.item, max_amount)) {
+	if (pinv->remove(istack.item, max_amount)) {
 		if (max_amount > 1)
 			pc->logMsg(msg->getv("%s x%d removed.", items->getItemName(istack.item).c_str(), max_amount), Avatar::MSG_UNIQUE);
 		else if (max_amount == 1)
@@ -186,7 +186,7 @@ void CampaignManager::rewardItem(ItemStack istack) {
 	if (istack.empty())
 		return;
 
-	menu->inv->add(istack, MenuInventory::CARRIED, ItemStorage::NO_SLOT, MenuInventory::ADD_PLAY_SOUND, MenuInventory::ADD_AUTO_EQUIP);
+	pinv->add(istack, PlayerInventory::CARRIED, ItemStorage::NO_SLOT, PlayerInventory::ADD_PLAY_SOUND, PlayerInventory::ADD_AUTO_EQUIP);
 
 	if (istack.item == eset->misc.currency_id) {
 		pc->logMsg(msg->getv("You receive %d %s.", istack.quantity, eset->loot.currency.c_str()), Avatar::MSG_UNIQUE);

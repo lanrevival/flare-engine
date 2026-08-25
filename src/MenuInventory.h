@@ -32,7 +32,6 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Utils.h"
 #include "WidgetLabel.h"
 
-class BonusData;
 class GameSlotPreview;
 class StatBlock;
 class WidgetButton;
@@ -84,6 +83,12 @@ public:
 	static const int EQUIPMENT = 0;
 	static const int CARRIED = 1;
 
+	// Duplicated on PlayerInventory now (P1.3d-4b-3), not aliased -- add()'s real home. Kept here
+	// too, unlike the mod-select constant P1.3d-4b-2 deleted outright, because this class's own
+	// drop()/activate()/buy()/itemReturn() still call add() (the thin wrapper below) with these as
+	// readable argument names, and qualifying every one of those call sites with
+	// PlayerInventory:: for a constant that is still exactly `true` on both classes would be
+	// churn with no behaviour to show for it.
 	static const bool ADD_PLAY_SOUND = true;
 	static const bool ADD_AUTO_EQUIP = true;
 	static const bool IS_DRAGGING = true;
@@ -91,8 +96,6 @@ public:
 	explicit MenuInventory();
 	~MenuInventory();
 	void align();
-
-	void applyDeathPenalty();
 
 	/** Steps the active equipment set: +1 next, -1 previous, 0 nothing.
 	 *
@@ -116,19 +119,25 @@ public:
 	bool drop(const Point& position, ItemStack stack);
 	void activate(const Point& position);
 
+	/** add(), remove() and applyEquipment() are thin wrappers now (P1.3d-4b-3) -- the mutators
+	 * moved to PlayerInventory, which every genuinely sim-side caller now calls directly. What's
+	 * left here is exactly the UI-only behaviour those bodies used to have bundled in: add()'s
+	 * equipment-slot redraw flag and the drag-state reset, remove()'s activated-item special case,
+	 * applyEquipment()'s GameSlotPreview refresh. See PlayerInventory.h for the full accounting of
+	 * what moved and why each of these three didn't move whole. Every existing caller of these
+	 * three -- this class's own drop()/activate()/buy()/itemReturn(), MenuManager, MenuPowers --
+	 * keeps calling them exactly as before; only CampaignManager/PowerManager/EventManager/
+	 * GameStatePlay/SaveLoad were repointed to pinv-> directly.
+	 */
 	bool add(ItemStack stack, int area, int slot, bool play_sound, bool auto_equip);
 	bool remove(ItemID item, int quantity);
 	void removeFromPrevSlot(int quantity);
-	void addCurrency(int count);
 	bool buy(ItemStack stack, int tab, bool dragging);
 	bool sell(ItemStack stack);
 
 	bool requirementsMet(ItemID item);
 
 	void applyEquipment();
-	void applyItemStats();
-	void applyItemSetBonuses(std::vector<ItemSetID> &active_sets, std::vector<int> &active_set_quantities);
-	void applyBonus(const BonusData* bdata);
 	void applyEquipmentSet(unsigned set);
 	void applyNextEquipmentSet();
 	void applyPreviousEquipmentSet();
@@ -138,11 +147,7 @@ public:
 
 	void clearHighlight();
 
-	void fillEquipmentSlots();
-
 	int getMaxPurchasable(ItemStack item, int vendor_tab);
-
-	void disableEquipmentSlot(size_t slot_type);
 
 	bool canEquipItem(const Point& position);
 	bool canUseItem(const Point& position);

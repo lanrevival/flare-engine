@@ -290,7 +290,7 @@ void GameStatePlay::checkLoot() {
 	}
 
 	if (!pickup.empty()) {
-		menu->inv->add(pickup, MenuInventory::CARRIED, ItemStorage::NO_SLOT, MenuInventory::ADD_PLAY_SOUND, MenuInventory::ADD_AUTO_EQUIP);
+		pinv->add(pickup, PlayerInventory::CARRIED, ItemStorage::NO_SLOT, PlayerInventory::ADD_PLAY_SOUND, PlayerInventory::ADD_AUTO_EQUIP);
 		if (items->isValid(pickup.item)) {
 			StatusID pickup_status = camp->registerStatus(items->items[pickup.item]->pickup_status);
 			camp->setStatus(pickup_status);
@@ -654,6 +654,17 @@ void GameStatePlay::checkLootDrop() {
 		}
 		menu->inv->drop_stack.pop();
 	}
+
+	// Same as menu->inv->drop_stack above, but for overflow from pinv->add() -- P1.3d-4b-3 gave
+	// PlayerInventory its own queue rather than reaching back into a menu that may not exist to
+	// push into this one. UI-triggered overflow (drag-and-drop) still goes through
+	// menu->inv->drop_stack above; sim-triggered overflow (loot pickup, quest rewards) goes here.
+	while (!pinv->drop_stack.empty()) {
+		if (!pinv->drop_stack.front().empty()) {
+			loot->addLoot(pinv->drop_stack.front(), pc->stats.pos, LootManager::DROPPED_BY_HERO);
+		}
+		pinv->drop_stack.pop();
+	}
 }
 
 /**
@@ -661,11 +672,16 @@ void GameStatePlay::checkLootDrop() {
  */
 void GameStatePlay::checkUsedItems() {
 	for (unsigned i=0; i<powers->used_items.size(); i++) {
+		// Deliberately still routed through MenuInventory's wrapper here, not PlayerInventory
+		// directly -- it keeps the activated_item/activated_slot special case (P1.3d-4b-3), which
+		// is what makes a right-click activation consume the exact carried slot the player clicked
+		// rather than just any stack of the same item. Repointing this one needs that case
+		// designed a sim-side equivalent first, not just deleted.
 		menu->inv->remove(powers->used_items[i], 1);
 	}
 	for (unsigned i=0; i<powers->used_equipped_items.size(); i++) {
 		pinv->inventory[PlayerInventory::EQUIPMENT].remove(powers->used_equipped_items[i], 1);
-		menu->inv->applyEquipment();
+		pinv->applyEquipment();
 	}
 	powers->used_items.clear();
 	powers->used_equipped_items.clear();
@@ -884,10 +900,11 @@ void GameStatePlay::logic() {
 	checkCutscene();
 
 	// The death penalty is simulation and is driven from here, not from menu->logic(), which is
-	// where it used to run. See MenuInventory::applyDeathPenalty(). The call sits immediately
-	// before menu->logic() so the tick it lands on is exactly the one it landed on before --
-	// this was a pure relocation and every golden had to stay put to prove it.
-	menu->inv->applyDeathPenalty();
+	// where it used to run. See PlayerInventory::applyDeathPenalty() (moved there outright in
+	// P1.3d-4b-3, no menu involved any more). The call sits immediately before menu->logic() so
+	// the tick it lands on is exactly the one it landed on before -- this was a pure relocation
+	// and every golden had to stay put to prove it.
+	pinv->applyDeathPenalty();
 
 	// check menus first (top layer gets mouse click priority)
 	menu->logic();
@@ -1025,7 +1042,7 @@ void GameStatePlay::logic() {
 
 		// reapply equipment if the transformation allows it
 		if (pc->stats.transform_with_equipment)
-			menu->inv->applyEquipment();
+			pinv->applyEquipment();
 	}
 	// revert hero powers
 	if (pc->revertPowers) {
@@ -1040,7 +1057,7 @@ void GameStatePlay::logic() {
 		pab->updated = true;
 
 		// also reapply equipment here, to account items that give bonuses to base stats
-		menu->inv->applyEquipment();
+		pinv->applyEquipment();
 	}
 
 	// when the hero (re)spawns, reapply equipment & passive effects
@@ -1048,7 +1065,7 @@ void GameStatePlay::logic() {
 		pc->stats.alive = true;
 		pc->stats.corpse = false;
 		pc->stats.cur_state = StatBlock::ENTITY_STANCE;
-		menu->inv->applyEquipment();
+		pinv->applyEquipment();
 		menu->inv->changed_equipment = true;
 		checkEquipmentChange();
 		pc->stats.hp = pc->stats.get(Stats::HP_MAX);

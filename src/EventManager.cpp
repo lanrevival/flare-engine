@@ -34,6 +34,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuManager.h"
 #include "MessageEngine.h"
 #include "ModManager.h"
+#include "PlayerInventory.h"
 #include "PowerManager.h"
 #include "Rng.h"
 #include "Settings.h"
@@ -1286,7 +1287,7 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 				}
 
 				pc->stats.recalc();
-				menu->inv->applyEquipment();
+				pinv->applyEquipment();
 				pc->stats.logic();
 			}
 			if (ec->data[0].Int >= 1) {

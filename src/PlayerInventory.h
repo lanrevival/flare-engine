@@ -105,10 +105,63 @@ public:
 	bool canActivateItem(ItemID item) const;
 	PowerID getPowerMod(PowerID meta_power) const;
 
-	/** The one mutator that came across, because it has no UI in it at all: it is a single call
-	 * into the carried storage. addCurrency() stayed behind -- it goes through add().
+	/** The one mutator that came across in P1.3d-4b-2, because it has no UI in it at all: it is a
+	 * single call into the carried storage. addCurrency() stayed behind then -- it goes through
+	 * add(), which hadn't moved yet.
 	 */
 	void removeCurrency(int count);
+
+	/** The rest of the mutators, moved in P1.3d-4b-3 once P1.3e (ActionBarState) and P1.3g
+	 * (PowerBonusState) had removed the two real reasons they couldn't come with 4b-2: add() used
+	 * to call menu_act->addPower() and applyEquipment() used to call menu->pow->clearBonusLevels().
+	 * Both now go through pab/pbs, neither of which needs a menu to exist.
+	 *
+	 * What did NOT move, and why -- each of these is a MenuInventory-owned UI concern entangled in
+	 * the original body, not a simulation concern that got left behind by mistake:
+	 *
+	 *   - add()'s EQUIPMENT branch used to call updateEquipment(slot), a one-line dirty flag
+	 *     MenuManager reads to decide whether to redraw a slot icon. Dropped from this version.
+	 *     Every UI caller that changes equipment already separately calls updateEquipment() itself
+	 *     at the same call site (see MenuInventory::drop()/activate()), so nothing currently relies
+	 *     on add() setting it internally.
+	 *   - applyEquipment()'s last two lines used to call preview->loadGraphicsFromInventory(this)
+	 *     -- a GameSlotPreview widget used by the new-game/continue screen. Dropped. MenuInventory
+	 *     keeps a thin applyEquipment() that calls this version and then does that one line, and
+	 *     every existing caller (UI or otherwise) still goes through it unchanged -- see below.
+	 *   - remove()'s FIRST branch checked activated_item/activated_slot, MenuInventory's record of
+	 *     which exact carried slot a right-click activation targeted, so the right stack (not just
+	 *     any stack of the same item) gets consumed. That is UI interaction state with no
+	 *     simulation meaning outside a live click, so it is not here -- this version is only the
+	 *     general-case fallback. MenuInventory::remove() keeps the special case and falls through
+	 *     to this for everything else.
+	 *
+	 * MenuInventory::add(), ::remove() and ::applyEquipment() all still exist, as thin wrappers
+	 * around these, for exactly the reason MenuActionBar::addPower()'s id==0 branch and
+	 * MenuActionBar::clear() still exist after P1.3e: a caller that IS a live UI (MenuManager.cpp,
+	 * MenuPowers.cpp, and MenuInventory's own drop()/activate()/buy()/itemReturn()) has no reason
+	 * to skip the widget bookkeeping, and forcing it to would be trading one kind of correctness
+	 * risk for another. Only genuinely sim-side callers (CampaignManager, PowerManager,
+	 * EventManager, GameStatePlay, SaveLoad) were repointed to call these directly.
+	 *
+	 * drop_stack is new here, not moved: overflow items (inventory full) still have to go
+	 * somewhere when add() is called with no menu around to own a queue for them.
+	 * GameStatePlay::checkLootDrop() drains this alongside menu->drop_stack/camp->drop_stack/
+	 * menu->inv->drop_stack, which still exist and are still drained separately -- UI-triggered
+	 * overflow (drag-and-drop) still goes through MenuInventory's own queue via the wrapper.
+	 */
+	bool add(ItemStack stack, int area, int slot, bool play_sound, bool auto_equip);
+	bool remove(ItemID item, int quantity);
+	void addCurrency(int count);
+	void applyEquipment();
+	void applyDeathPenalty();
+	void fillEquipmentSlots();
+
+	// Argument names for add(), moved from MenuInventory alongside it. Deleted there, not aliased
+	// -- same reasoning as ONLY_EMPTY_SLOTS above.
+	static const bool ADD_PLAY_SOUND = true;
+	static const bool ADD_AUTO_EQUIP = true;
+
+	std::queue<ItemStack> drop_stack;
 
 	MenuItemStorage inventory[2];
 
@@ -127,6 +180,19 @@ public:
 
 private:
 	std::vector<bool> equip_slot_enabled;
+
+	// applyEquipment()'s own helpers, moved with it. Only ever called from within it (or, for
+	// disableEquipmentSlot(), from within applyEquipment() and nowhere else in the whole tree --
+	// verified by grep before moving, not assumed).
+	void applyItemStats();
+	void applyItemSetBonuses(std::vector<ItemSetID>& active_sets, std::vector<int>& active_set_quantities);
+	void applyBonus(const BonusData* bdata);
+	void disableEquipmentSlot(size_t disable_slot_type);
+
+	// currency is a cache of inventory[CARRIED].count(currency_id), recomputed here so it stays
+	// correct with no MenuInventory::logic() around to do it once a frame. That line still exists
+	// there too, redundantly -- see MenuInventory.cpp -- which is harmless, not a second owner.
+	void recomputeCurrency();
 };
 
 #endif

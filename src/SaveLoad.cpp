@@ -545,7 +545,7 @@ void SaveLoad::loadGame() {
 	}
 
 	// add legacy currency to inventory
-	menu->inv->addCurrency(currency);
+	pinv->addCurrency(currency);
 
 	// apply stats, inventory, and powers
 	applyPlayerData();
@@ -610,7 +610,7 @@ void SaveLoad::loadClass(int index) {
 	}
 
 	// inventory
-	menu->inv->addCurrency(hero_class.currency);
+	pinv->addCurrency(hero_class.currency);
 
 	ItemStack stack;
 
@@ -618,7 +618,7 @@ void SaveLoad::loadClass(int index) {
 	while (!equipment.empty()) {
 		stack = Parse::toItemQuantityPair(Parse::popFirstString(equipment));
 		int equip_slot = pinv->getEquipSlotFromItem(stack.item, PlayerInventory::ONLY_EMPTY_SLOTS);
-		menu->inv->add(stack, MenuInventory::EQUIPMENT, equip_slot, !MenuInventory::ADD_PLAY_SOUND, !MenuInventory::ADD_AUTO_EQUIP);
+		pinv->add(stack, PlayerInventory::EQUIPMENT, equip_slot, !PlayerInventory::ADD_PLAY_SOUND, !PlayerInventory::ADD_AUTO_EQUIP);
 	}
 
 	for (size_t i = 0; i < hero_class.equipment_sets.size(); ++i) {
@@ -627,7 +627,7 @@ void SaveLoad::loadClass(int index) {
 		while (!equipment_set.empty()) {
 			stack = Parse::toItemQuantityPair(Parse::popFirstString(equipment_set));
 			int equip_slot = pinv->getEquipSlotFromItem(stack.item, PlayerInventory::ONLY_EMPTY_SLOTS);
-			menu->inv->add(stack, MenuInventory::EQUIPMENT, equip_slot, !MenuInventory::ADD_PLAY_SOUND, !MenuInventory::ADD_AUTO_EQUIP);
+			pinv->add(stack, PlayerInventory::EQUIPMENT, equip_slot, !PlayerInventory::ADD_PLAY_SOUND, !PlayerInventory::ADD_AUTO_EQUIP);
 		}
 
 	}
@@ -636,7 +636,7 @@ void SaveLoad::loadClass(int index) {
 	std::string carried = hero_class.carried;
 	while (!carried.empty()) {
 		stack = Parse::toItemQuantityPair(Parse::popFirstString(carried));
-		menu->inv->add(stack, MenuInventory::CARRIED, ItemStorage::NO_SLOT, !MenuInventory::ADD_PLAY_SOUND, !MenuInventory::ADD_AUTO_EQUIP);
+		pinv->add(stack, PlayerInventory::CARRIED, ItemStorage::NO_SLOT, !PlayerInventory::ADD_PLAY_SOUND, !PlayerInventory::ADD_AUTO_EQUIP);
 	}
 
 	// powers & action bar
@@ -710,7 +710,7 @@ void SaveLoad::loadStash() {
  * Performs final calculations after loading a save or a new class
  */
 void SaveLoad::applyPlayerData() {
-	menu->inv->fillEquipmentSlots();
+	pinv->fillEquipmentSlots();
 
 	// remove items with zero quantity from inventory
 	pinv->inventory[PlayerInventory::EQUIPMENT].clean();
@@ -722,7 +722,7 @@ void SaveLoad::applyPlayerData() {
 	// initialize vars
 	pc->stats.recalc();
 	pc->stats.loadHeroSFX();
-	menu->inv->applyEquipment();
+	pinv->applyEquipment();
 	pc->stats.logic(); // run stat logic once to apply items bonuses
 
 	// just for aesthetics, turn the hero to face the camera

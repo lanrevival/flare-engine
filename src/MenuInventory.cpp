@@ -305,77 +305,8 @@ void MenuInventory::align() {
 		button_sort->setPos(window_area.x, window_area.y);
 }
 
-/** The death penalty: currency, XP, and one destroyed item.
- *
- * This is SIMULATION, and until P1.3b it ran as a side effect of MenuInventory::logic() -- a
- * menu's per-tick update, mutating pc->stats and drawing from sim_rng, the stream P0.3b created
- * so that simulation draws would be reproducible. Avatar.cpp said so out loud: "raise the death
- * penalty flag. This is handled in MenuInventory".
- *
- * It now runs from GameStatePlay's tick instead, so that making MenuManager optional (P1.3f)
- * cannot silently delete it. The CODE still lives here because it needs the inventory, and the
- * inventory is still menu-owned; P1.3d gives it a sim-side owner and this method moves with the
- * rest of the storage operations, its call site becoming pc->inventory.applyDeathPenalty().
- *
- * Deliberately NOT moved into the !isPaused() block. That would be a real behaviour change in a
- * case no recording can see, since the corpus never pauses. P1.3c splits the pause concept and is
- * where this belongs.
- */
-void MenuInventory::applyDeathPenalty() {
-	if (pc->stats.death_penalty && eset->death_penalty.enabled) {
-		std::string death_message = "";
-
-		// remove a % of currency
-		if (eset->death_penalty.currency > 0) {
-			if (pinv->currency > 0)
-				pinv->removeCurrency(static_cast<int>((static_cast<float>(pinv->currency) * eset->death_penalty.currency) / 100.f));
-			death_message += msg->getv("Lost %s%% of %s.", Utils::floatToString(eset->death_penalty.currency, eset->number_format.death_penalty).c_str(), eset->loot.currency.c_str()) + ' ';
-		}
-
-		// remove a % of either total xp or xp since the last level
-		if (eset->death_penalty.xp > 0) {
-			if (pc->stats.xp > 0)
-				pc->stats.xp -= static_cast<int>((static_cast<float>(pc->stats.xp) * eset->death_penalty.xp) / 100.f);
-			death_message += msg->getv("Lost %s%% of total XP.", Utils::floatToString(eset->death_penalty.xp, eset->number_format.death_penalty).c_str()) + ' ';
-		}
-		else if (eset->death_penalty.xp_current > 0) {
-			if (pc->stats.xp - eset->xp.getLevelXP(pc->stats.level) > 0)
-				pc->stats.xp -= static_cast<int>((static_cast<float>(pc->stats.xp - eset->xp.getLevelXP(pc->stats.level)) * eset->death_penalty.xp_current) / 100.f);
-			death_message += msg->getv("Lost %s%% of current level XP.", Utils::floatToString(eset->death_penalty.xp_current, eset->number_format.death_penalty).c_str()) + ' ';
-		}
-
-		// prevent down-leveling from removing too much xp
-		if (pc->stats.xp < eset->xp.getLevelXP(pc->stats.level))
-			pc->stats.xp = eset->xp.getLevelXP(pc->stats.level);
-
-		// remove a random carried item
-		if (eset->death_penalty.item) {
-			std::vector<ItemID> removable_items;
-			removable_items.clear();
-			for (int i=0; i < pinv->MAX_EQUIPPED; i++) {
-				if (!inventory[EQUIPMENT][i].empty() && items->isValid(inventory[EQUIPMENT][i].item)) {
-					if (!items->items[inventory[EQUIPMENT][i].item]->quest_item)
-						removable_items.push_back(inventory[EQUIPMENT][i].item);
-				}
-			}
-			for (int i=0; i < pinv->MAX_CARRIED; i++) {
-				if (!inventory[CARRIED][i].empty() && items->isValid(inventory[CARRIED][i].item)) {
-					if (!items->items[inventory[CARRIED][i].item]->quest_item)
-						removable_items.push_back(inventory[CARRIED][i].item);
-				}
-			}
-			if (!removable_items.empty()) {
-				size_t random_item = sim_rng->index(removable_items.size());
-				remove(removable_items[random_item], 1);
-				death_message += msg->getv("Lost %s.",items->getItemName(removable_items[random_item]).c_str());
-			}
-		}
-
-		pc->logMsg(death_message, Avatar::MSG_NORMAL);
-
-		pc->stats.death_penalty = false;
-	}
-}
+// applyDeathPenalty() moved to PlayerInventory in P1.3d-4b-3 -- see its header comment there for
+// why the call site moved to GameStatePlay's tick first, back in P1.3b, ahead of the code itself.
 
 void MenuInventory::logic() {
 
@@ -888,135 +819,32 @@ void MenuInventory::activate(const Point& position) {
  * @param area Area number where it will try to store the item
  * @param slot Slot number where it will try to store the item
  */
+// Thin wrapper since P1.3d-4b-3 -- the real logic is PlayerInventory::add() now. This preserves the
+// two things that were genuinely MenuInventory's: the equipment-slot redraw flag (only relevant
+// when area == EQUIPMENT, matching the one place the original body called it) and ending whatever
+// mouse drag was in progress. See PlayerInventory.h for the full accounting.
 bool MenuInventory::add(ItemStack stack, int area, int slot, bool play_sound, bool auto_equip) {
-	if (stack.empty())
-		return true;
-
-	if (!items->isValid(stack.item))
-		return false;
-
-	bool success = true;
-
-	if (play_sound)
-		items->playSound(stack.item);
-
-	if (auto_equip && settings->auto_equip) {
-		int equip_slot = pinv->getEquipSlotFromItem(stack.item, PlayerInventory::ONLY_EMPTY_SLOTS);
-		bool disabled_slots_empty = true;
-
-		// if this item would disable non-empty slots, don't auto-equip it
-		for (size_t i = 0; i < items->items[stack.item]->disable_slots.size(); ++i) {
-			for (int j = 0; j < pinv->MAX_EQUIPPED; ++j) {
-				if (!inventory[EQUIPMENT].storage[j].empty() && pinv->slot_type[j] == items->items[stack.item]->disable_slots[i]) {
-					disabled_slots_empty = false;
-				}
-			}
-		}
-
-		if (equip_slot >= 0 && pinv->isEquipSlotEnabled(equip_slot) && disabled_slots_empty) {
-			area = EQUIPMENT;
-			slot = equip_slot;
-		}
-
-	}
-
-	if (area == CARRIED) {
-		ItemStack leftover = inventory[CARRIED].add(stack, slot);
-		if (!leftover.empty()) {
-			if (items->items[stack.item]->quest_item) {
-				// quest items can't be dropped, so find a non-quest item in the inventory to drop
-				const int max_q = items->items[stack.item]->max_quantity;
-				int slots_to_clear = 1;
-				if (max_q > 0)
-					slots_to_clear = leftover.quantity + (leftover.quantity % max_q) / max_q;
-
-				for (int i = pinv->MAX_CARRIED-1; i >=0; --i) {
-					if (items->items[inventory[CARRIED].storage[i].item]->quest_item)
-						continue;
-
-					drop_stack.push(inventory[CARRIED].storage[i]);
-					inventory[CARRIED].storage[i].clear();
-
-					slots_to_clear--;
-					if (slots_to_clear <= 0)
-						break;
-				}
-
-				if (slots_to_clear > 0) {
-					// inventory is full of quest items! we have to drop this now...
-					drop_stack.push(leftover);
-				}
-				else {
-					add(leftover, CARRIED, slot, !ADD_PLAY_SOUND, !ADD_AUTO_EQUIP);
-				}
-			}
-			else {
-				drop_stack.push(leftover);
-			}
-			pc->logMsg(msg->get("Inventory is full."), Avatar::MSG_NORMAL);
-			success = false;
-		}
-	}
-	else if (area == EQUIPMENT) {
-		ItemStack &dest = inventory[EQUIPMENT].storage[slot];
-		ItemStack leftover;
-		leftover.item = stack.item;
-
-		if (!dest.empty() && dest.item != stack.item) {
-			// items don't match, so just add the stack to the carried area
-			leftover.quantity = stack.quantity;
-		}
-		else if (dest.quantity + stack.quantity > items->items[stack.item]->max_quantity) {
-			// items match, so attempt to merge the stacks. Any leftover will be added to the carried area
-			leftover.quantity = dest.quantity + stack.quantity - items->items[stack.item]->max_quantity;
-			stack.quantity = items->items[stack.item]->max_quantity - dest.quantity;
-			if (stack.quantity > 0) {
-				add(stack, EQUIPMENT, slot, !ADD_PLAY_SOUND, !ADD_AUTO_EQUIP);
-			}
-		}
-		else {
-			// put the item in the appropriate equipment slot
-			inventory[EQUIPMENT].add(stack, slot);
-			updateEquipment(slot);
-			leftover.clear();
-		}
-
-		if (!leftover.empty()) {
-			add(leftover, CARRIED, ItemStorage::NO_SLOT, !ADD_PLAY_SOUND, !ADD_AUTO_EQUIP);
-		}
-
-		applyEquipment();
-	}
-
-	// if this item has a power, place it on the action bar if possible
-	if (success && items->getItemType(items->items[stack.item]->type).auto_actionbar && items->items[stack.item]->power > 0) {
-		menu_act->addPower(items->items[stack.item]->power, 0);
-	}
-
+	bool success = pinv->add(stack, area, slot, play_sound, auto_equip);
+	if (area == EQUIPMENT)
+		updateEquipment(slot);
 	drag_prev_src = -1;
-
 	return success;
 }
 
 /**
  * Remove one given item from the player's inventory.
  */
+// Thin wrapper since P1.3d-4b-3, keeping only the activated_item special case that was genuinely
+// MenuInventory's -- see PlayerInventory.h. Everything else falls through to pinv->remove().
 bool MenuInventory::remove(ItemID item, int quantity) {
 	if (activated_item != 0 && activated_slot != -1 && item == activated_item) {
 		inventory[CARRIED].subtract(activated_slot, 1);
 		activated_item = 0;
 		activated_slot = -1;
-	}
-	else if(!inventory[CARRIED].remove(item, quantity)) {
-		if (!inventory[EQUIPMENT].remove(item, quantity)) {
-			return false;
-		}
-		else {
-			applyEquipment();
-		}
+		return true;
 	}
 
-	return true;
+	return pinv->remove(item, quantity);
 }
 
 void MenuInventory::removeFromPrevSlot(int quantity) {
@@ -1030,17 +858,7 @@ void MenuInventory::removeFromPrevSlot(int quantity) {
 	}
 }
 
-/**
- * Add currency item
- */
-void MenuInventory::addCurrency(int count) {
-	if (count > 0) {
-		ItemStack stack;
-		stack.item = eset->misc.currency_id;
-		stack.quantity = count;
-		add(stack, CARRIED, ItemStorage::NO_SLOT, !ADD_PLAY_SOUND, !ADD_AUTO_EQUIP);
-	}
-}
+// addCurrency() moved to PlayerInventory in P1.3d-4b-3 -- see PlayerInventory.h.
 
 /**
  * Check if there is enough currency to buy the given stack, and if so remove it from the current total and add the stack.
@@ -1134,7 +952,7 @@ bool MenuInventory::sell(ItemStack stack) {
 
 	int value_each = items->items[stack.item]->getSellPrice(ItemManager::DEFAULT_SELL_PRICE);
 	int value = value_each * stack.quantity;
-	addCurrency(value);
+	pinv->addCurrency(value);
 	items->playSound(eset->misc.currency_id);
 	drag_prev_src = -1;
 	return true;
@@ -1154,270 +972,19 @@ void MenuInventory::updateEquipment(int slot) {
 /**
  * Given the equipped items, calculate the hero's stats
  */
+// Thin wrapper since P1.3d-4b-3 -- the real logic is PlayerInventory::applyEquipment() now. This
+// preserves the one thing that was genuinely MenuInventory's: refreshing the new-game/continue
+// screen's character preview, if one exists. See PlayerInventory.h for the full accounting.
 void MenuInventory::applyEquipment() {
-	if (items->items.empty())
-		return;
-
-	ItemID item_id;
-	std::vector<ItemSetID> active_sets;
-	std::vector<int> active_set_quantities;
-
-	// calculate bonuses to basic stats, added by items
-	bool checkRequired = true;
-	while(checkRequired) {
-		checkRequired = false;
-		active_sets.clear();
-		active_set_quantities.clear();
-
-		for (size_t j = 0; j < eset->primary_stats.list.size(); ++j) {
-			pc->stats.primary_additional[j] = 0;
-		}
-
-		for (int i = 0; i < pinv->MAX_EQUIPPED; i++) {
-			if (pinv->isEquipSlotActive(i)) {
-				item_id = inventory[EQUIPMENT].storage[i].item;
-				if (!items->isValid(item_id))
-					continue;
-
-				Item* item = items->items[item_id];
-				unsigned bonus_counter = 0;
-				while (bonus_counter < item->bonus.size()) {
-					for (size_t j = 0; j < eset->primary_stats.list.size(); ++j) {
-						if (item->bonus[bonus_counter].type == BonusData::PRIMARY_STAT && item->bonus[bonus_counter].index == j)
-							pc->stats.primary_additional[j] += static_cast<int>(item->bonus[bonus_counter].value.get());
-					}
-
-					bonus_counter++;
-				}
-			}
-		}
-
-		// determine which item sets are active and count the number of items for each active set
-		std::vector<ItemSetID>::iterator it;
-		for (int i=0; i<pinv->MAX_EQUIPPED; i++) {
-			ItemStack& stack = inventory[EQUIPMENT].storage[i];
-
-			if (items->isValid(stack.item) && pinv->isEquipSlotActive(i) && items->items[stack.item]->set > 0) {
-				it = std::find(active_sets.begin(), active_sets.end(), items->items[stack.item]->set);
-				if (it != active_sets.end()) {
-					active_set_quantities[std::distance(active_sets.begin(), it)] += 1;
-				}
-				else {
-					active_sets.push_back(items->items[stack.item]->set);
-					active_set_quantities.push_back(1);
-				}
-			}
-		}
-
-		// calculate bonuses to basic stats, added by item sets
-		for (size_t k = 0; k < active_sets.size(); ++k) {
-			if (!items->isValidSet(active_sets[k]))
-				continue;
-
-			ItemSet* item_set = items->item_sets[active_sets[k]];
-			for (size_t bonus_counter = 0; bonus_counter < item_set->bonus.size(); ++bonus_counter) {
-				if (item_set->bonus[bonus_counter].requirement != active_set_quantities[k])
-					continue;
-
-				for (size_t j = 0; j < eset->primary_stats.list.size(); ++j) {
-					if (item_set->bonus[bonus_counter].type == BonusData::PRIMARY_STAT && item_set->bonus[bonus_counter].index == j)
-						pc->stats.primary_additional[j] += static_cast<int>(item_set->bonus[bonus_counter].value.get());
-				}
-			}
-		}
-
-		// check that each equipped item fit requirements and is in the proper type of slot
-		for (int i = 0; i < pinv->MAX_EQUIPPED; i++) {
-			ItemStack& stack = inventory[EQUIPMENT].storage[i];
-
-			if (items->isValid(stack.item)) {
-				if ((pinv->isEquipSlotActive(i) && !items->requirementsMet(&pc->stats, stack.item)) || (!stack.empty() && pinv->slot_type[i] != items->items[stack.item]->type)) {
-					add(stack, CARRIED, ItemStorage::NO_SLOT, ADD_PLAY_SOUND, !ADD_AUTO_EQUIP);
-					stack.clear();
-					checkRequired = true;
-				}
-			}
-		}
-	}
-
-	// defaults
-	for (unsigned i=0; i<pc->stats.powers_list_items.size(); ++i) {
-		PowerID id = pc->stats.powers_list_items[i];
-		// pc->stats.hp > 0 is hack to keep on_death revive passives working
-		if (powers->powers[id]->passive && pc->stats.hp > 0 && !powers->powers[id]->passive_effects_persist) {
-			pc->stats.effects.removeEffectPassive(id);
-		}
-	}
-	pc->stats.powers_list_items.clear();
-
-	// reset wielding vars
-	pc->stats.equip_flags.clear();
-
-	// remove all effects and bonuses added by items
-	pc->stats.effects.clearItemEffects();
-
-	// reset power level bonuses
-	pbs->clearBonusLevels();
-
-	applyItemStats();
-	applyItemSetBonuses(active_sets, active_set_quantities);
-
-	// enable all slots by default
-	for (int i = 0; i < pinv->MAX_EQUIPPED; ++i) {
-		pinv->setEquipSlotEnabled(i, true);
-	}
-	// disable any incompatible slots, unequipping items if neccessary
-	for (int i = 0; i < pinv->MAX_EQUIPPED; ++i) {
-		item_id = inventory[EQUIPMENT][i].item;
-
-		if (items->isValid(item_id) && pinv->isEquipSlotActive(i)) {
-			for (size_t j = 0; j < items->items[item_id]->disable_slots.size(); ++j) {
-				disableEquipmentSlot(items->items[item_id]->disable_slots[j]);
-			}
-		}
-	}
-
-	// disable equipment slots via passive powers
-	for (size_t i = 0; i < pc->stats.powers_passive.size(); ++i) {
-		PowerID id = pc->stats.powers_passive[i];
-		if (!powers->powers[id]->passive)
-			continue;
-
-		for (size_t j = 0; j < powers->powers[id]->disable_equip_slots.size(); ++j) {
-			disableEquipmentSlot(powers->powers[id]->disable_equip_slots[j]);
-		}
-	}
-	for (size_t i = 0; i < pc->stats.powers_list_items.size(); ++i) {
-		PowerID id = pc->stats.powers_list_items[i];
-		if (!powers->powers[id]->passive)
-			continue;
-
-		for (size_t j = 0; j < powers->powers[id]->disable_equip_slots.size(); ++j) {
-			disableEquipmentSlot(powers->powers[id]->disable_equip_slots[j]);
-		}
-	}
-
-	// update stat display
-	pc->stats.refresh_stats = true;
+	pinv->applyEquipment();
 
 	if (preview)
 		preview->loadGraphicsFromInventory(this);
-
-	if (pc->stats.cur_state == StatBlock::ENTITY_POWER) {
-		pc->stats.cur_state = StatBlock::ENTITY_STANCE;
-	}
 }
 
-void MenuInventory::applyItemStats() {
-	if (items->items.empty())
-		return;
+// applyItemStats()/applyItemSetBonuses()/applyBonus() moved to PlayerInventory in P1.3d-4b-3,
+// unchanged -- see PlayerInventory.h. They were only ever called from applyEquipment() above.
 
-	// reset additional values
-	for (size_t i = 0; i < eset->damage_types.list.size(); ++i) {
-		pc->stats.item_base_dmg[i].min = pc->stats.item_base_dmg[i].max = 0;
-	}
-	pc->stats.item_base_abs.min = pc->stats.item_base_abs.max = 0;
-
-	// apply stats from all items
-	for (int i=0; i<pinv->MAX_EQUIPPED; i++) {
-		if (pinv->isEquipSlotActive(i)) {
-			ItemID item_id = inventory[EQUIPMENT].storage[i].item;
-			if (!items->isValid(item_id))
-				continue;
-
-			Item* item = items->items[item_id];
-
-			// apply base stats
-			for (size_t j = 0; j < eset->damage_types.list.size(); ++j) {
-				pc->stats.item_base_dmg[j].min += item->base_dmg[j].min.get();
-				pc->stats.item_base_dmg[j].max += item->base_dmg[j].max.get();
-			}
-
-			// set equip flags
-			for (unsigned j=0; j<item->equip_flags.size(); ++j) {
-				pc->stats.equip_flags.insert(item->equip_flags[j]);
-			}
-
-			// apply absorb bonus
-			pc->stats.item_base_abs.min += item->base_abs.min.get();
-			pc->stats.item_base_abs.max += item->base_abs.max.get();
-
-			// apply various bonuses
-			unsigned bonus_counter = 0;
-			while (bonus_counter < item->bonus.size()) {
-				applyBonus(&item->bonus[bonus_counter]);
-				bonus_counter++;
-			}
-
-			// add item powers
-			if (item->power > 0) {
-				pc->stats.powers_list_items.push_back(item->power);
-				if (pc->stats.effects.triggered_others)
-					powers->activateSinglePassive(&pc->stats, item->power);
-			}
-		}
-	}
-}
-
-void MenuInventory::applyItemSetBonuses(std::vector<ItemSetID> &active_sets, std::vector<int> &active_set_quantities) {
-	// apply item set bonuses
-	for (size_t i = 0; i < active_sets.size(); ++i) {
-		if (!items->isValidSet(active_sets[i]))
-			continue;
-
-		ItemSet* item_set = items->item_sets[active_sets[i]];
-
-		for (size_t j = 0; j < item_set->bonus.size(); ++j) {
-			if (item_set->bonus[j].requirement > active_set_quantities[i])
-				continue;
-
-			applyBonus(&(item_set->bonus[j]));
-		}
-	}
-}
-
-void MenuInventory::applyBonus(const BonusData* bdata) {
-	EffectDef ed;
-
-	if (bdata->type == BonusData::SPEED) {
-		ed.id = "speed";
-	}
-	else if (bdata->type == BonusData::ATTACK_SPEED) {
-		ed.id = "attack_speed";
-	}
-	else if (bdata->type == BonusData::STAT) {
-		ed.id = Stats::KEY[bdata->index];
-	}
-	else if (bdata->type == BonusData::DAMAGE_MIN) {
-		ed.id = eset->damage_types.list[bdata->index].min;
-	}
-	else if (bdata->type == BonusData::DAMAGE_MAX) {
-		ed.id = eset->damage_types.list[bdata->index].max;
-	}
-	else if (bdata->type == BonusData::RESIST_ELEMENT) {
-		ed.id = eset->damage_types.list[bdata->index].resist;
-	}
-	else if (bdata->type == BonusData::PRIMARY_STAT) {
-		ed.id = eset->primary_stats.list[bdata->index].id;
-	}
-	else if (bdata->power_id > 0) {
-		pbs->addBonusLevels(bdata->power_id, static_cast<int>(bdata->value.get()));
-		return; // don't add item effect
-	}
-	else if (bdata->type == BonusData::RESOURCE_STAT) {
-		ed.id = eset->resource_stats.list[bdata->index].ids[bdata->sub_index];
-	}
-
-	ed.type = Effect::getTypeFromString(ed.id);
-
-	EffectParams ep;
-	ep.magnitude = bdata->value.get();
-	ep.is_multiplier = bdata->is_multiplier;
-	ep.source_type = Power::SOURCE_TYPE_HERO;
-	ep.is_from_item = true;
-
-	pc->stats.effects.addEffect(&pc->stats, ed, ep);
-}
 
 void MenuInventory::applyEquipmentSet(unsigned set) {
 	unsigned prev_equipment_set = pinv->active_equipment_set;
@@ -1532,58 +1099,7 @@ void MenuInventory::clearHighlight() {
 	inventory[CARRIED].highlightClear();
 }
 
-/**
- * Sort equipment storage array, so items order matches slots order
- */
-void MenuInventory::fillEquipmentSlots() {
-	// create temporary array
-	ItemStack *equip_stack = new ItemStack[pinv->MAX_EQUIPPED];
-
-	for (int i = 0; i < pinv->MAX_EQUIPPED; ++i) {
-		// initialize array
-		// if an item is set, ensure the quantity is >= 1
-		equip_stack[i] = inventory[EQUIPMENT].storage[i];
-		if (equip_stack[i].item > 0)
-			equip_stack[i].quantity = std::max(1, equip_stack[i].quantity);
-		else
-			equip_stack[i].clear();
-
-		// clean up storage[]
-		inventory[EQUIPMENT].storage[i].clear();
-
-		// if items were in the correct slot, put them back
-		if (!equip_stack[i].empty() && inventory[EQUIPMENT].storage[i].empty() && items->isValid(equip_stack[i].item) && items->items[equip_stack[i].item]->type == pinv->slot_type[i]) {
-			inventory[EQUIPMENT].storage[i] = equip_stack[i];
-			equip_stack[i].clear();
-		}
-	}
-
-	// for items that weren't in a matching slot, try to find one
-	// if all else fails, add them to the inventory
-	for (int i = 0; i < pinv->MAX_EQUIPPED; ++i) {
-		if (equip_stack[i].empty() || !items->isValid(equip_stack[i].item))
-			continue;
-
-		bool found_slot = false;
-		for (int j = 0; j < pinv->MAX_EQUIPPED; ++j) {
-			// search for empty slot with needed type
-			if (inventory[EQUIPMENT].storage[j].empty()) {
-				if (items->items[equip_stack[i].item]->type == pinv->slot_type[j]) {
-					inventory[EQUIPMENT].storage[j] = equip_stack[i];
-					found_slot = true;
-					break;
-				}
-			}
-		}
-
-		// couldn't find a slot, adding to inventory
-		if (!found_slot) {
-			add(equip_stack[i], CARRIED, ItemStorage::NO_SLOT, !ADD_PLAY_SOUND, !ADD_AUTO_EQUIP);
-		}
-	}
-
-	delete [] equip_stack;
-}
+// fillEquipmentSlots() moved to PlayerInventory in P1.3d-4b-3, unchanged -- see PlayerInventory.h.
 
 int MenuInventory::getMaxPurchasable(ItemStack item, int vendor_tab) {
 	if (!items->isValid(item.item))
@@ -1599,19 +1115,8 @@ int MenuInventory::getMaxPurchasable(ItemStack item, int vendor_tab) {
 		return 0;
 }
 
-void MenuInventory::disableEquipmentSlot(size_t disable_slot_type) {
-	for (int i=0; i<pinv->MAX_EQUIPPED; ++i) {
-		if (pinv->isEquipSlotActive(i) && pinv->slot_type[i] == disable_slot_type) {
-			if (!inventory[EQUIPMENT].storage[i].empty()) {
-				add(inventory[EQUIPMENT].storage[i], CARRIED, ItemStorage::NO_SLOT, ADD_PLAY_SOUND, !ADD_AUTO_EQUIP);
-				inventory[EQUIPMENT].storage[i].clear();
-				updateEquipment(i);
-				applyEquipment();
-			}
-			pinv->setEquipSlotEnabled(i, false);
-		}
-	}
-}
+// disableEquipmentSlot() moved to PlayerInventory in P1.3d-4b-3, as a private helper -- it was only
+// ever called from applyEquipment(), which moved with it. See PlayerInventory.h.
 
 bool MenuInventory::canEquipItem(const Point& position) {
 	// clicked a carried item
