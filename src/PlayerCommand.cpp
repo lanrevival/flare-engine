@@ -31,7 +31,7 @@ PlayerCommand::PlayerCommand()
 	, main1_active(false), main2_active(false)
 	, shift(false)
 	, using_mouse(false)
-	, mouse_screen()
+	, click_consumed_by_ui(false)
 	, respawn(false)
 	, equip_set_delta(0)
 	, actions() {
@@ -94,7 +94,6 @@ void PlayerCommandBuilder::build(PlayerCommand& cmd, const InputState& in, const
 
 	cmd.shift = in.pressing[Input::SHIFT];
 	cmd.using_mouse = const_cast<InputState&>(in).usingMouse();
-	cmd.mouse_screen = in.mouse;
 
 	// Next wins if both are held, which is the order MenuInventory::logic() used to resolve them
 	// in. The lock is NOT set here -- build() takes a const InputState because it reads intent and

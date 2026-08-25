@@ -463,7 +463,7 @@ void Avatar::set_direction(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 	bool restrict_power_use = false;
 	if (settings->mouse_move) {
-		if(cmd.mm_pressed && !cmd.shift && !menu->act->isWithinSlots(cmd.mouse_screen) && !menu->act->isWithinMenus(cmd.mouse_screen)) {
+		if(cmd.mm_pressed && !cmd.shift && !cmd.click_consumed_by_ui) {
 			restrict_power_use = true;
 		}
 	}

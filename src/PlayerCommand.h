@@ -55,11 +55,14 @@ public:
 	bool shift;
 	bool using_mouse;
 
-	// Screen coordinates. Present ONLY because Avatar still asks the action bar whether the
-	// cursor is over a menu (Avatar.cpp:464), which is a menu dependency rather than an input
-	// one. P1.3 removes those call sites and this field should go with them -- the simulation
-	// has no business knowing about screen space.
-	Point mouse_screen;
+	// Whether the cursor is over the action bar's slots or menus. NOT built from InputState, for
+	// the same reason respawn below isn't: it needs menu->act->isWithinSlots()/isWithinMenus(),
+	// so GameStatePlay fills it at the boundary, right where it already calls
+	// menu->act->checkAction(). This replaced a raw Point mouse_screen field that let Avatar ask
+	// the action bar the same question itself (Avatar.cpp:466) -- a menu dependency rather than
+	// an input one, and the simulation has no business knowing about screen space at all, only
+	// this one derived fact about it.
+	bool click_consumed_by_ui;
 
 	// Respawn after death. NOT built from InputState: it comes from the game-over menu, so
 	// GameStatePlay fills it at the boundary and consumes the click there. The point is that the

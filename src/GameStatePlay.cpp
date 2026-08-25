@@ -933,6 +933,7 @@ void GameStatePlay::logic() {
 		PlayerCommandBuilder::build(player_cmd, *inpt, mapr->cam.pos);
 		menu->act->checkAction(pc->action_queue);
 		player_cmd.actions = pc->action_queue;
+		player_cmd.click_consumed_by_ui = menu->act->isWithinSlots(inpt->mouse) || menu->act->isWithinMenus(inpt->mouse);
 
 		// Respawn is a menu click, so it is resolved HERE rather than inside the simulation.
 		// Avatar used to read menu->game_over->continue_clicked itself, which meant a dead player
