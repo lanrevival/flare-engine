@@ -27,6 +27,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
  * Also handles message passing between child objects, often to avoid circular dependencies.
  */
 
+#include "ActionBarState.h"
 #include "Avatar.h"
 #include "CampaignManager.h"
 #include "CombatText.h"
@@ -112,7 +113,10 @@ GameStatePlay::GameStatePlay()
 	hazards = new HazardManager();
 	// Before the menus, and destroyed after them: MenuInventory's constructor hands this object
 	// the inventory shape it parses out of menus/inventory.txt, and then binds itself to it.
+	// pab follows the same rule for the same reason -- MenuActionBar's constructor binds
+	// reference members to it before menus/actionbar.txt has even been parsed.
 	pinv = new PlayerInventory();
+	pab = new ActionBarState();
 	menu = new MenuManager();
 	npcs = new NPCManager();
 	quests = new QuestLog(menu->questlog);
@@ -1249,6 +1253,7 @@ GameStatePlay::~GameStatePlay() {
 	delete mapr;
 	delete menu;
 	delete pinv;
+	delete pab;
 	delete loot;
 	delete camp;
 	delete items;
@@ -1264,6 +1269,7 @@ GameStatePlay::~GameStatePlay() {
 	pc = NULL;
 	menu = NULL;
 	pinv = NULL;
+	pab = NULL;
 	camp = NULL;
 	enemyg = NULL;
 	entitym = NULL;

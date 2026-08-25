@@ -19,6 +19,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #ifndef SHAREDGAMEOBJECTS_H
 #define SHAREDGAMEOBJECTS_H
 
+class ActionBarState;
 class Avatar;
 class CampaignManager;
 class EnemyGroupManager;
@@ -50,6 +51,7 @@ extern ItemManager *items;
 extern LootManager *loot;
 extern MapRenderer *mapr;
 extern MenuActionBar *menu_act;
+extern ActionBarState *pab;
 extern MenuManager *menu;
 extern MenuPowers *menu_powers;
 extern NPCManager *npcs;

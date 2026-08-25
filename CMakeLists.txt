@@ -122,6 +122,7 @@ Set (FLARE_SOURCES
 	./src/AnimationSet.cpp
 	./src/AStarContainer.cpp
 	./src/AStarNode.cpp
+	./src/ActionBarState.cpp
 	./src/Avatar.cpp
 	./src/Camera.cpp
 	./src/CampaignManager.cpp
@@ -249,6 +250,7 @@ Set (FLARE_HEADERS
 	./src/AnimationSet.h
 	./src/AStarContainer.h
 	./src/AStarNode.h
+	./src/ActionBarState.h
 	./src/Avatar.h
 	./src/Camera.h
 	./src/CampaignManager.h

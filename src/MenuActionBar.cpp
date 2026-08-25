@@ -25,6 +25,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
  * Handles the config, display, and usage of the 0-9 hotkeys, mouse buttons, and menu calls
  */
 
+#include "ActionBarState.h"
 #include "Avatar.h"
 #include "CommonIncludes.h"
 #include "EngineSettings.h"
@@ -63,9 +64,14 @@ MenuActionBar::MenuActionBar()
 	, tooltip_length(MenuPowers::TOOLTIP_LONG_MENU)
 	, powers_overlap_slots(false)
 	, tablist_cursor(-1)
-	, slots_count(0)
+	, slots_count(pab->slots_count)
+	, hotkeys(pab->hotkeys)
+	, hotkeys_temp(pab->hotkeys_temp)
+	, hotkeys_mod(pab->hotkeys_mod)
+	, locked(pab->locked)
+	, requires_attention(pab->requires_attention)
 	, drag_prev_slot(-1)
-	, updated(false)
+	, updated(pab->updated)
 	, twostep_slot(-1)
 	, touch_slot(NULL)
 	, enable_gamepad_nav(true) {
@@ -190,12 +196,10 @@ MenuActionBar::MenuActionBar()
 
 	// menus are added to tablist with setupMenuButtons()
 
-	slots_count = static_cast<unsigned>(slots.size());
+	// Sizes slots_count, hotkeys, hotkeys_temp, hotkeys_mod and locked -- see
+	// ActionBarState::initSlots(). Only these four are pab's; the rest below are presentation.
+	pab->initSlots(static_cast<unsigned>(slots.size()));
 
-	hotkeys.resize(slots_count);
-	hotkeys_temp.resize(slots_count);
-	hotkeys_mod.resize(slots_count);
-	locked.resize(slots_count);
 	slot_item_count.resize(slots_count);
 	slot_activated.resize(slots_count);
 	slot_fail_cooldown.resize(slots_count);

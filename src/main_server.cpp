@@ -31,6 +31,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include <ctime>
 #include <cstdlib>
 
+#include "ActionBarState.h"
 #include "AnimationManager.h"
 #include "Avatar.h"
 #include "PlayerInventory.h"
@@ -42,6 +43,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "FontEngine.h"
 #include "GameSwitcher.h"
 #include "InputState.h"
+#include "MenuActionBar.h"
 #include "MenuInventory.h"
 #include "MenuManager.h"
 #include "MessageEngine.h"
@@ -604,6 +606,24 @@ int main(int argc, char *argv[]) {
 		// explain it. Currency is already hashed, so this is not new coverage, only new legibility.
 		printf(" currency=%d", pinv ? pinv->currency : -1);
 
+		// P1.3e-a's own version of the equipped/carried pair above, and the reason it needs one:
+		// WorldHash never hashes action bar bindings at all, on either side of this change, so a
+		// broken alias here would be invisible to every golden AND to 'equipped'/'carried' -- this
+		// is the only thing that can see it. Two readers of the same claimed-single hotkeys array:
+		// one through pab (the new owner) and one through menu->act (MenuActionBar's reference
+		// member, bound to pab->hotkeys in its constructor). If ActionBarState ever became a copy
+		// instead of the owner, this pair is where that shows up as two different counts.
+		int hotkeys_pab = 0;
+		if (pab) {
+			for (unsigned i = 0; i < pab->slots_count; ++i)
+				if (pab->hotkeys[i] != 0) hotkeys_pab++;
+		}
+		int hotkeys_menu = 0;
+		if (menu && menu->act) {
+			for (unsigned i = 0; i < menu->act->slots_count; ++i)
+				if (menu->act->hotkeys[i] != 0) hotkeys_menu++;
+		}
+		printf(" hotkeys_pab=%d hotkeys_menu=%d", hotkeys_pab, hotkeys_menu);
 
 		printf("\n");
 	}

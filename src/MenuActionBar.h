@@ -113,21 +113,27 @@ public:
 
 	void setupMenuButtons(MenuCharacter* chr, MenuInventory* inv, MenuPowers* pow, MenuLog* questlog);
 
-	unsigned slots_count;
-	std::vector<PowerID> hotkeys; // refer to power_index in PowerManager
-	std::vector<PowerID> hotkeys_temp; // temp for shapeshifting
-	std::vector<PowerID> hotkeys_mod; // hotkeys can be changed by items
-	std::vector<bool> locked; // if slot is locked, you cannot drop it
+	/** Points at ActionBarState's own fields. NOT copies -- see ActionBarState.h. A reference
+	 * rather than a pointer, unlike PlayerInventory::inventory, because these are single vectors
+	 * rather than a 2-element array: binding a reference in the constructor initializer list keeps
+	 * every hotkeys[i]/locked[i]/etc in this class and its ~40 callers compiling untouched, with no
+	 * `->` to add anywhere. That is deliberate: it keeps this commit a pure ownership move.
+	 */
+	unsigned& slots_count;
+	std::vector<PowerID>& hotkeys; // refer to power_index in PowerManager
+	std::vector<PowerID>& hotkeys_temp; // temp for shapeshifting
+	std::vector<PowerID>& hotkeys_mod; // hotkeys can be changed by items
+	std::vector<bool>& locked; // if slot is locked, you cannot drop it
 	std::vector<bool> prevent_changing;
 	std::vector<WidgetSlot *> slots; // hotkey slots
 	WidgetSlot *menus[MENU_COUNT]; // menu buttons
 	std::string menu_titles[MENU_COUNT];
 	std::vector<int> slot_item_count; // -1 means this power isn't item based.  0 means out of items.  1+ means sufficient items.
-	bool requires_attention[MENU_COUNT];
+	std::vector<bool>& requires_attention;
 	std::vector<bool> slot_activated;
 
 	int drag_prev_slot;
-	bool updated;
+	bool& updated;
 	int twostep_slot;
 
 	WidgetSlot* touch_slot;

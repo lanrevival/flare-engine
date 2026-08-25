@@ -16,6 +16,7 @@ You should have received a copy of the GNU General Public License along with
 FLARE.  If not, see http://www.gnu.org/licenses/
 */
 
+#include "ActionBarState.h"
 #include "Avatar.h"
 #include "CampaignManager.h"
 #include "EnemyGroupManager.h"
@@ -42,6 +43,7 @@ ItemManager *items = NULL;
 LootManager *loot = NULL;
 MapRenderer *mapr = NULL;
 MenuActionBar *menu_act= NULL;
+ActionBarState *pab = NULL;
 MenuPowers *menu_powers = NULL;
 NPCManager *npcs = NULL;
 PlayerInventory *pinv = NULL;
