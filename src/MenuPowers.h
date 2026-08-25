@@ -76,22 +76,22 @@ public:
 	MenuPowersCell* next; // TODO should we also have "parent"?
 };
 
+/** current_cell and bonus_levels used to live here. They moved to PowerBonusState in P1.3g, so
+ * that PlayerInventory::applyEquipment() can reset and recompute bonus levels without reaching
+ * through MenuPowers -- see PowerBonusState.h and plans/phase1/P1.3g-power-bonus-state.md. This
+ * group's index into MenuPowers::power_cell is the same index into every PowerBonusState vector;
+ * nothing here stores that index because every caller already has it (power_cell[i].foo()).
+ */
 class MenuPowersCellGroup {
 public:
 	MenuPowersCellGroup();
-	MenuPowersCell* getCurrent();
-	MenuPowersCell* getBonusCurrent(MenuPowersCell* pcell);
-	int getBonusLevels();
 
 	int tab;
 	Point pos;
 
-	size_t current_cell;
 	std::vector<MenuPowersCell> cells;
 
 	WidgetButton* upgrade_button;
-
-	std::vector< std::pair<size_t, int> > bonus_levels;
 };
 
 class MenuPowersClick {
@@ -125,6 +125,13 @@ private:
 	bool isCellVisible(MenuPowersCell* pcell);
 
 	MenuPowersCell* getCellByPowerIndex(PowerID power_index);
+
+	// Ported from MenuPowersCellGroup, which lost these in P1.3g -- see that class's header
+	// comment. group is an index into power_cell (and, in lockstep, into every PowerBonusState
+	// vector); these still return/consume MenuPowersCell*, so they stay here rather than move to
+	// PowerBonusState, which deliberately knows nothing about that widget-adjacent type.
+	MenuPowersCell* getCurrent(size_t group);
+	MenuPowersCell* getBonusCurrent(size_t group, MenuPowersCell* pcell);
 
 	void upgradePower(MenuPowersCell* pcell, bool ignore_tab);
 
@@ -187,9 +194,6 @@ public:
 
 	bool meetsUsageStats(PowerID power_index);
 
-	void clearActionBarBonusLevels();
-	void clearBonusLevels();
-	void addBonusLevels(PowerID power_index, int bonus_levels);
 	std::string getItemBonusPowerReqString(PowerID power_index);
 
 	void createTooltipFromActionBar(TooltipData* tip_data, unsigned slot, int tooltip_length);

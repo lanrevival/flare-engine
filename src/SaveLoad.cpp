@@ -53,6 +53,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "NPC.h"
 #include "Platform.h"
 #include "PlayerInventory.h"
+#include "PowerBonusState.h"
 #include "PowerManager.h"
 #include "SaveLoad.h"
 #include "Settings.h"
@@ -155,7 +156,7 @@ void SaveLoad::saveGame() {
 		// action bar
 		// NOTE we need to reset any bonus-modified powers in the action bar before writing
 		// we use menu->pow->setUnlockedPowers() after to restore the action bar state
-		menu->pow->clearActionBarBonusLevels();
+		pbs->clearActionBarBonusLevels();
 		outfile << "actionbar=";
 		for (unsigned i = 0; i < static_cast<unsigned>(MenuActionBar::SLOT_MAX); i++) {
 			if (i < pab->slots_count)

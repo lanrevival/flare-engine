@@ -42,6 +42,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuPowers.h"
 #include "MessageEngine.h"
 #include "PlayerInventory.h"
+#include "PowerBonusState.h"
 #include "PowerManager.h"
 #include "Rng.h"
 #include "Settings.h"
@@ -1256,7 +1257,7 @@ void MenuInventory::applyEquipment() {
 	pc->stats.effects.clearItemEffects();
 
 	// reset power level bonuses
-	menu->pow->clearBonusLevels();
+	pbs->clearBonusLevels();
 
 	applyItemStats();
 	applyItemSetBonuses(active_sets, active_set_quantities);
@@ -1400,7 +1401,7 @@ void MenuInventory::applyBonus(const BonusData* bdata) {
 		ed.id = eset->primary_stats.list[bdata->index].id;
 	}
 	else if (bdata->power_id > 0) {
-		menu->pow->addBonusLevels(bdata->power_id, static_cast<int>(bdata->value.get()));
+		pbs->addBonusLevels(bdata->power_id, static_cast<int>(bdata->value.get()));
 		return; // don't add item effect
 	}
 	else if (bdata->type == BonusData::RESOURCE_STAT) {

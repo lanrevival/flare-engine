@@ -171,6 +171,30 @@ jobs:
           fi
           echo "OK: no menu-routed action bar state access in the sim-side consumers"
 
+      - name: Power bonus levels are reached through pbs, not through a menu
+        run: |
+          # P1.3g moved current_cell/bonus_levels off MenuPowers and onto PowerBonusState (pbs),
+          # so that PlayerInventory::applyEquipment() -- once P1.3d-4b-3 moves it -- can reset and
+          # recompute item/set power-level bonuses without reaching into MenuPowers. Only two call
+          # sites ever reached the moved methods: MenuInventory.cpp (applyEquipment()/applyBonus())
+          # and SaveLoad.cpp (the pre-save action bar reset). Both are already repointed to pbs->;
+          # this guard is what stops a future edit from putting menu->pow-> back, the same shape as
+          # the hotkey-state guard above. menu->pow->setUnlockedPowers()/resetToBasePowers() and
+          # every other MenuPowers method are unaffected -- those genuinely stayed on MenuPowers,
+          # unmoved, and are not matched by this pattern.
+          moved='clearBonusLevels|addBonusLevels|clearActionBarBonusLevels'
+          hits=$(grep -nE "(menu->pow->|menu_powers->)($moved)\b" \
+                 src/MenuInventory.cpp src/SaveLoad.cpp src/GameStatePlay.cpp src/EntityManager.cpp || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo ""
+            echo "ERROR: power bonus-level state is being reached through the powers menu."
+            echo "These three methods belong to PowerBonusState. See src/PowerBonusState.h:"
+            echo "  menu->pow->clearBonusLevels() -> pbs->clearBonusLevels()"
+            exit 1
+          fi
+          echo "OK: no menu-routed power bonus-level access in the sim-side consumers"
+
   replays:
     # Replays a corpus of recorded input and compares world-state digests against committed
     # goldens. This is the regression test Phases 1 and 2 lean on: almost every plan in them is a

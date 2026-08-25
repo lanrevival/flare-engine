@@ -196,6 +196,7 @@ Set (FLARE_SOURCES
 	./src/NPCManager.cpp
 	./src/PlayerCommand.cpp
 	./src/PlayerInventory.cpp
+	./src/PowerBonusState.cpp
 	./src/PowerManager.cpp
 	./src/QuestLog.cpp
 	./src/RenderDevice.cpp
@@ -325,6 +326,7 @@ Set (FLARE_HEADERS
 	./src/NPCManager.h
 	./src/PlayerCommand.h
 	./src/PlayerInventory.h
+	./src/PowerBonusState.h
 	./src/PowerManager.h
 	./src/QuestLog.h
 	./src/RenderDevice.h

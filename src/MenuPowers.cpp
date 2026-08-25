@@ -37,6 +37,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuManager.h"
 #include "MenuPowers.h"
 #include "MessageEngine.h"
+#include "PowerBonusState.h"
 #include "PowerManager.h"
 #include "RenderDevice.h"
 #include "Settings.h"
@@ -74,21 +75,26 @@ MenuPowersCell::MenuPowersCell()
 MenuPowersCellGroup::MenuPowersCellGroup()
 	: tab(0)
 	, pos()
-	, current_cell(0)
 	, cells()
 	, upgrade_button(NULL) {
 }
 
-MenuPowersCell* MenuPowersCellGroup::getCurrent() {
-	return &cells[current_cell];
+// Ported from MenuPowersCellGroup -- see that class's header comment in MenuPowers.h. Reads
+// pbs->current_cell[group] where the original read the now-deleted current_cell field.
+MenuPowersCell* MenuPowers::getCurrent(size_t group) {
+	return &power_cell[group].cells[pbs->current_cell[group]];
 }
 
-MenuPowersCell* MenuPowersCellGroup::getBonusCurrent(MenuPowersCell* pcell) {
-	if (bonus_levels.empty())
+// Ported from MenuPowersCellGroup -- see MenuPowers.h. Reads pbs->current_cell[group] and
+// pbs->getBonusLevels(group) where the original read the now-deleted current_cell/bonus_levels
+// fields.
+MenuPowersCell* MenuPowers::getBonusCurrent(size_t group, MenuPowersCell* pcell) {
+	if (pbs->bonus_levels[group].empty())
 		return pcell;
 
-	size_t current = current_cell;
+	size_t current = pbs->current_cell[group];
 
+	std::vector<MenuPowersCell>& cells = power_cell[group].cells;
 	for (size_t i = 0; i < cells.size(); ++i) {
 		if (pcell == &cells[i]) {
 			current = i;
@@ -96,22 +102,13 @@ MenuPowersCell* MenuPowersCellGroup::getBonusCurrent(MenuPowersCell* pcell) {
 		}
 	}
 
-	int current_bonus_levels = getBonusLevels();
+	int current_bonus_levels = pbs->getBonusLevels(group);
 	size_t bonus_cell = current + static_cast<size_t>(current_bonus_levels);
 
 	if (bonus_cell >= cells.size())
 		return &cells[cells.size() - 1];
 
 	return &cells[bonus_cell];
-}
-
-int MenuPowersCellGroup::getBonusLevels() {
-	int blevel = 0;
-	for (size_t i = 0; i < bonus_levels.size(); ++i) {
-		if (current_cell >= bonus_levels[i].first)
-			blevel += bonus_levels[i].second;
-	}
-	return blevel;
 }
 
 MenuPowers::MenuPowers()
@@ -296,6 +293,17 @@ void MenuPowers::loadPowerTree(const std::string &filename) {
 				}
 			}
 		}
+	}
+
+	// Register each group with PowerBonusState now that ids are final -- see PowerBonusState.h.
+	// Group index here MUST match power_cell's own index; power_cell is only ever appended to
+	// above, in order, so this loop visiting it in order keeps the two in lockstep.
+	for (size_t i = 0; i < power_cell.size(); ++i) {
+		std::vector<PowerID> cell_ids;
+		for (size_t j = 0; j < power_cell[i].cells.size(); ++j) {
+			cell_ids.push_back(power_cell[i].cells[j].id);
+		}
+		pbs->addGroup(cell_ids);
 	}
 
 	// load any specified graphics into the tree_surf vector
@@ -743,10 +751,10 @@ bool MenuPowers::isBonusCell(MenuPowersCell* pcell) {
 	if (!pcell)
 		return false;
 
-	if (power_cell[pcell->group].getBonusLevels() <= 0)
+	if (pbs->getBonusLevels(pcell->group) <= 0)
 		return false;
 
-	return pcell == power_cell[pcell->group].getBonusCurrent(power_cell[pcell->group].getCurrent());
+	return pcell == getBonusCurrent(pcell->group, getCurrent(pcell->group));
 }
 
 bool MenuPowers::isCellVisible(MenuPowersCell* pcell) {
@@ -798,8 +806,10 @@ void MenuPowers::upgradePower(MenuPowersCell* pcell, bool ignore_tab) {
 void MenuPowers::setUnlockedPowers() {
 	bool did_cell_lock = false;
 
-	// restore bonus-modified action bar powers before performing upgrades
-	clearActionBarBonusLevels();
+	// restore bonus-modified action bar powers before performing upgrades. Deliberately NOT
+	// pbs->clearBonusLevels() -- that also wipes the bonus records themselves, which must survive
+	// an upgrade; only applyEquipment() (which recomputes them from scratch afterwards) does that.
+	pbs->clearActionBarBonusLevels();
 
 	for (size_t i = 0; i<power_cell.size(); ++i) {
 		for (size_t j = 0; j < power_cell[i].cells.size(); ++j) {
@@ -821,8 +831,8 @@ void MenuPowers::setUnlockedPowers() {
 					lockCell(&power_cell[i].cells[j]);
 					did_cell_lock = true;
 
-					if (power_cell[i].current_cell > 1)
-						power_cell[i].current_cell = j;
+					if (pbs->current_cell[i] > 1)
+						pbs->current_cell[i] = j;
 
 					// We're going to recursively call setUnlockedPowers() at this point.
 					// We save a list of powers locked here so that we don't unlock them again in this cycle,
@@ -831,10 +841,10 @@ void MenuPowers::setUnlockedPowers() {
 				}
 				else {
 					// if power was present in ActionBar, update it there
-					if (power_cell[i].current_cell != j)
-						menu->act->addPower(power_cell[i].cells[j].id, power_cell[i].getCurrent()->id);
+					if (pbs->current_cell[i] != j)
+						menu->act->addPower(power_cell[i].cells[j].id, getCurrent(i)->id);
 
-					power_cell[i].current_cell = j;
+					pbs->current_cell[i] = j;
 					if (slots[i])
 						slots[i]->setIcon(powers->powers[power_cell[i].cells[j].id]->icon, WidgetSlot::NO_OVERLAY);
 				}
@@ -851,11 +861,11 @@ void MenuPowers::setUnlockedPowers() {
 	recently_locked_cells.clear();
 
 	for (size_t i = 0; i < power_cell.size(); ++i) {
-		MenuPowersCell* current_pcell = power_cell[i].getCurrent();
+		MenuPowersCell* current_pcell = getCurrent(i);
 
 		// handle passive powers
 		if (current_pcell->is_unlocked) {
-			MenuPowersCell* bonus_pcell = power_cell[i].getBonusCurrent(current_pcell);
+			MenuPowersCell* bonus_pcell = getBonusCurrent(i, current_pcell);
 
 			for (size_t j = 0; j < power_cell[i].cells.size(); ++j) {
 				MenuPowersCell* pcell = &power_cell[i].cells[j];
@@ -952,7 +962,7 @@ void MenuPowers::createTooltipFromActionBar(TooltipData* tip_data, unsigned slot
 	// if the power is upgraded, we need to get the base power
 	MenuPowersCell* pcell_base = NULL;
 	if (pcell) {
-		pcell_base = power_cell[pcell->group].getCurrent();
+		pcell_base = getCurrent(pcell->group);
 	}
 
 	createTooltip(tip_data, pcell_base, pindex, false, tooltip_length);
@@ -963,7 +973,7 @@ void MenuPowers::createTooltip(TooltipData* tip_data, MenuPowersCell* pcell, Pow
 
 	MenuPowersCell* pcell_bonus = NULL;
 	if (pcell) {
-		pcell_bonus = power_cell[pcell->group].getBonusCurrent(pcell);
+		pcell_bonus = getBonusCurrent(pcell->group, pcell);
 	}
 	const Power* pwr = pcell_bonus ? powers->powers[pcell_bonus->id] : powers->powers[power_index];
 
@@ -972,7 +982,7 @@ void MenuPowers::createTooltip(TooltipData* tip_data, MenuPowersCell* pcell, Pow
 		ss << pwr->name;
 		if (pcell && pcell->upgrade_level > 0) {
 			ss << " (" << msg->getv("Level %d", pcell->upgrade_level);
-			int bonus_levels = power_cell[pcell->group].getBonusLevels();
+			int bonus_levels = pbs->getBonusLevels(pcell->group);
 			if (bonus_levels > 0)
 				ss << ", +" << bonus_levels;
 			ss << ")";
@@ -1446,7 +1456,7 @@ void MenuPowers::renderPowers(int tab_num) {
 		// Continue if slot is not filled with data
 		if (power_cell[i].tab != tab_num) continue;
 
-		MenuPowersCell* slot_cell = power_cell[i].getCurrent();
+		MenuPowersCell* slot_cell = getCurrent(i);
 		if (!slot_cell || !isCellVisible(slot_cell))
 			continue;
 
@@ -1493,7 +1503,7 @@ void MenuPowers::logic() {
 	for (size_t i=0; i<power_cell.size(); i++) {
 		// make sure invisible cells are skipped in the tablist
 		if (visible && slots[i])
-			slots[i]->enable_tablist_nav = isCellVisible(power_cell[i].getCurrent());
+			slots[i]->enable_tablist_nav = isCellVisible(getCurrent(i));
 
 		// disable upgrade buttons by default
 		if (power_cell[i].upgrade_button != NULL) {
@@ -1501,12 +1511,12 @@ void MenuPowers::logic() {
 		}
 
 		// try to automatically upgrade powers is no power point is required
-		MenuPowersCell* pcell = power_cell[i].getCurrent();
+		MenuPowersCell* pcell = getCurrent(i);
 		while (checkUpgrade(pcell)) {
 			if (pcell->next && !pcell->next->requires_point) {
 				// automatic upgrade possible; do upgrade and re-check upgrade possibility
 				upgradePower(pcell, UPGRADE_POWER_ALL_TABS);
-				pcell = power_cell[i].getCurrent();
+				pcell = getCurrent(i);
 				if (power_cell[i].upgrade_button != NULL)
 					power_cell[i].upgrade_button->enabled = (pc->stats.hp > 0 && isCellVisible(pcell) && checkUpgrade(pcell));
 			}
@@ -1521,7 +1531,7 @@ void MenuPowers::logic() {
 		// handle clicking of upgrade button
 		if (visible && pc->stats.hp > 0 && power_cell[i].upgrade_button != NULL) {
 			if ((!tab_control || power_cell[i].tab == tab_control->getActiveTab()) && power_cell[i].upgrade_button->checkClick()) {
-				upgradePower(power_cell[i].getCurrent(), !UPGRADE_POWER_ALL_TABS);
+				upgradePower(getCurrent(i), !UPGRADE_POWER_ALL_TABS);
 			}
 		}
 	}
@@ -1650,7 +1660,7 @@ void MenuPowers::renderTooltips(const Point& position) {
 		if (tab_control && (tab_control->getActiveTab() != power_cell[i].tab))
 			continue;
 
-		MenuPowersCell* tip_cell = power_cell[i].getCurrent();
+		MenuPowersCell* tip_cell = getCurrent(i);
 		if (!isCellVisible(tip_cell))
 			continue;
 
@@ -1702,7 +1712,7 @@ MenuPowersClick MenuPowers::click(const Point& mouse) {
 				}
 			}
 
-			MenuPowersCell* pcell = power_cell[i].getCurrent();
+			MenuPowersCell* pcell = getCurrent(i);
 			if (!pcell || !isCellVisible(pcell))
 				return result;
 
@@ -1726,7 +1736,7 @@ MenuPowersClick MenuPowers::click(const Point& mouse) {
 						tablist.setCurrent(NULL);
 					}
 				}
-				result.drag = power_cell[i].getBonusCurrent(pcell)->id;
+				result.drag = getBonusCurrent(i, pcell)->id;
 			}
 
 			return result;
@@ -1759,7 +1769,7 @@ void MenuPowers::clickUnlock(PowerID power_index) {
 
 void MenuPowers::resetToBasePowers() {
 	for (size_t i = 0; i < power_cell.size(); ++i) {
-		power_cell[i].current_cell = 0;
+		pbs->current_cell[i] = 0;
 		for (size_t j = 0; j < power_cell[i].cells.size(); ++j) {
 			power_cell[i].cells[j].is_unlocked = false;
 			power_cell[i].cells[j].passive_on = false;
@@ -1781,7 +1791,7 @@ bool MenuPowers::meetsUsageStats(PowerID power_index) {
 		return true;
 
 	// ignore bonuses to power level
-	MenuPowersCell* base_pcell = power_cell[pcell->group].getCurrent();
+	MenuPowersCell* base_pcell = getCurrent(pcell->group);
 
 	if (pc->stats.level < base_pcell->requires_level)
 		return false;
@@ -1794,42 +1804,10 @@ bool MenuPowers::meetsUsageStats(PowerID power_index) {
 	return true;
 }
 
-void MenuPowers::clearActionBarBonusLevels() {
-	for (size_t i = 0; i < power_cell.size(); ++i) {
-		if (power_cell[i].getBonusLevels() > 0) {
-			MenuPowersCell* pcell = power_cell[i].getCurrent();
-			menu->act->addPower(pcell->id, power_cell[i].getBonusCurrent(pcell)->id);
-		}
-	}
-}
-
-void MenuPowers::clearBonusLevels() {
-	clearActionBarBonusLevels();
-
-	for (size_t i = 0; i < power_cell.size(); ++i) {
-		power_cell[i].bonus_levels.clear();
-	}
-}
-
-void MenuPowers::addBonusLevels(PowerID power_index, int bonus_levels) {
-	MenuPowersCell* pcell = getCellByPowerIndex(power_index);
-
-	if (!pcell)
-		return;
-
-	MenuPowersCellGroup* pgroup = &power_cell[pcell->group];
-
-	size_t min_level = pgroup->cells.size() - 1;
-	for (size_t i = 0; i < pgroup->cells.size(); ++i) {
-		if (pcell == &pgroup->cells[i]) {
-			min_level = i;
-			break;
-		}
-	}
-
-	std::pair<size_t, int> bonus(min_level, bonus_levels);
-	pgroup->bonus_levels.push_back(bonus);
-}
+// clearActionBarBonusLevels()/clearBonusLevels()/addBonusLevels() moved to PowerBonusState in
+// P1.3g -- see PowerBonusState.h and plans/phase1/P1.3g-power-bonus-state.md. Callers here now say
+// pbs->clearActionBarBonusLevels() / pbs->clearBonusLevels(); the external callers in
+// MenuInventory.cpp say pbs->clearBonusLevels() / pbs->addBonusLevels().
 
 std::string MenuPowers::getItemBonusPowerReqString(PowerID power_index) {
 	MenuPowersCell* pcell = getCellByPowerIndex(power_index);

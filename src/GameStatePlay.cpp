@@ -70,6 +70,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "NPCManager.h"
 #include "PlayerCommand.h"
 #include "PlayerInventory.h"
+#include "PowerBonusState.h"
 #include "PowerManager.h"
 #include "QuestLog.h"
 #include "RenderDevice.h"
@@ -117,6 +118,7 @@ GameStatePlay::GameStatePlay()
 	// reference members to it before menus/actionbar.txt has even been parsed.
 	pinv = new PlayerInventory();
 	pab = new ActionBarState();
+	pbs = new PowerBonusState();
 	menu = new MenuManager();
 	npcs = new NPCManager();
 	quests = new QuestLog(menu->questlog);
@@ -1254,6 +1256,7 @@ GameStatePlay::~GameStatePlay() {
 	delete menu;
 	delete pinv;
 	delete pab;
+	delete pbs;
 	delete loot;
 	delete camp;
 	delete items;
@@ -1270,6 +1273,7 @@ GameStatePlay::~GameStatePlay() {
 	menu = NULL;
 	pinv = NULL;
 	pab = NULL;
+	pbs = NULL;
 	camp = NULL;
 	enemyg = NULL;
 	entitym = NULL;
