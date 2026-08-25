@@ -38,13 +38,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "FileParser.h"
 #include "InputState.h"
 #include "MapRenderer.h"
-#include "MenuActionBar.h"
-#include "MenuExit.h"
-#include "MenuGameOver.h"
-#include "MenuInventory.h"
-#include "MenuManager.h"
 #include "MessageEngine.h"
-#include "MenuMiniMap.h"
 #include "ModManager.h"
 #include "PlayerInventory.h"
 #include "PowerManager.h"
@@ -80,6 +74,7 @@ Avatar::Avatar()
 	, drag_walking(false)
 	, respawn(false)
 	, close_menus(false)
+	, show_game_over(false)
 	, allow_movement(true)
 	, cursor_enemy(NULL)
 	, lock_enemy(NULL)
@@ -889,11 +884,11 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 					logMsg(msg->get("You are defeated."), MSG_NORMAL);
 
 					if (stats.permadeath) {
-						// ignore death penalty on permadeath and instead delete the player's saved game
+						// ignore death penalty on permadeath and instead delete the player's saved game.
+						// GameStatePlay disables the save UI for permadeath at the same close_menus
+						// boundary that already closes menus on death (GameStatePlay.cpp).
 						stats.death_penalty = false;
 						Utils::removeSaveDir(save_load->getGameSlot());
-						menu->exit->disableSave();
-						menu->game_over->disableSave();
 					}
 					else {
 						// raise the death penalty flag.  This is handled in MenuInventory
@@ -907,7 +902,8 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 
 				if (!stats.corpse && (activeAnimation->getTimesPlayed() >= 1 || activeAnimation->getName() != "die")) {
 					stats.corpse = true;
-					menu->game_over->visible = true;
+					// GameStatePlay shows the game-over menu (GameStatePlay.cpp) when it sees this.
+					show_game_over = true;
 				}
 
 				// allow respawn with Accept if not permadeath

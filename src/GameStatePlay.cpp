@@ -988,6 +988,18 @@ void GameStatePlay::logic() {
 	if (pc->close_menus) {
 		pc->close_menus = false;
 		menu->closeAll();
+		if (pc->stats.permadeath) {
+			menu->exit->disableSave();
+			menu->game_over->disableSave();
+		}
+	}
+
+	// show the game-over menu once the death animation finishes -- Avatar.cpp sets this the same
+	// tick stats.corpse flips true, a menu push it can no longer make once MenuManager becomes
+	// optional on a headless server.
+	if (pc->show_game_over) {
+		pc->show_game_over = false;
+		menu->game_over->visible = true;
 	}
 
 	// these actions occur whether the game is paused or not.

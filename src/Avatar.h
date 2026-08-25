@@ -144,6 +144,7 @@ public:
 	bool newLevelNotification;
 	bool respawn;
 	bool close_menus;
+	bool show_game_over;
 	bool allow_movement;
 	std::vector<Timer*> power_cooldown_timers;
 	std::vector<Timer*> power_cast_timers;
