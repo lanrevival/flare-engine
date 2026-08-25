@@ -440,6 +440,13 @@ void MenuTalker::setNPC(NPC* _npc) {
 		first_interaction = true;
 	}
 
+	// P1.3f, F6: in_dialog is sim state (EntityBehavior reads it to gate this NPC's actions), so
+	// it moves with `npc` here rather than being derived from `visible` at read time -- the same
+	// state -> presentation direction every other move this phase has kept.
+	if (npc && npc != _npc) {
+		npc->stats.in_dialog = false;
+	}
+
 	npc = _npc;
 
 	if (_npc == NULL) {
@@ -449,6 +456,7 @@ void MenuTalker::setNPC(NPC* _npc) {
 		return;
 	}
 
+	npc->stats.in_dialog = true;
 	visible = true;
 }
 

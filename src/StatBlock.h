@@ -146,6 +146,9 @@ public:
 	bool hero_ally;
 	bool enemy_ally;
 	bool npc;
+	// Set/cleared only by MenuTalker::setNPC() (P1.3f, F6). Lets EntityBehavior gate this NPC's
+	// actions without reaching through menu->talker -- a widget a dedicated server never has.
+	bool in_dialog;
 	bool humanoid; // true for human, sceleton...; false for wyvern, snake...
 	bool lifeform;
 	bool permadeath;

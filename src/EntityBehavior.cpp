@@ -35,10 +35,6 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Entity.h"
 #include "EntityBehavior.h"
 #include "MapRenderer.h"
-#include "Menu.h"
-#include "MenuManager.h"
-#include "MenuTalker.h"
-#include "NPC.h"
 #include "PowerManager.h"
 #include "Rng.h"
 #include "Settings.h"
@@ -153,7 +149,7 @@ void EntityBehavior::findTarget() {
 		return;
 
 	// NPCs engaged in dialog can't act
-	if (e->stats.npc && menu && menu->talker && menu->talker->visible && menu->talker->npc == static_cast<NPC*>(e))
+	if (e->stats.npc && e->stats.in_dialog)
 		return;
 
 	StatBlock *target_stats = NULL;
@@ -379,7 +375,7 @@ void EntityBehavior::checkPower() {
 	if (!e->stats.cooldown.isEnd()) return;
 
 	// NPCs engaged in dialog can't act
-	if (e->stats.npc && menu && menu->talker && menu->talker->visible && menu->talker->npc == static_cast<NPC*>(e))
+	if (e->stats.npc && e->stats.in_dialog)
 		return;
 
 	// Note there are two stages to activating a power.
@@ -446,7 +442,7 @@ void EntityBehavior::checkMove() {
 	if (e->stats.effects.stun) return;
 
 	// NPCs engaged in dialog can't act
-	if (e->stats.npc && menu && menu->talker && menu->talker->visible && menu->talker->npc == static_cast<NPC*>(e)) {
+	if (e->stats.npc && e->stats.in_dialog) {
 		if (e->stats.cur_state == StatBlock::ENTITY_MOVE) {
 			e->stats.cur_state = StatBlock::ENTITY_STANCE;
 		}
