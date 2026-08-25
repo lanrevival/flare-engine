@@ -995,11 +995,39 @@ void GameStatePlay::logic() {
 	}
 
 	// show the game-over menu once the death animation finishes -- Avatar.cpp sets this the same
-	// tick stats.corpse flips true, a menu push it can no longer make once MenuManager becomes
-	// optional on a headless server.
+	// tick stats.corpse flips true. GameStatePlay is presentation-only (P1.4 partitions it out of
+	// flare_sim), so this push has to live here rather than in Avatar/GameStatePlay's sim callers.
 	if (pc->show_game_over) {
 		pc->show_game_over = false;
 		menu->game_over->visible = true;
+	}
+
+	// Refresh the skill tree and action bar after a RESPEC event. EventManager.cpp sets this
+	// instead of calling menu_powers/menu_act directly -- those types don't exist in flare_sim, and
+	// this is the same close_menus-style boundary. Deferred verbatim, in the event's original
+	// order, rather than split: menu_powers->resetToBasePowers()'s internal unlock pass and the
+	// explicit setUnlockedPowers() call below depend on the order pc->stats.powers_list is
+	// populated in, and there is no replay coverage (RESPEC is unused by any corpus mod) to verify
+	// a reordering is safe. See plans/00-ROADMAP.md's P1.3h note: a headless server defers this
+	// forever, so RESPEC there resets a character's powers but never re-applies class defaults or
+	// auto-unlocks free skill-tree nodes -- a real, documented gap, not a silent one.
+	if (pc->respec_powers) {
+		pc->respec_powers = false;
+		EngineSettings::HeroClasses::HeroClass* pc_class = eset->hero_classes.getByName(pc->stats.character_class);
+
+		menu_powers->resetToBasePowers();
+		if (pc_class && !pc->respec_use_engine_defaults) {
+			for (size_t j = 0; j < pc_class->powers.size(); j++) {
+				pc->stats.powers_list.push_back(pc_class->powers[j]);
+			}
+		}
+		menu_powers->setUnlockedPowers();
+
+		menu_act->clear(MenuActionBar::CLEAR_SKIP_ITEMS);
+		if (pc_class && !pc->respec_use_engine_defaults) {
+			pab->set(pc_class->hotkeys, ActionBarState::SET_SKIP_EMPTY);
+		}
+		menu_powers->newPowerNotification = false;
 	}
 
 	// these actions occur whether the game is paused or not.

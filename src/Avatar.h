@@ -145,6 +145,8 @@ public:
 	bool respawn;
 	bool close_menus;
 	bool show_game_over;
+	bool respec_powers;
+	bool respec_use_engine_defaults;
 	bool allow_movement;
 	std::vector<Timer*> power_cooldown_timers;
 	std::vector<Timer*> power_cast_timers;

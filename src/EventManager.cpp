@@ -27,11 +27,6 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "ItemManager.h"
 #include "LootManager.h"
 #include "MapRenderer.h"
-#include "Menu.h"
-#include "MenuActionBar.h"
-#include "MenuInventory.h"
-#include "MenuPowers.h"
-#include "MenuManager.h"
 #include "MessageEngine.h"
 #include "ModManager.h"
 #include "PlayerInventory.h"
@@ -1295,19 +1290,16 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 				pc->stats.powers_list.clear();
 				pc->stats.powers_passive.clear();
 				pc->stats.effects.clearEffects();
-				menu_powers->resetToBasePowers();
-				if (pc_class && !use_engine_defaults) {
-					for (size_t j=0; j < pc_class->powers.size(); j++) {
-						pc->stats.powers_list.push_back(pc_class->powers[j]);
-					}
-				}
-				menu_powers->setUnlockedPowers();
 
-				menu_act->clear(MenuActionBar::CLEAR_SKIP_ITEMS);
-				if (pc_class && !use_engine_defaults) {
-					pab->set(pc_class->hotkeys, ActionBarState::SET_SKIP_EMPTY);
-				}
-				menu->pow->newPowerNotification = false;
+				// The skill-tree unlock/notification refresh below is MenuPowers/MenuActionBar work --
+				// it re-derives which tree nodes are purchasable and refreshes widgets, none of which
+				// exists on a headless server. GameStatePlay runs it at the same boundary that already
+				// defers close_menus/show_game_over, verbatim and in the same order, so client behaviour
+				// is unchanged; a dedicated server defers it forever, which is a real, known gap (no
+				// skill-tree auto-unlock on RESPEC without a menu) tracked as P1.3h in the roadmap
+				// rather than guessed at here.
+				pc->respec_powers = true;
+				pc->respec_use_engine_defaults = use_engine_defaults;
 
 				pc->respawn = true; // re-applies equipment, also revives the player
 				pc->stats.refresh_stats = true;
