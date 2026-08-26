@@ -1340,7 +1340,15 @@ bool StatBlock::canUsePower(PowerID powerid, bool allow_passive) const {
 			&& powers->checkRequiredResourceState(power, this)
 			&& (!power->requires_corpse || (target_corpse && !target_corpse->corpse_timer.isEnd()) || (target_nearest_corpse && powers->checkNearestTargeting(power, this, true) && !target_nearest_corpse->corpse_timer.isEnd()))
 			&& (checkRequiredSpawns(power->requires_spawns))
-			&& (menu_powers && menu_powers->meetsUsageStats(powerid))
+			// meetsUsageStats() checks the power tree's own requires_level/requires_primary for
+			// this power -- itself falling back to true when the power isn't in the tree at all
+			// (!pcell inside meetsUsageStats). !menu_powers is the same fallback for a headless
+			// server (P1.4c), which never builds one: no MenuPowers means no additional
+			// skill-tree-position gate, not "this power can never be used." Was menu_powers &&
+			// ..., which silently made every power unusable the moment a server stopped
+			// constructing MenuPowers -- found by reading this function while designing P1.4c's
+			// hotkey translator, not by a failing corpus row.
+			&& (!menu_powers || menu_powers->meetsUsageStats(powerid))
 			&& (power->type == Power::TYPE_SPAWN ? !summonLimitReached(powerid) : true)
 			&& !(power->spawn_type == "untransform" && !transformed)
 			&& std::includes(equip_flags.begin(), equip_flags.end(), power->requires_flags.begin(), power->requires_flags.end())

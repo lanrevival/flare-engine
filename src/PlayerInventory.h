@@ -169,6 +169,13 @@ public:
 	void applyDeathPenalty();
 	void fillEquipmentSlots();
 
+	// The state mutation half of MenuInventory::applyNextEquipmentSet()/applyPreviousEquipmentSet()
+	// -- wraparound arithmetic on active_equipment_set below, then applyEquipment() -- with the
+	// widget refresh (updateEquipmentSetWidgets(), the hudlog message) left on MenuInventory, which
+	// still wraps this for its own callers. See P1.4c. Returns whether anything changed, same
+	// contract as MenuInventory::applyEquipmentSetDelta().
+	bool applyEquipmentSetDelta(int delta);
+
 	// Argument names for add(), moved from MenuInventory alongside it. Deleted there, not aliased
 	// -- same reasoning as ONLY_EMPTY_SLOTS above.
 	static const bool ADD_PLAY_SOUND = true;

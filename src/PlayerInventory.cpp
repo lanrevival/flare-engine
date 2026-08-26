@@ -558,6 +558,31 @@ void PlayerInventory::applyEquipment() {
 	recomputeCurrency();
 }
 
+// The state-mutation half of MenuInventory::applyNextEquipmentSet()/applyPreviousEquipmentSet() --
+// see P1.4c. Widget refresh (updateEquipmentSetWidgets(), the hudlog message) stays on
+// MenuInventory, which still wraps this. Wraparound matches those two functions exactly: past the
+// top, wrap to 1; past the bottom, wrap to max_equipment_set.
+bool PlayerInventory::applyEquipmentSetDelta(int delta) {
+	if (delta == 0 || max_equipment_set == 0)
+		return false;
+
+	if (delta > 0) {
+		if (active_equipment_set < max_equipment_set)
+			active_equipment_set++;
+		else
+			active_equipment_set = 1;
+	}
+	else {
+		if (active_equipment_set > 1)
+			active_equipment_set--;
+		else
+			active_equipment_set = max_equipment_set;
+	}
+
+	applyEquipment();
+	return true;
+}
+
 void PlayerInventory::applyItemStats() {
 	if (items->items.empty())
 		return;

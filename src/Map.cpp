@@ -342,6 +342,70 @@ void Map::activatePower(PowerID power_index, unsigned statblock_index, const FPo
 	}
 }
 
+void Map::executeOnLoadEvents() {
+	// if set from the command-line, execute a given script if this is our first map load
+	if (!settings->load_script.empty() && filename != "maps/spawn.txt") {
+		Event evnt;
+		EventComponent ec;
+
+		ec.type = EventComponent::SCRIPT;
+		ec.s = settings->load_script;
+		settings->load_script.clear();
+
+		evnt.components.push_back(ec);
+		eventm->executeEvent(evnt);
+
+		return;
+	}
+
+	std::vector<Event>::iterator it;
+
+	// loop in reverse because we may erase elements
+	for (it = events.end(); it != events.begin(); ) {
+		--it;
+
+		// skip inactive events
+		if (!eventm->isActive(*it)) continue;
+
+		if ((*it).activate_type == Event::ACTIVATE_ON_LOAD) {
+			if (eventm->executeEvent(*it))
+				it = events.erase(it);
+		}
+	}
+
+	// Also check static events, as they should execute alongside on_load events
+	// Yet, this should be done *after* the on_load events to not break old behavior.
+	// That's why we don't just check static events in the above loop
+	for (it = events.end(); it != events.begin(); ) {
+		--it;
+
+		// skip inactive events
+		if (!eventm->isActive(*it)) continue;
+
+		if ((*it).activate_type == Event::ACTIVATE_STATIC) {
+			if (eventm->executeEvent(*it))
+				it = events.erase(it);
+		}
+	}
+}
+
+void Map::executeOnMapExitEvents() {
+	std::vector<Event>::iterator it;
+
+	// We're leaving the map, so the events of this map are removed anyway in
+	// the next frame (Reminder: We're about to load a new map ;),
+	// so we will ignore the events keep_after_trigger value and do not delete
+	// any event in this loop
+	for (it = events.begin(); it != events.end(); ++it) {
+
+		// skip inactive events
+		if (!eventm->isActive(*it)) continue;
+
+		if ((*it).activate_type == Event::ACTIVATE_ON_MAPEXIT)
+			eventm->executeEvent(*it); // ignore repeat value
+	}
+}
+
 void Map::removeLayer(unsigned index) {
 	layernames.erase(layernames.begin() + index);
 	layers.erase(layers.begin() + index);

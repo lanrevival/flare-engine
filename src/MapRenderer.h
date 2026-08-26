@@ -113,12 +113,6 @@ public:
 	void checkNearestEvent();
 	void checkTooltip();
 
-	// some events are automatically triggered when the map is loaded
-	void executeOnLoadEvents();
-
-	// some events are triggered on exiting the map
-	void executeOnMapExitEvents();
-
 	bool isValidTile(const unsigned &tile);
 	Point centerTile(const Point& p);
 

@@ -185,7 +185,12 @@ void FogOfWar::logic() {
 	updateTiles();
 	if (update_minimap) {
 		calcMiniBoundaries();
-		menu->mini->update(&mapr->collider, &bounds);
+		// FogOfWar::logic() runs every tick, unconditionally, from Map::logic() (P1.4a) -- on a
+		// headless server (P1.4c) menu is NULL, and update_minimap goes true on ordinary tile
+		// reveal, not some rare path, so this crashed on the very first tile reveal before the
+		// guard was added. menu->mini stays unbuilt server-side; there is no minimap to push to.
+		if (menu)
+			menu->mini->update(&mapr->collider, &bounds);
 		update_minimap = false;
 	}
 }

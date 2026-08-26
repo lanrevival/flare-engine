@@ -251,6 +251,12 @@ public:
 	void checkEvents(const FPoint& loc);
 	void activatePower(PowerID power_index, unsigned statblock_index, const FPoint &target);
 
+	// some events are automatically triggered when the map is loaded
+	void executeOnLoadEvents();
+
+	// some events are triggered on exiting the map
+	void executeOnMapExitEvents();
+
 	MapCollision collider;
 
 	// event-created loot or items

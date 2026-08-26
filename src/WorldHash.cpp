@@ -131,13 +131,18 @@ uint64_t WorldHash::compute(unsigned long tick) {
 	// Covered on purpose. Phase 2 rewrites hundreds of references to the player singleton; a
 	// digest that stopped at positions would pass all of it.
 	h = mixI32(h, TAG_INVENTORY);
-	if (menu && menu->inv) {
+	// Guards on pinv, not menu -- everything hashed below reads pinv directly and has since
+	// P1.3d-4b. The guard used to ask about the menu instead (menu && menu->inv), which happened
+	// to hold whenever pinv did because nothing constructed one without the other -- until P1.4c,
+	// where a headless server builds pinv with no menu at all. That silently would have dropped
+	// this whole block, and with it the corpus's only coverage of equipment/inventory contents:
+	// found by reading this file while designing P1.4c's server loop, not by a failing digest,
+	// because a skipped block still hashes identically to another skipped block.
+	if (pinv) {
 		// Which equipment set is active, not just what is in the slots. Measured gap: a probe
 		// that vanished items from the digest showed contents ARE covered (melee notices a loss
 		// in both storage areas), but this scalar was not hashed at all, so a swap between two
 		// equally-full sets was invisible.
-		// It lives on PlayerInventory now. The guard above still asks about the menu because the
-		// storages below still do; P1.3d-4b is where both stop.
 		h = mixI32(h, static_cast<int32_t>(pinv->active_equipment_set));
 
 		for (int area = 0; area < MenuInventory::CARRIED + 1; ++area) {
