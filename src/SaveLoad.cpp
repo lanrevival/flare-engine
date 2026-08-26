@@ -151,7 +151,7 @@ void SaveLoad::saveGame() {
 		outfile << "carried=" << pinv->inventory[PlayerInventory::CARRIED].getItems() << "\n";
 
 		// spawn point
-		outfile << "spawn=" << mapr->respawn_map << "," << static_cast<int>(mapr->respawn_point.x) << "," << static_cast<int>(mapr->respawn_point.y) << "\n";
+		outfile << "spawn=" << wmap->respawn_map << "," << static_cast<int>(wmap->respawn_point.x) << "," << static_cast<int>(wmap->respawn_point.y) << "\n";
 
 		// action bar
 		// NOTE we need to reset any bonus-modified powers in the action bar before writing
@@ -171,7 +171,12 @@ void SaveLoad::saveGame() {
 			if (i < MenuActionBar::SLOT_MAX - 1) outfile << ",";
 		}
 		outfile << "\n";
-		menu->pow->setUnlockedPowers();
+		// Widget-only skill-tree refresh, restoring what clearActionBarBonusLevels() above
+		// temporarily cleared for the write -- see loadPowerTree()'s comment for why a headless
+		// server doesn't need this to have run. Skipped rather than dereferencing a menu that
+		// doesn't exist (P1.4c).
+		if (menu)
+			menu->pow->setUnlockedPowers();
 
 		//shapeshifter value
 		if (pc->stats.transform_type == "untransform" || pc->stats.transform_duration != -1) outfile << "transformed=" << "\n";
@@ -209,8 +214,9 @@ void SaveLoad::saveGame() {
 		// save the engine version for troubleshooting purposes
 		outfile << "engine_version=" << VersionInfo::ENGINE.getString() << "\n";
 
-		// save the vendor buyback
-		if (eset->misc.save_buyback) {
+		// save the vendor buyback -- MenuVendor-owned UI cache, no sim-side equivalent (P1.4c,
+		// matches checkNPCInteraction()'s "drop entirely").
+		if (eset->misc.save_buyback && menu) {
 			std::map<std::string, ItemStorage>::iterator it;
 
 			for (it = menu->vendor->buyback_stock.begin(); it != menu->vendor->buyback_stock.end(); ++it) {
@@ -224,7 +230,10 @@ void SaveLoad::saveGame() {
 
 		outfile << "questlog_dismissed=" << !pab->requires_attention[MenuActionBar::MENU_LOG] << "\n";
 
-		outfile << "stash_tab=" << menu->stash->getTab();
+		// menu->stash's tab selection is a widget concern with no sim state behind it; a headless
+		// server writes the field's default (0) rather than reading through a menu that doesn't
+		// exist (P1.4c).
+		outfile << "stash_tab=" << (menu ? menu->stash->getTab() : 0);
 
 		outfile << std::endl;
 
@@ -235,34 +244,36 @@ void SaveLoad::saveGame() {
 		platform.FSCommit();
 	}
 
-	// Save stashes
-	for (size_t i = 0; i < menu->stash->tabs.size(); ++i) {
-		// shared stashes are not saved for permadeath characters
-		if (pc->stats.permadeath && !menu->stash->tabs[i].is_private)
-			continue;
+	// Save stashes -- MenuStash-owned, no sim-side equivalent (P1.4c, matches checkStash()).
+	if (menu) {
+		for (size_t i = 0; i < menu->stash->tabs.size(); ++i) {
+			// shared stashes are not saved for permadeath characters
+			if (pc->stats.permadeath && !menu->stash->tabs[i].is_private)
+				continue;
 
-		ss.str("");
-		ss << settings->path_user << "saves/" << eset->misc.save_prefix;
-		if (menu->stash->tabs[i].is_private)
-			ss << "/" << game_slot;
-		ss << "/" << menu->stash->tabs[i].filename;
-		outfile.open(Filesystem::convertSlashes(ss.str()).c_str(), std::ios::out);
+			ss.str("");
+			ss << settings->path_user << "saves/" << eset->misc.save_prefix;
+			if (menu->stash->tabs[i].is_private)
+				ss << "/" << game_slot;
+			ss << "/" << menu->stash->tabs[i].filename;
+			outfile.open(Filesystem::convertSlashes(ss.str()).c_str(), std::ios::out);
 
-		if (outfile.is_open()) {
+			if (outfile.is_open()) {
 
-			// comment
-			outfile << "# flare-engine stash file: \"" << menu->stash->tabs[i].id << "\"\n";
+				// comment
+				outfile << "# flare-engine stash file: \"" << menu->stash->tabs[i].id << "\"\n";
 
-			outfile << "quantity=" << menu->stash->tabs[i].stock.getQuantities() << "\n";
-			outfile << "item=" << menu->stash->tabs[i].stock.getItems() << "\n";
+				outfile << "quantity=" << menu->stash->tabs[i].stock.getQuantities() << "\n";
+				outfile << "item=" << menu->stash->tabs[i].stock.getItems() << "\n";
 
-			outfile << std::endl;
+				outfile << std::endl;
 
-			if (outfile.bad()) Utils::logError("SaveLoad: Unable to save stash. No write access or disk is full!");
-			outfile.close();
-			outfile.clear();
+				if (outfile.bad()) Utils::logError("SaveLoad: Unable to save stash. No write access or disk is full!");
+				outfile.close();
+				outfile.clear();
 
-			platform.FSCommit();
+				platform.FSCommit();
+			}
 		}
 	}
 
@@ -272,9 +283,12 @@ void SaveLoad::saveGame() {
 	saveExtendedItems(SAVE_STORAGE_ITEMS);
 	settings->prev_save_slot = game_slot-1;
 
-	// display a log message saying that we saved the game
-	menu->questlog->add(msg->get("Game saved."), MenuLog::TYPE_MESSAGES, WidgetLog::MSG_NORMAL);
-	menu->hudlog->add(msg->get("Game saved."), MenuHUDLog::MSG_NORMAL);
+	// display a log message saying that we saved the game -- widget-only, no sim-side equivalent
+	// (P1.4c).
+	if (menu) {
+		menu->questlog->add(msg->get("Game saved."), MenuLog::TYPE_MESSAGES, WidgetLog::MSG_NORMAL);
+		menu->hudlog->add(msg->get("Game saved."), MenuHUDLog::MSG_NORMAL);
+	}
 }
 
 void SaveLoad::saveExtendedItems(bool save_storage_items) {
@@ -463,7 +477,16 @@ void SaveLoad::loadGame() {
 				pinv->inventory[PlayerInventory::EQUIPMENT].setQuantities(infile.val);
 			}
 			else if (infile.key == "active_equipment_set") {
-				menu->inv->applyEquipmentSet(Parse::toInt(infile.val));
+				// menu->inv->applyEquipmentSet() does two things: the bounds-checked assignment
+				// below, which is the only sim-relevant part (P1.4c: a headless server has no
+				// menu to route it through), and updateEquipmentSetWidgets(), a widget refresh
+				// that's moot here since applyPlayerData() unconditionally calls
+				// pinv->applyEquipment() right after this parse loop either way.
+				unsigned set = static_cast<unsigned>(Parse::toInt(infile.val));
+				if (menu)
+					menu->inv->applyEquipmentSet(set);
+				else if (set > 0 && set <= pinv->max_equipment_set)
+					pinv->active_equipment_set = set;
 			}
 			else if (infile.key == "carried") {
 				pinv->inventory[PlayerInventory::CARRIED].setItems(infile.val);
@@ -473,20 +496,20 @@ void SaveLoad::loadGame() {
 				pinv->inventory[PlayerInventory::CARRIED].setQuantities(infile.val);
 			}
 			else if (infile.key == "spawn") {
-				mapr->teleport_mapname = Parse::popFirstString(infile.val);
-				if (mapr->teleport_mapname != "" && Filesystem::fileExists(mods->locate(mapr->teleport_mapname))) {
-					mapr->teleport_destination.x = static_cast<float>(Parse::popFirstInt(infile.val)) + 0.5f;
-					mapr->teleport_destination.y = static_cast<float>(Parse::popFirstInt(infile.val)) + 0.5f;
-					mapr->teleportation = true;
+				wmap->teleport_mapname = Parse::popFirstString(infile.val);
+				if (wmap->teleport_mapname != "" && Filesystem::fileExists(mods->locate(wmap->teleport_mapname))) {
+					wmap->teleport_destination.x = static_cast<float>(Parse::popFirstInt(infile.val)) + 0.5f;
+					wmap->teleport_destination.y = static_cast<float>(Parse::popFirstInt(infile.val)) + 0.5f;
+					wmap->teleportation = true;
 					// prevent spawn.txt from putting us on the starting map
-					mapr->clearEvents();
+					wmap->clearEvents();
 				}
 				else {
-					Utils::logError("SaveLoad: Unable to find %s, loading maps/spawn.txt", mapr->teleport_mapname.c_str());
-					mapr->teleport_mapname = "maps/spawn.txt";
-					mapr->teleport_destination.x = 0.5f;
-					mapr->teleport_destination.y = 0.5f;
-					mapr->teleportation = true;
+					Utils::logError("SaveLoad: Unable to find %s, loading maps/spawn.txt", wmap->teleport_mapname.c_str());
+					wmap->teleport_mapname = "maps/spawn.txt";
+					wmap->teleport_destination.x = 0.5f;
+					wmap->teleport_destination.y = 0.5f;
+					wmap->teleportation = true;
 				}
 			}
 			else if (infile.key == "actionbar") {
@@ -513,14 +536,17 @@ void SaveLoad::loadGame() {
 			else if (infile.key == "campaign") camp->setAll(infile.val);
 			else if (infile.key == "time_played") pc->time_played = Parse::toUnsignedLong(infile.val);
 			else if (infile.key == "engine_version") save_version.setFromString(infile.val);
-			else if (eset->misc.save_buyback && infile.key == "buyback_item") {
+			// Vendor buyback stock is a MenuVendor-owned UI cache with no sim-side equivalent
+			// (matches checkNPCInteraction()'s "drop entirely" -- P1.4c) -- skipped headless
+			// rather than dereferencing a menu that doesn't exist.
+			else if (eset->misc.save_buyback && menu && infile.key == "buyback_item") {
 				std::string npc_filename = Parse::popFirstString(infile.val, ';');
 				if (!npc_filename.empty()) {
 					menu->vendor->buyback_stock[npc_filename].init(NPC::VENDOR_MAX_STOCK);
 					menu->vendor->buyback_stock[npc_filename].setItems(infile.val);
 				}
 			}
-			else if (eset->misc.save_buyback && infile.key == "buyback_quantity") {
+			else if (eset->misc.save_buyback && menu && infile.key == "buyback_quantity") {
 				std::string npc_filename = Parse::popFirstString(infile.val, ';');
 				if (!npc_filename.empty()) {
 					menu->vendor->buyback_stock[npc_filename].init(NPC::VENDOR_MAX_STOCK);
@@ -574,14 +600,21 @@ void SaveLoad::loadGame() {
 		Utils::logInfo("SaveLoad: Warning! Engine version of save file (%s) does not match current engine version (%s). Be on the lookout for bugs.", save_version.getString().c_str(), VersionInfo::ENGINE.getString().c_str());
 
 	// reset character menu
-	menu->chr->refreshStats();
+	if (menu)
+		menu->chr->refreshStats();
 
+	// Widget-only skill-tree unlock display -- see loadPowerTree()'s own comment. Called
+	// unconditionally on purpose; it guards itself.
 	loadPowerTree();
 
-	// disable the shared stash for permadeath characters
-	menu->stash->enableSharedTab(pc->stats.permadeath);
+	// Stash tabs are MenuStash-owned UI state with no sim-side equivalent (matches
+	// checkStash()'s "drop entirely" -- P1.4c) -- skipped headless.
+	if (menu) {
+		// disable the shared stash for permadeath characters
+		menu->stash->enableSharedTab(pc->stats.permadeath);
 
-	menu->stash->setTab(stash_tab);
+		menu->stash->setTab(stash_tab);
+	}
 
 	pc->loadAnimations();
 }
@@ -716,8 +749,9 @@ void SaveLoad::applyPlayerData() {
 	pinv->inventory[PlayerInventory::EQUIPMENT].clean();
 	pinv->inventory[PlayerInventory::CARRIED].clean();
 
-	// Load stash
-	loadStash();
+	// Load stash -- MenuStash-owned, no sim-side equivalent (P1.4c, matches checkStash()).
+	if (menu)
+		loadStash();
 
 	// initialize vars
 	pc->stats.recalc();
@@ -728,17 +762,30 @@ void SaveLoad::applyPlayerData() {
 	// just for aesthetics, turn the hero to face the camera
 	pc->stats.direction = 6;
 
-	// set up MenuTalker for this hero
-	menu->talker->setHero(pc->stats);
+	// set up MenuTalker for this hero -- widget only, no sim-side equivalent (P1.4c).
+	if (menu)
+		menu->talker->setHero(pc->stats);
 
 	// load sounds (gender specific)
 	pc->loadSounds();
 
-	// apply power upgrades
-	menu->pow->setUnlockedPowers();
+	// apply power upgrades -- see loadPowerTree()'s own comment.
+	if (menu)
+		menu->pow->setUnlockedPowers();
 }
 
+// menu->pow->loadPowerTree()/setUnlockedPowers() populate power_cell[i].cells[j].is_unlocked --
+// widget-level skill-tree grid state, read by nothing outside MenuPowers.cpp (P1.4c's own
+// "Powers reset" investigation). The sim-relevant gate this used to feed,
+// StatBlock::canUsePower()'s menu_powers->meetsUsageStats() term, is itself conditioned on
+// !menu_powers now (P1.4c), so a headless server -- which never constructs a MenuPowers at all --
+// treats every power as already unlocked rather than needing this to have run. Guards itself
+// rather than every call site, since both callers (here and applyPlayerData()) call it
+// unconditionally today.
 void SaveLoad::loadPowerTree() {
+	if (!menu)
+		return;
+
 	EngineSettings::HeroClasses::HeroClass* pc_class;
 	pc_class = eset->hero_classes.getByName(pc->stats.character_class);
 	if (pc_class && !pc_class->power_tree.empty()) {
@@ -754,22 +801,22 @@ void SaveLoad::saveFOW() {
 	std::ofstream outfile;
 
 	// Save fow dark layer
-	if (mapr->fogofwar && mapr->save_fogofwar && !mapr->getFilename().empty() && fow->dark_layer_id < mapr->layernames.size()) {
-		std::string fow_filename = mapr->getFOWFilename();
+	if (wmap->fogofwar && wmap->save_fogofwar && !wmap->getFilename().empty() && fow->dark_layer_id < wmap->layernames.size()) {
+		std::string fow_filename = wmap->getFOWFilename();
 
 		outfile.open(Filesystem::convertSlashes(fow_filename).c_str(), std::ios::out);
 
 		if (outfile.is_open()) {
-			outfile << "# " << mapr->getFilename() << std::endl;
+			outfile << "# " << wmap->getFilename() << std::endl;
 			outfile << "[layer]" << std::endl;
-			outfile << "type=" << mapr->layernames[fow->dark_layer_id] << std::endl;
+			outfile << "type=" << wmap->layernames[fow->dark_layer_id] << std::endl;
 			outfile << "data=" << std::endl;
 
 			std::string layer = "";
-			for (int line = 0; line < mapr->h; line++) {
+			for (int line = 0; line < wmap->h; line++) {
 				std::stringstream map_row;
-				for (int tile = 0; tile < mapr->w; tile++) {
-					unsigned short val = mapr->layers[fow->dark_layer_id][tile][line];
+				for (int tile = 0; tile < wmap->w; tile++) {
+					unsigned short val = wmap->layers[fow->dark_layer_id][tile][line];
 					map_row << val << ",";
 				}
 				layer += map_row.str();
