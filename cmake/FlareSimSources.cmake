@@ -62,6 +62,7 @@ Set (FLARE_PRESENTATION_SOURCES
 	./src/CombatText.cpp
 	./src/CursorManager.cpp
 	./src/DeviceList.cpp
+	./src/FontDeviceList.cpp
 	./src/FontEngine.cpp
 	./src/GameSlotPreview.cpp
 	./src/GameState.cpp
@@ -101,6 +102,7 @@ Set (FLARE_PRESENTATION_SOURCES
 	./src/MenuTalker.cpp
 	./src/MenuTouchControls.cpp
 	./src/MenuVendor.cpp
+	./src/NullFontEngine.cpp
 	./src/NullInputState.cpp
 	./src/NullRenderDevice.cpp
 	./src/NullSoundManager.cpp

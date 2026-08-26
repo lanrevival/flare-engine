@@ -28,7 +28,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
  */
 
 #include "CombatText.h"
-#include "DeviceList.h"
+#include "FontDeviceList.h"
 #include "EngineSettings.h"
 #include "FontEngine.h"
 #include "GameStateConfig.h"

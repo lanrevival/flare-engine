@@ -20,16 +20,14 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 #include "CommonIncludes.h"
 
-class FontEngine;
 class InputState;
-class MessageEngine;
 class SoundManager;
 class RenderDevice;
 
+// getFontEngine() and createRenderDeviceList() live in FontDeviceList.h instead (P1.4d) -- see
+// that header's comment for why.
 RenderDevice* getRenderDevice(const std::string& name);
-void createRenderDeviceList(MessageEngine* msg, std::vector<std::string> &rd_name, std::vector<std::string> &rd_desc);
 
-FontEngine* getFontEngine();
 // 'headless' selects the null implementations, used by the dedicated server. The default
 // keeps every existing client call site unchanged.
 SoundManager* getSoundManager(bool headless = false);

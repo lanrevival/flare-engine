@@ -30,7 +30,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Avatar.h"
 #include "CombatText.h"
 #include "CommonIncludes.h"
-#include "DeviceList.h"
+#include "FontDeviceList.h"
 #include "EngineSettings.h"
 #include "FileParser.h"
 #include "FontEngine.h"

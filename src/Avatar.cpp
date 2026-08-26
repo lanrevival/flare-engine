@@ -948,9 +948,9 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 		}
 	}
 
-	// update camera -- mapr is NULL on a headless server (P1.4c); no camera to update.
-	if (mapr)
-		mapr->cam.setTarget(stats.pos);
+	// Camera::setTarget() has no sim consequence -- it only records where the viewport should
+	// smoothly scroll to. Moved to GameStatePlay::logic() (P1.4d), which is the only caller
+	// that ever had a real mapr to update; that keeps Avatar.cpp free of MapRenderer entirely.
 
 	// check for map events
 	wmap->checkEvents(stats.pos);

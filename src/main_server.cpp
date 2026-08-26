@@ -47,7 +47,6 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "SharedGameResources.h"
 #include "CombatText.h"
 #include "CommonIncludes.h"
-#include "DeviceList.h"
 #include "EngineSettings.h"
 #include "EnemyGroupManager.h"
 #include "EntityManager.h"
@@ -84,7 +83,10 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Version.h"
 #include "XPScaling.h"
 
+#include "NullFontEngine.h"
+#include "NullInputState.h"
 #include "NullRenderDevice.h"
+#include "NullSoundManager.h"
 
 #include <SDL.h>
 
@@ -970,28 +972,34 @@ static void serverInit(const ServerCmdLineArgs& args) {
 
 	save_load = new SaveLoad();
 	msg = new MessageEngine();
-	font = getFontEngine();
+	// Constructed directly rather than through DeviceList.cpp's getInputManager()/getRenderDevice()/
+	// getSoundManager() (P1.4d): those are runtime string/bool factories, so even their
+	// "null"/headless branch still references SDLInputState/SDLSoftwareRenderDevice/
+	// SDLHardwareRenderDevice/SDLSoundManager in the same function body, which drags
+	// SDL2_image/SDL2_mixer into any binary that links DeviceList.cpp at all -- including one that
+	// only ever takes the null branch at runtime. Constructing the Null* classes here instead means
+	// main_server.cpp, and everything it links, never references the SDL-backed render/input/sound
+	// classes even at the symbol level. FontEngine is the one exception: MenuConfig.cpp (linked
+	// in for reasons that have nothing to do with fonts -- see CMakeLists.txt's
+	// FLARE_SERVER_EXCLUDED_PRESENTATION_SOURCES comment) unconditionally needs SDLFontEngine to
+	// exist for its own linking, so flare-server accepts SDL2_ttf regardless of what font is
+	// constructed here; a NullFontEngine is still used here rather than SDLFontEngine so the
+	// server's *own* font object never does real font work, even though the library is present.
+	font = new NullFontEngine();
 	anim = new AnimationManager();
 	comb = new CombatText();
 
 	eset = new EngineSettings();
 	eset->load();
 
-	inpt = getInputManager(true);
+	inpt = new NullInputState();
 	icons = NULL;
 
 	Stats::init();
 
 	platform.setScreenSize();
 
-	render_device = getRenderDevice("null");
-
-	// If this ever stops being a NullRenderDevice, the server has quietly regained a
-	// dependency on a display. Fail loudly rather than discovering it on a headless box.
-	if (dynamic_cast<NullRenderDevice*>(render_device) == NULL) {
-		Utils::logError("main_server: --headless requires the null render device, but got something else.");
-		Utils::Exit(1);
-	}
+	render_device = new NullRenderDevice();
 
 	if (render_device->createContext() == -1) {
 		Utils::logError("main_server: Could not create rendering context.");
@@ -999,7 +1007,7 @@ static void serverInit(const ServerCmdLineArgs& args) {
 	}
 	render_device->reloadGraphics();
 
-	snd = getSoundManager(true);
+	snd = new NullSoundManager();
 
 	tooltipm = new TooltipManager();
 }

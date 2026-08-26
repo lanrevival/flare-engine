@@ -18,7 +18,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 */
 
 #include "CommonIncludes.h"
-#include "DeviceList.h"
+#include "FontDeviceList.h"
 #include "EngineSettings.h"
 #include "FileParser.h"
 #include "FontEngine.h"

@@ -46,7 +46,6 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuManager.h"
 #include "MenuPowers.h"
 #include "MenuStash.h"
-#include "MenuTalker.h"
 #include "MenuVendor.h"
 #include "MessageEngine.h"
 #include "ModManager.h"
@@ -762,9 +761,16 @@ void SaveLoad::applyPlayerData() {
 	// just for aesthetics, turn the hero to face the camera
 	pc->stats.direction = 6;
 
-	// set up MenuTalker for this hero -- widget only, no sim-side equivalent (P1.4c).
-	if (menu)
-		menu->talker->setHero(pc->stats);
+	// set up MenuTalker for this hero -- widget-only dialogue-portrait cache, no sim-side
+	// equivalent (P1.4c, matches checkNPCInteraction()'s "drop entirely" -- NPC dialogue is
+	// menu->talker-driven and doesn't exist headless at all). Dropped rather than guarded: an
+	// if(menu) guard stops this from running server-side but still needs MenuTalker::setHero()
+	// to link, and SaveLoad.cpp has no other reason to reach into MenuTalker.cpp at all -- so
+	// dropping the reference is strictly simpler than keeping a guarded call to a class this
+	// file otherwise has nothing to do with. (MenuTalker.cpp ends up linked into flare-server
+	// regardless, via MenuManager.cpp -- see CMakeLists.txt's
+	// FLARE_SERVER_EXCLUDED_PRESENTATION_SOURCES comment -- this drop just means SaveLoad.cpp
+	// itself isn't why.)
 
 	// load sounds (gender specific)
 	pc->loadSounds();

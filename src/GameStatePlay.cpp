@@ -973,6 +973,10 @@ void GameStatePlay::logic() {
 
 		pc->logic(player_cmd, player_locks);
 
+		// update camera -- moved out of Avatar::logic() (P1.4d); the camera has no sim
+		// consequence, only mapr->logic()'s later cam.logic() smoothing step needs the target.
+		mapr->cam.setTarget(pc->stats.pos);
+
 		// transfer hero data to enemies, for AI use
 		if (pc->stats.get(Stats::STEALTH) > 100) entitym->hero_stealth = 100;
 		else entitym->hero_stealth = pc->stats.get(Stats::STEALTH);

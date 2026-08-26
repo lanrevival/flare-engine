@@ -28,6 +28,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "AnimationManager.h"
 #include "CombatText.h"
 #include "DeviceList.h"
+#include "FontDeviceList.h"
 #include "EngineSettings.h"
 #include "GameSwitcher.h"
 #include "InputState.h"
