@@ -57,8 +57,6 @@ private:
 
 	Point last_mouse;
 
-	std::vector<Timer> slot_fail_cooldown;
-
 	SoundID sfx_unable_to_cast;
 
 	int tooltip_length;
@@ -123,6 +121,7 @@ public:
 	std::vector<PowerID>& hotkeys_mod; // hotkeys can be changed by items
 	std::vector<bool>& locked; // if slot is locked, you cannot drop it
 	std::vector<bool>& prevent_changing;
+	std::vector<Timer>& slot_fail_cooldown; // since P1.4c; see ActionBarState.h
 	std::vector<WidgetSlot *> slots; // hotkey slots
 	WidgetSlot *menus[MENU_COUNT]; // menu buttons
 	std::string menu_titles[MENU_COUNT];
@@ -132,7 +131,7 @@ public:
 
 	int drag_prev_slot;
 	bool& updated;
-	int twostep_slot;
+	int& twostep_slot; // since P1.4c; see ActionBarState.h
 
 	WidgetSlot* touch_slot;
 

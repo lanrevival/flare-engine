@@ -70,10 +70,11 @@ MenuActionBar::MenuActionBar()
 	, hotkeys_mod(pab->hotkeys_mod)
 	, locked(pab->locked)
 	, prevent_changing(pab->prevent_changing)
+	, slot_fail_cooldown(pab->slot_fail_cooldown)
 	, requires_attention(pab->requires_attention)
 	, drag_prev_slot(-1)
 	, updated(pab->updated)
-	, twostep_slot(-1)
+	, twostep_slot(pab->twostep_slot)
 	, touch_slot(NULL)
 	, enable_gamepad_nav(true) {
 
@@ -197,13 +198,12 @@ MenuActionBar::MenuActionBar()
 
 	// menus are added to tablist with setupMenuButtons()
 
-	// Sizes slots_count, hotkeys, hotkeys_temp, hotkeys_mod and locked -- see
-	// ActionBarState::initSlots(). Only these four are pab's; the rest below are presentation.
+	// Sizes slots_count, hotkeys, hotkeys_temp, hotkeys_mod, locked and slot_fail_cooldown -- see
+	// ActionBarState::initSlots(). Only these are pab's; the rest below are presentation.
 	pab->initSlots(static_cast<unsigned>(slots.size()));
 
 	slot_item_count.resize(slots_count);
 	slot_activated.resize(slots_count);
-	slot_fail_cooldown.resize(slots_count);
 
 	clear(!MenuActionBar::CLEAR_SKIP_ITEMS);
 
@@ -275,14 +275,12 @@ void MenuActionBar::align() {
 }
 
 void MenuActionBar::clearSlot(size_t slot) {
-	// hotkeys/hotkeys_temp/hotkeys_mod/locked live on pab now; this is the widget-only remainder
-	// -- see ActionBarState::clearSlot() for the part that moved.
+	// hotkeys/hotkeys_temp/hotkeys_mod/locked/slot_fail_cooldown live on pab now; this is the
+	// widget-only remainder -- see ActionBarState::clearSlot() for the part that moved.
 	pab->clearSlot(slot);
 
 	slot_item_count[slot] = -1;
 	slot_activated[slot] = false;
-	slot_fail_cooldown[slot].setDuration(Settings::SIM_TICK_HZ);
-	slot_fail_cooldown[slot].reset(Timer::END);
 
 	if (slots[slot]) {
 		slots[slot]->enabled = true;

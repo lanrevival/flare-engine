@@ -26,6 +26,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "EventManager.h"
 #include "FileParser.h"
 #include "FogOfWar.h"
+#include "InputState.h"
 #include "Map.h"
 #include "MapSaver.h"
 #include "MessageEngine.h"
@@ -42,6 +43,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "UtilsMath.h"
 #include "UtilsParsing.h"
 
+#include <limits>
 #include <vector>
 
 void SpawnLevel::parse(FileParser &infile) {
@@ -339,6 +341,49 @@ void Map::activatePower(PowerID power_index, unsigned statblock_index, const FPo
 	}
 	else {
 		Utils::logError("Map: StatBlock index is out of bounds.");
+	}
+}
+
+// Ported from MapRenderer::checkNearestEvent() -- P1.4c. Dropped: the tooltip/cursor half
+// (show_tooltip, createTooltip(), tip_pos), all presentation and gated on inpt->usingMouse()/
+// usingTouchscreen() in the original, neither of which the server needs. it->reachable_from's
+// check reads pc->stats.pos here where the original read mapr->cam.pos -- the ATTR's own
+// documented meaning is "if the hero is inside this rectangle" (EventManager.cpp), so this is a
+// more faithful read of the field's intent than the client's camera-position proxy, not a new
+// approximation on top of one.
+void Map::checkNearestEventInteraction() {
+	std::vector<Event>::iterator it;
+	std::vector<Event>::iterator nearest = events.end();
+	float best_distance = std::numeric_limits<float>::max();
+
+	// loop in reverse because we may erase elements
+	for (it = events.end(); it != events.begin(); ) {
+		--it;
+
+		// skip inactive events
+		if (!eventm->isActive(*it)) continue;
+
+		// skip events without hotspots
+		if (it->hotspot.h == 0) continue;
+
+		// skip events on cooldown
+		if (!it->cooldown.isEnd() || !it->delay.isEnd()) continue;
+
+		float distance = Utils::calcDist(pc->stats.pos, it->center);
+		if (((it->reachable_from.w == 0 && it->reachable_from.h == 0) || Utils::isWithinRect(it->reachable_from, Point(pc->stats.pos)))
+				&& distance < eset->misc.interact_range && distance < best_distance) {
+			best_distance = distance;
+			nearest = it;
+		}
+	}
+
+	if (nearest != events.end()) {
+		if (inpt->pressing[Input::ACCEPT] && !inpt->lock[Input::ACCEPT]) {
+			inpt->lock[Input::ACCEPT] = true;
+
+			if (eventm->executeEvent(*nearest))
+				events.erase(nearest);
+		}
 	}
 }
 

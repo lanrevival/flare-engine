@@ -251,6 +251,12 @@ public:
 	void checkEvents(const FPoint& loc);
 	void activatePower(PowerID power_index, unsigned statblock_index, const FPoint &target);
 
+	// The proximity+ACCEPT-key half of MapRenderer::checkNearestEvent() -- P1.4c. Finds the
+	// nearest active, in-range, off-cooldown event with a hotspot and, on an unlocked ACCEPT
+	// press, executes it. The mouse-hover/tooltip half of that function stays presentation-only
+	// and does not move here -- see P1.4c's plan doc.
+	void checkNearestEventInteraction();
+
 	// some events are automatically triggered when the map is loaded
 	void executeOnLoadEvents();
 

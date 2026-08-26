@@ -47,12 +47,20 @@ FLARE.  If not, see http://www.gnu.org/licenses/
  * and that code did not need to change at all: resize()/[index]= behave identically through a
  * reference.
  *
- * What is NOT here, on purpose: `clear()`, `checkAction()`, and half of `addPower()`.
- * `checkAction()` reads widget click state and never runs on a headless server at all -- it stays
- * on MenuActionBar permanently, not as a shortcut. `clear()` calls MenuActionBar's own clearSlot()
- * (the widget-touching one) for every slot it clears, and its two callers (GameStatePlay's
- * resetGame(), EventManager's class-switch) still go through a live menu today -- moving it isn't
- * needed for anything currently blocked, so it stays, deferred rather than rushed.
+ * `twostep_slot` and `slot_fail_cooldown` joined in P1.4c, for a different reason than any of the
+ * above: not because a widget got in the way, but because the headless server's hotkey translator
+ * (main_server.cpp) needs to persist two-step-activation and per-slot fail-cooldown state ACROSS
+ * ticks, the same way MenuActionBar always has, and there is exactly one of each per hotkey slot
+ * whether or not anything is drawing them. Sized in initSlots()/cleared in clearSlot() alongside
+ * the four PowerID vectors, same pattern.
+ *
+ * What is NOT here, on purpose: `clear()`, and half of `addPower()`. `clear()` calls
+ * MenuActionBar's own clearSlot() (the widget-touching one) for every slot it clears, and its two
+ * callers (GameStatePlay's resetGame(), EventManager's class-switch) still go through a live menu
+ * today -- moving it isn't needed for anything currently blocked, so it stays, deferred rather than
+ * rushed. `checkAction()` itself also stays on MenuActionBar, for the widget-click branches it still
+ * owns -- but as of P1.4c it is no longer true that it "never runs on a headless server at all": the
+ * hotkey-only subset of what it does now runs server-side too, through checkHotkeyActions() below.
  *
  * addPower()'s split follows a real seam, not the wart PlayerInventory::setEquipSlotEnabled() has:
  * MenuActionBar::addPower(id, target_id)'s two branches are MUTUALLY EXCLUSIVE, not entangled.
@@ -75,6 +83,8 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "CommonIncludes.h"
 #include "Utils.h"
 
+class ActionData;
+
 class ActionBarState {
 public:
 	// How many menu buttons requires_attention tracks (character/inventory/powers/log). A
@@ -88,18 +98,28 @@ public:
 
 	ActionBarState();
 
-	/** Sizes the four per-slot arrays. Called once, from MenuActionBar's constructor, after it has
-	 * parsed menus/actionbar.txt and knows how many slots exist -- see PlayerInventory::init()'s
-	 * header comment for the same shape of dependency and why it hasn't moved yet (D1).
+	/** Sizes the six per-slot arrays (the four PowerID vectors, plus slot_fail_cooldown since
+	 * P1.4c). Called once, from MenuActionBar's constructor, after it has parsed
+	 * menus/actionbar.txt and knows how many slots exist -- see PlayerInventory::init()'s header
+	 * comment for the same shape of dependency and why it hasn't moved yet (D1).
 	 */
 	void initSlots(unsigned _slots_count);
 
 	/** Empties one slot: hotkeys[slot], hotkeys_temp[slot], hotkeys_mod[slot] and locked[slot] all
-	 * go to their unset values. Nothing else -- MenuActionBar's own clearSlot() calls this and then
-	 * does the widget-side reset (icon, cooldown flash, item count) that this class has no way to
-	 * do and no need to: the next logic() tick redraws every slot's icon from hotkeys_mod anyway.
+	 * go to their unset values, and slot_fail_cooldown[slot] (since P1.4c) is reset to its
+	 * just-cleared duration/state. Nothing else -- MenuActionBar's own clearSlot() calls this and
+	 * then does the widget-side reset (icon, cooldown flash, item count) that this class has no way
+	 * to do and no need to: the next logic() tick redraws every slot's icon from hotkeys_mod anyway.
 	 */
 	void clearSlot(size_t slot);
+
+	/** The hotkey-only subset of MenuActionBar::checkAction() -- see this file's header comment.
+	 * Reads pc/powers/inpt/wmap directly (all sim globals) instead of taking them as parameters,
+	 * matching Map::checkEvents()/activatePower()'s own style. Appends to action_queue exactly like
+	 * the original; does not touch slots[]/slot_item_count/anything widget-owned, because none of
+	 * that exists without a live MenuActionBar.
+	 */
+	void checkHotkeyActions(std::vector<ActionData> &action_queue);
 
 	/** Places power `id` on a slot: MAIN1/MAIN2 first, then 0-9, skipping slots menus/actionbar.txt
 	 * marked un-droppable (prevent_changing) and, when target_id is 0, skipping duplicates of a
@@ -125,6 +145,15 @@ public:
 	// Sized to MENU_COUNT, not slots_count -- one flag per menu button, not per hotkey slot.
 	std::vector<bool> requires_attention;
 	bool updated;
+
+	// Since P1.4c. Which slot (if any) is mid two-step activation (a power with
+	// STARTING_POS_TARGET or buff_teleport, waiting on its second MAIN1/MAIN2 press) -- -1 means
+	// none. One value for the whole action bar, not per-slot, matching MenuActionBar's original.
+	int twostep_slot;
+
+	// Since P1.4c. Per-slot "don't retry a just-failed activation every tick" cooldown -- sized in
+	// initSlots(), armed in clearSlot(), matching MenuActionBar::slot_fail_cooldown exactly.
+	std::vector<Timer> slot_fail_cooldown;
 };
 
 #endif
