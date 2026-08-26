@@ -28,11 +28,13 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuPowers.h"
 #include "NPCManager.h"
 #include "PlayerInventory.h"
+#include "PlayerManager.h"
 #include "PowerBonusState.h"
 #include "PowerManager.h"
 #include "XPScaling.h"
 #include "SharedGameResources.h"
 
+PlayerManager *playerm = NULL;
 Avatar *pc = NULL;
 MenuManager *menu = NULL;
 CampaignManager *camp = NULL;

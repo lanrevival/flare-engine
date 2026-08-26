@@ -35,6 +35,7 @@ class MenuManager;
 class MenuPowers;
 class NPCManager;
 class PlayerInventory;
+class PlayerManager;
 class PowerBonusState;
 class PowerManager;
 class FogOfWar;
@@ -43,6 +44,10 @@ class XPScaling;
 /* These objects are created in the GameStatePlay constructor and deleted in the GameStatePlay destructor
 *  so can be accessed safely anywhere in between. The objects must not be changed by any other class.
 */
+// pc/pinv/pab/pbs are PlayerManager's compatibility aliases for playerm->local() and its three
+// sibling objects (PlayerManager.h/.cpp) -- kept in sync by PlayerManager::setLocal()/create()/
+// remove(), not written to directly by anyone else. See plans/phase2/P2.1-player-manager.md.
+extern PlayerManager *playerm;
 extern Avatar *pc;
 extern CampaignManager *camp;
 extern EnemyGroupManager *enemyg;

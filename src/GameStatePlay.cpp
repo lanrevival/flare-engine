@@ -70,6 +70,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "NPCManager.h"
 #include "PlayerCommand.h"
 #include "PlayerInventory.h"
+#include "PlayerManager.h"
 #include "PowerBonusState.h"
 #include "PowerManager.h"
 #include "QuestLog.h"
@@ -109,17 +110,18 @@ GameStatePlay::GameStatePlay()
 	fow = new FogOfWar();
 	mapr = new MapRenderer();
 	wmap = mapr; // the simulation's view of the same object. See SharedGameResources.h, P1.4a.
-	pc = new Avatar();
+	// playerm allocates pc/pinv/pab/pbs together -- see PlayerManager.cpp. pinv/pab must exist
+	// before the menus below and survive after they're destroyed: MenuInventory's constructor
+	// hands pinv the inventory shape it parses out of menus/inventory.txt and binds itself to
+	// it, and MenuActionBar does the same to pab before menus/actionbar.txt has even been
+	// parsed. See the destructor's matching playerm->remove(0) call, placed after delete menu
+	// for exactly this reason.
+	playerm = new PlayerManager();
+	playerm->create(0);
+	playerm->setLocal(0);
 	entitym = new EntityManager();
 	enemyg = new EnemyGroupManager();
 	hazards = new HazardManager();
-	// Before the menus, and destroyed after them: MenuInventory's constructor hands this object
-	// the inventory shape it parses out of menus/inventory.txt, and then binds itself to it.
-	// pab follows the same rule for the same reason -- MenuActionBar's constructor binds
-	// reference members to it before menus/actionbar.txt has even been parsed.
-	pinv = new PlayerInventory();
-	pab = new ActionBarState();
-	pbs = new PowerBonusState();
 	menu = new MenuManager();
 	npcs = new NPCManager();
 	quests = new QuestLog(menu->questlog);
@@ -1314,12 +1316,13 @@ GameStatePlay::~GameStatePlay() {
 	delete npcs;
 	delete hazards;
 	delete entitym;
-	delete pc;
 	delete mapr;
 	delete menu;
-	delete pinv;
-	delete pab;
-	delete pbs;
+	// After delete menu, not before -- pinv/pab must outlive MenuInventory/MenuActionBar, which
+	// bind into them (see the constructor's matching comment). playerm->remove(0) frees pc/pinv/
+	// pab/pbs together and NULLs the four aliases itself (PlayerManager::remove()).
+	playerm->remove(0);
+	delete playerm;
 	delete loot;
 	delete camp;
 	delete items;
@@ -1332,11 +1335,8 @@ GameStatePlay::~GameStatePlay() {
 	delete eventm;
 
 	// NULL-ify shared game resources
-	pc = NULL;
+	playerm = NULL;
 	menu = NULL;
-	pinv = NULL;
-	pab = NULL;
-	pbs = NULL;
 	camp = NULL;
 	enemyg = NULL;
 	entitym = NULL;

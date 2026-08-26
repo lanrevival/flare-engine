@@ -43,6 +43,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "CampaignManager.h"
 #include "PlayerCommand.h"
 #include "PlayerInventory.h"
+#include "PlayerManager.h"
 #include "PowerBonusState.h"
 #include "SharedGameResources.h"
 #include "CombatText.h"
@@ -153,7 +154,7 @@ static QuestLog* server_quests = NULL;
 
 class ServerCmdLineArgs {
 public:
-	ServerCmdLineArgs() : mod_list(), load_slot(), data_path(), max_ticks(0), hash_every(0), hash_at_exit(false), sim_seed(RNG_DEFAULT_SIM_SEED), record_path(), replay_path() {}
+	ServerCmdLineArgs() : mod_list(), load_slot(), data_path(), max_ticks(0), hash_every(0), hash_at_exit(false), sim_seed(RNG_DEFAULT_SIM_SEED), record_path(), replay_path(), dump_players(false), assert_pc_alias(false) {}
 	std::vector<std::string> mod_list;
 	std::string load_slot;
 	std::string data_path;
@@ -163,6 +164,8 @@ public:
 	uint64_t sim_seed;
 	std::string record_path;
 	std::string replay_path;
+	bool dump_players;
+	bool assert_pc_alias;
 };
 
 // The Platform implementations are compiled by #include-ing them into the entry point rather
@@ -1048,13 +1051,17 @@ static void serverConstructSim(const ServerCmdLineArgs& args) {
 	powers = new PowerManager();
 	fow = new FogOfWar();
 	wmap = new Map();
-	pc = new Avatar();
+	// playerm allocates pc/pinv/pab/pbs together -- see PlayerManager.cpp. The server has no
+	// MenuManager, so unlike GameStatePlay's constructor there is no menu-binding ordering
+	// constraint on pinv/pab here; this is a TODO: P3.5, same as the comment on the id below.
+	playerm = new PlayerManager();
+	// TODO: P3.5 -- players arrive when clients connect. Until then, create one so the server
+	// keeps working.
+	playerm->create(0);
+	playerm->setLocal(0);
 	entitym = new EntityManager();
 	enemyg = new EnemyGroupManager();
 	hazards = new HazardManager();
-	pinv = new PlayerInventory();
-	pab = new ActionBarState();
-	pbs = new PowerBonusState();
 	npcs = new NPCManager();
 
 	// QuestLog's own display state (the quests[] vector, log formatting) has no sim consumer --
@@ -1127,10 +1134,8 @@ static void serverCleanup() {
 	delete npcs;
 	delete hazards;
 	delete entitym;
-	delete pc;
-	delete pinv;
-	delete pab;
-	delete pbs;
+	playerm->remove(0);
+	delete playerm;
 	delete loot;
 	delete camp;
 	delete items;
@@ -1142,10 +1147,7 @@ static void serverCleanup() {
 	delete wmap;
 
 	server_quests = NULL;
-	pc = NULL;
-	pinv = NULL;
-	pab = NULL;
-	pbs = NULL;
+	playerm = NULL;
 	camp = NULL;
 	enemyg = NULL;
 	entitym = NULL;
@@ -1351,6 +1353,11 @@ static void printHelp() {
 	       "--replay=<FILE>          Replays input from FILE. Refuses a version or mod mismatch.\n"
 	       "--hash                   Prints a digest of world state at exit.\n"
 	       "--hash-every=<N>         Prints a digest every N ticks, for bisecting a divergence.\n"
+	       "--dump-players           Prints one line per player right after construction, then\n"
+	       "                         runs normally. P2.1 diagnostic -- see PlayerManager.h.\n"
+	       "--assert-pc-alias        Checks pc/pinv/pab/pbs against playerm's local() entry right\n"
+	       "                         after construction, prints the result, and exits without\n"
+	       "                         running the simulation: 0 if all four match, 1 otherwise.\n"
 	       "--max-fps=<N>            Render frame limit. Accepted and ignored: the server\n"
 	       "                         renders nothing and always simulates at 60 Hz.\n"
 	       "--headless               Accepted and implied; the server is always headless.\n");
@@ -1429,6 +1436,12 @@ int main(int argc, char *argv[]) {
 		else if (arg == "hash-every") {
 			args.hash_every = strtoul(parseServerArgValue(arg_full).c_str(), NULL, 10);
 		}
+		else if (arg == "dump-players") {
+			args.dump_players = true;
+		}
+		else if (arg == "assert-pc-alias") {
+			args.assert_pc_alias = true;
+		}
 		else if (arg == "max-fps") {
 			// Accepted so that the sim-rate-vs-render-rate claim can actually be tested: a
 			// server run at 30 and at 144 must produce the same tick count in the same wall
@@ -1484,6 +1497,31 @@ int main(int argc, char *argv[]) {
 	// After the reseed above, not before -- see serverConstructSim()'s own comment for why this
 	// ordering is load-bearing rather than cosmetic.
 	serverConstructSim(args);
+
+	// P2.1 diagnostics -- both read playerm right after construction, before any tick has run.
+	// stdout, not the log: golden/CI parsing shouldn't have to deal with timestamps.
+	if (args.dump_players) {
+		printf("players=%zu\n", playerm->count());
+		for (size_t i = 0; i < playerm->players.size(); ++i) {
+			printf("player id=%u\n", static_cast<unsigned>(playerm->players[i]->id));
+		}
+	}
+
+	if (args.assert_pc_alias) {
+		bool ok = (pc   == playerm->get(playerm->local_id)) &&
+		          (pinv == playerm->inventoryFor(playerm->local_id)) &&
+		          (pab  == playerm->actionbarFor(playerm->local_id)) &&
+		          (pbs  == playerm->powerbonusFor(playerm->local_id));
+		printf("assert-pc-alias: pc=%d pinv=%d pab=%d pbs=%d\n",
+		       pc   == playerm->get(playerm->local_id),
+		       pinv == playerm->inventoryFor(playerm->local_id),
+		       pab  == playerm->actionbarFor(playerm->local_id),
+		       pbs  == playerm->powerbonusFor(playerm->local_id));
+		// Diagnostic mode: checks a construction-time invariant and exits, same idiom as the
+		// startPlayback failure above -- the sim is fully constructed but never ticked, and
+		// nothing downstream expects that state, so skip serverCleanup() and the main loop.
+		Utils::Exit(ok ? 0 : 1);
+	}
 
 	uint64_t trajectory = WorldHash::init();
 	unsigned long last_event_tick = 0;

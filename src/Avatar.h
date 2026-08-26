@@ -31,6 +31,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "ActionData.h"
 #include "Entity.h"
 #include "PlayerCommand.h"
+#include "PlayerManager.h"
 #include "Utils.h"
 
 class Entity;
@@ -163,6 +164,12 @@ public:
 	int mm_target_object;
 	FPoint mm_target_object_pos;
 	bool block_xp_gain;
+
+	// Set once, by PlayerManager::create() -- nothing else assigns it, nothing reads it yet.
+	// PlayerManager uses it (via players[i]->id) to find which array slot belongs to which id,
+	// since the other three parallel arrays (PlayerInventory/ActionBarState/PowerBonusState)
+	// carry no id of their own and rely entirely on staying aligned with players by index.
+	PlayerID id;
 
 	std::vector<ActionData> action_queue;
 };

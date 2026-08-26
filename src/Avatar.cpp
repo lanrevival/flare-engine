@@ -91,6 +91,7 @@ Avatar::Avatar()
 	, mm_target_object(MM_TARGET_NONE)
 	, mm_target_object_pos()
 	, block_xp_gain(false)
+	, id(0)
 {
 	power_cooldown_timers.resize(powers->powers.size(), NULL);
 	power_cast_timers.resize(powers->powers.size(), NULL);

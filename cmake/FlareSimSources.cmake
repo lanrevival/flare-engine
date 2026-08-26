@@ -33,6 +33,7 @@ Set (FLARE_SIM_SOURCES
 	./src/NPCManager.cpp
 	./src/PlayerCommand.cpp
 	./src/PlayerInventory.cpp
+	./src/PlayerManager.cpp
 	./src/PowerBonusState.cpp
 	./src/PowerManager.cpp
 	./src/Rng.cpp
