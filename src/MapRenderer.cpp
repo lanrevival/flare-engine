@@ -77,81 +77,6 @@ void MapRenderer::clearObjects() {
 	loot.clear();
 }
 
-bool MapRenderer::enemyGroupPlaceEnemy(float x, float y, const Map_Group &g) {
-	if (collider.isValidPosition(x, y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_NONE)) {
-		Enemy_Level enemy_lev = enemyg->getRandomEnemy(g.category, g.levelmin, g.levelmax);
-		if (!enemy_lev.type.empty()) {
-			Map_Enemy group_member = Map_Enemy(enemy_lev.type, FPoint(x, y));
-
-			group_member.direction = (g.direction == -1 ? sim_rng->range(0, 7) : g.direction);
-			group_member.wander_radius = g.wander_radius;
-			group_member.requirements = g.requirements;
-			group_member.invincible_requirements = g.invincible_requirements;
-
-			if (g.area.x == 1 && g.area.y == 1) {
-				// this is a single enemy
-				for (size_t i = 0; i < g.waypoints.size(); ++i) {
-					group_member.waypoints.push(g.waypoints[i]);
-				}
-			}
-
-			group_member.spawn_level = g.spawn_level;
-
-			enemies.push(group_member);
-		}
-		return true;
-	}
-	return false;
-}
-
-void MapRenderer::pushEnemyGroup(Map_Group &g) {
-	// activate at all?
-	if (!sim_rng->percentChanceF(g.chance)) {
-		return;
-	}
-
-	// The algorithm tries to place the enemies at random locations.
-	// However if a location is not possible (unwalkable or there is already an entity),
-	// then try again.
-	// This could result in an infinite loop if there were more enemies than
-	// actual places, so have an upper bound of tries.
-
-	// random number of enemies
-	int enemies_to_spawn = sim_rng->range(g.numbermin, g.numbermax);
-
-	// pick an upper bound, which is definitely larger than threetimes the enemy number to spawn.
-	int allowed_misses = 5 * g.numbermax;
-
-	while (enemies_to_spawn > 0 && allowed_misses > 0) {
-
-		float x = (g.area.x == 0) ? (static_cast<float>(g.pos.x) + 0.5f) : (static_cast<float>(g.pos.x + sim_rng->range(0, g.area.x - 1))) + 0.5f;
-		float y = (g.area.y == 0) ? (static_cast<float>(g.pos.y) + 0.5f) : (static_cast<float>(g.pos.y + sim_rng->range(0, g.area.y - 1))) + 0.5f;
-
-		if (enemyGroupPlaceEnemy(x, y, g))
-			enemies_to_spawn--;
-		else
-			allowed_misses--;
-	}
-	if (enemies_to_spawn > 0) {
-		// now that the fast method of spawning enemies doesn't work, but we
-		// still have enemies to place, do not place them randomly, but at the
-		// first free spot
-		for (int x = g.pos.x; x < g.pos.x + g.area.x && enemies_to_spawn > 0; x++) {
-			for (int y = g.pos.y; y < g.pos.y + g.area.y && enemies_to_spawn > 0; y++) {
-				float xpos = static_cast<float>(x) + 0.5f;
-				float ypos = static_cast<float>(y) + 0.5f;
-				if (enemyGroupPlaceEnemy(xpos, ypos, g))
-					enemies_to_spawn--;
-			}
-		}
-
-	}
-	if (enemies_to_spawn > 0) {
-		Utils::logError("MapRenderer: Could not spawn all enemies in group at %s (x=%d,y=%d,w=%d,h=%d), %d missing (min=%d max=%d)",
-				filename.c_str(), g.pos.x, g.pos.y, g.area.x, g.area.y, enemies_to_spawn, g.numbermin, g.numbermax);
-	}
-}
-
 /**
  * No guarantee that maps will use all layers
  * Clear all tile layers (e.g. when loading a map)
@@ -169,48 +94,25 @@ int MapRenderer::load(const std::string& fname) {
 		sids.pop_back();
 	}
 
-	// clear enemy spawn queue
-	while (!powers->map_enemies.empty()) {
-		powers->map_enemies.pop();
-	}
-
 	// clear combat text
 	comb->clear();
 
 	show_tooltip = false;
 	is_spawn_map = (fname == "maps/spawn.txt");
 
+	// Collision-layer setup, fow_dark/fow_fog layer id assignment, the powers->map_enemies
+	// clear, and the pushEnemyGroup() spawn loop all moved into Map::load() itself -- P1.4c.
+	// They are sim-critical (a headless server's wmap is a plain Map, never a MapRenderer, and
+	// had no collision grid or spawned enemies at all until this moved) and none of them ever
+	// touched a widget, so Map::load(fname) below now does all of it; only index_objectlayer
+	// (presentation: which layer to draw entities relative to) stays here.
 	Map::load(fname);
 
 	loadMusic();
 
-	for (unsigned i = 0; i < layers.size(); ++i) {
-		if (layernames[i] == "collision") {
-			short width = static_cast<short>(layers[i].size());
-			if (width == 0) {
-				Utils::logError("MapRenderer: Map width is 0. Can't set collision layer.");
-				break;
-			}
-			short height = static_cast<short>(layers[i][0].size());
-			collider.setMap(layers[i], width, height);
-			removeLayer(i);
-		}
-	}
 	for (unsigned i = 0; i < layers.size(); ++i)
 		if (layernames[i] == "object")
 			index_objectlayer = i;
-	if (fogofwar) {
-		for (unsigned short i = 0; i < layers.size(); ++i) {
-			if (layernames[i] == "fow_dark")
-				fow->dark_layer_id = i;
-			if (layernames[i] == "fow_fog")
-				fow->fog_layer_id = i;
-		}
-	}
-
-	for (size_t i = 0; i < enemy_groups.size(); ++i) {
-		pushEnemyGroup(enemy_groups[i]);
-	}
 
 	tset.load(this->tileset);
 

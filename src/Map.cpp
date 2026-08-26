@@ -23,6 +23,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "CampaignManager.h"
 #include "EffectManager.h"
 #include "EngineSettings.h"
+#include "EnemyGroupManager.h"
 #include "EventManager.h"
 #include "FileParser.h"
 #include "FogOfWar.h"
@@ -636,7 +637,121 @@ int Map::load(const std::string& fname, bool load_procgen_cache) {
 		layernames_hashed[i] = Utils::hashString(layernames[i]);
 	}
 
+	// Moved from MapRenderer::load() -- P1.4c. Sim-critical, not presentation: without an active
+	// collision grid every position looks blocked (MapCollision defaults to "not set up"), so a
+	// headless server's player could not move at all until this moved. Found by chasing exactly
+	// that symptom in the replay corpus, not by inspection.
+	//
+	// Clear pending runtime power-spawns from the previous map. A different queue from
+	// enemies/enemy_groups below -- PowerManager::activate()'s output for spawn powers, not
+	// map-authored enemy groups -- and it must not carry over to a new map.
+	while (!powers->map_enemies.empty()) {
+		powers->map_enemies.pop();
+	}
+
+	for (unsigned i = 0; i < layers.size(); ++i) {
+		if (layernames[i] == "collision") {
+			short width = static_cast<short>(layers[i].size());
+			if (width == 0) {
+				Utils::logError("Map: Map width is 0. Can't set collision layer.");
+				break;
+			}
+			short height = static_cast<short>(layers[i][0].size());
+			collider.setMap(layers[i], width, height);
+			removeLayer(i);
+		}
+	}
+
+	if (fogofwar) {
+		for (unsigned short i = 0; i < layers.size(); ++i) {
+			if (layernames[i] == "fow_dark")
+				fow->dark_layer_id = i;
+			if (layernames[i] == "fow_fog")
+				fow->fog_layer_id = i;
+		}
+	}
+
+	for (size_t i = 0; i < enemy_groups.size(); ++i) {
+		pushEnemyGroup(enemy_groups[i]);
+	}
+
 	return 0;
+}
+
+// Moved from MapRenderer -- P1.4c. See Map.h's comment on the declaration.
+bool Map::enemyGroupPlaceEnemy(float x, float y, const Map_Group &g) {
+	if (collider.isValidPosition(x, y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_NONE)) {
+		Enemy_Level enemy_lev = enemyg->getRandomEnemy(g.category, g.levelmin, g.levelmax);
+		if (!enemy_lev.type.empty()) {
+			Map_Enemy group_member = Map_Enemy(enemy_lev.type, FPoint(x, y));
+
+			group_member.direction = (g.direction == -1 ? sim_rng->range(0, 7) : g.direction);
+			group_member.wander_radius = g.wander_radius;
+			group_member.requirements = g.requirements;
+			group_member.invincible_requirements = g.invincible_requirements;
+
+			if (g.area.x == 1 && g.area.y == 1) {
+				// this is a single enemy
+				for (size_t i = 0; i < g.waypoints.size(); ++i) {
+					group_member.waypoints.push(g.waypoints[i]);
+				}
+			}
+
+			group_member.spawn_level = g.spawn_level;
+
+			enemies.push(group_member);
+		}
+		return true;
+	}
+	return false;
+}
+
+void Map::pushEnemyGroup(Map_Group &g) {
+	// activate at all?
+	if (!sim_rng->percentChanceF(g.chance)) {
+		return;
+	}
+
+	// The algorithm tries to place the enemies at random locations.
+	// However if a location is not possible (unwalkable or there is already an entity),
+	// then try again.
+	// This could result in an infinite loop if there were more enemies than
+	// actual places, so have an upper bound of tries.
+
+	// random number of enemies
+	int enemies_to_spawn = sim_rng->range(g.numbermin, g.numbermax);
+
+	// pick an upper bound, which is definitely larger than threetimes the enemy number to spawn.
+	int allowed_misses = 5 * g.numbermax;
+
+	while (enemies_to_spawn > 0 && allowed_misses > 0) {
+
+		float x = (g.area.x == 0) ? (static_cast<float>(g.pos.x) + 0.5f) : (static_cast<float>(g.pos.x + sim_rng->range(0, g.area.x - 1))) + 0.5f;
+		float y = (g.area.y == 0) ? (static_cast<float>(g.pos.y) + 0.5f) : (static_cast<float>(g.pos.y + sim_rng->range(0, g.area.y - 1))) + 0.5f;
+
+		if (enemyGroupPlaceEnemy(x, y, g))
+			enemies_to_spawn--;
+		else
+			allowed_misses--;
+	}
+	if (enemies_to_spawn > 0) {
+		// now that the fast method of spawning enemies doesn't work, but we
+		// still have enemies to place, do not place them randomly, but at the
+		// first free spot
+		for (int x = g.pos.x; x < g.pos.x + g.area.x && enemies_to_spawn > 0; x++) {
+			for (int y = g.pos.y; y < g.pos.y + g.area.y && enemies_to_spawn > 0; y++) {
+				float xpos = static_cast<float>(x) + 0.5f;
+				float ypos = static_cast<float>(y) + 0.5f;
+				if (enemyGroupPlaceEnemy(xpos, ypos, g))
+					enemies_to_spawn--;
+			}
+		}
+
+	}
+	if (enemies_to_spawn > 0) {
+		Utils::logError("Map: Could not spawn all enemies in group at %s (x=%d,y=%d,w=%d,h=%d), %d missing (min=%d max=%d)",
+				filename.c_str(), g.pos.x, g.pos.y, g.area.x, g.area.y, enemies_to_spawn, g.numbermin, g.numbermax);
+	}
 }
 
 void Map::loadHeader(FileParser &infile) {

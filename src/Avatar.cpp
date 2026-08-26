@@ -617,7 +617,13 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 		}
 	}
 
-	if (teleport_camera_lock && Utils::calcDist(stats.pos, mapr->cam.pos) < 0.5f) {
+	// mapr is NULL on a headless server (P1.4c) -- there is no camera to wait for, so the lock
+	// releases immediately rather than never, which would permanently block movement/direction
+	// changes gated on this same flag a few lines above and below (allow_movement,
+	// set_dir_timer). Found the way every other menu/mapr crash in this plan was: this flag gets
+	// set true by checkTeleport()'s port on tick 1, so tick 2's Avatar::logic() is the first
+	// unconditional dereference to actually run, not tick 1's.
+	if (teleport_camera_lock && (!mapr || Utils::calcDist(stats.pos, mapr->cam.pos) < 0.5f)) {
 		teleport_camera_lock = false;
 	}
 
@@ -942,8 +948,9 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 		}
 	}
 
-	// update camera
-	mapr->cam.setTarget(stats.pos);
+	// update camera -- mapr is NULL on a headless server (P1.4c); no camera to update.
+	if (mapr)
+		mapr->cam.setTarget(stats.pos);
 
 	// check for map events
 	wmap->checkEvents(stats.pos);

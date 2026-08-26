@@ -509,7 +509,9 @@ bool Entity::takeHit(Hazard &h) {
 		// default is dmg * 2
 		dmg = (dmg * sim_rng->rangeF(eset->combat.min_crit_damage, eset->combat.max_crit_damage)) / 100;
 		if (!stats.hero) {
-			mapr->cam.shake_timer.setDuration(Settings::SIM_TICK_HZ/2);
+			// mapr is NULL on a headless server (P1.4c) -- no camera to shake.
+			if (mapr)
+				mapr->cam.shake_timer.setDuration(Settings::SIM_TICK_HZ/2);
 			inpt->joystickRumble(InputState::JOYSTICK_RUMBLE_STRENGTH, InputState::JOYSTICK_RUMBLE_STRENGTH, 500);
 		}
 	}

@@ -1036,7 +1036,11 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 			}
 			else {
 				size_t index = static_cast<size_t>(distance(wmap->layernames.begin(), find(wmap->layernames.begin(), wmap->layernames.end(), ec->s)));
-				if (!mapr->isValidTile(tile_id))
+				// isValidTile() reads MapRenderer's own tileset (graphics), so mapr being NULL
+				// (P1.4c) means this can't actually be checked headless -- trusting the mod's
+				// data rather than blocking every non-collision MAPMOD server-side.
+				bool tile_ok = mapr ? mapr->isValidTile(tile_id) : true;
+				if (!tile_ok)
 					Utils::logError("EventManager: Mapmod at position (%d, %d) contains invalid tile id (%d).", tile_x, tile_y, tile_id);
 				else if (index >= wmap->layers.size())
 					Utils::logError("EventManager: Mapmod at position (%d, %d) is on an invalid layer.", tile_x, tile_y);
@@ -1069,9 +1073,13 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 			}
 			else {
 				size_t index = static_cast<size_t>(distance(wmap->layernames.begin(), find(wmap->layernames.begin(), wmap->layernames.end(), ec->s)));
-				if (!mapr->isValidTile(tile_a))
+				// Same substitution as MAPMOD above -- mapr's tileset can't be checked headless
+				// (P1.4c), so a NULL mapr trusts the mod's data for both tile ids.
+				bool tile_a_ok = mapr ? mapr->isValidTile(tile_a) : true;
+				bool tile_b_ok = mapr ? mapr->isValidTile(tile_b) : true;
+				if (!tile_a_ok)
 					Utils::logError("EventManager: Mapmod at position (%d, %d) contains invalid tile id (%d).", tile_x, tile_y, tile_a);
-				else if (!mapr->isValidTile(tile_b))
+				else if (!tile_b_ok)
 					Utils::logError("EventManager: Mapmod at position (%d, %d) contains invalid tile id (%d).", tile_x, tile_y, tile_b);
 				else if (index >= wmap->layers.size())
 					Utils::logError("EventManager: Mapmod at position (%d, %d) is on an invalid layer.", tile_x, tile_y);
@@ -1115,7 +1123,10 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 			se.use_pos = true;
 			se.loop = loop;
 			sim_events->push(se);
-			mapr->sids.push_back(sid);
+			// mapr->sids tracks sound ids for MapRenderer's own cleanup on map unload -- no
+			// such cleanup exists headless (mapr is NULL, P1.4c).
+			if (mapr)
+				mapr->sids.push_back(sid);
 		}
 		else if (ec->type == EventComponent::LOOT) {
 			EventComponent *ec_lootcount = ev.getComponent(EventComponent::LOOT_COUNT);
@@ -1141,7 +1152,9 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 			pc->logMsg(ec->s, Avatar::MSG_UNIQUE);
 		}
 		else if (ec->type == EventComponent::SHAKYCAM) {
-			mapr->cam.shake_timer.setDuration(ec->data[0].Int);
+			// mapr is NULL on a headless server (P1.4c) -- no camera to shake.
+			if (mapr)
+				mapr->cam.shake_timer.setDuration(ec->data[0].Int);
 			inpt->joystickRumble(InputState::JOYSTICK_RUMBLE_STRENGTH, InputState::JOYSTICK_RUMBLE_STRENGTH, (ec->data[0].Int * 1000) / Settings::SIM_TICK_HZ);
 		}
 		else if (ec->type == EventComponent::REMOVE_CURRENCY) {
@@ -1235,7 +1248,11 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 		}
 		else if (ec->type == EventComponent::MUSIC) {
 			wmap->music_filename = ec->s;
-			mapr->loadMusic();
+			// loadMusic() starts playback via MapRenderer -- no audio exists headless (mapr is
+			// NULL, P1.4c). wmap->music_filename itself stays set, in case a future save/load
+			// round trip needs it.
+			if (mapr)
+				mapr->loadMusic();
 		}
 		else if (ec->type == EventComponent::CUTSCENE) {
 			wmap->cutscene = true;
@@ -1306,7 +1323,10 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 			}
 		}
 		else if (ec->type == EventComponent::PARALLAX_LAYERS) {
-			mapr->setMapParallax(ec->s);
+			// Parallax background rendering config -- nothing renders headless (mapr is NULL,
+			// P1.4c).
+			if (mapr)
+				mapr->setMapParallax(ec->s);
 		}
 		else if (ec->type == EventComponent::RANDOM_STATUS) {
 			if (ec->data[0].Int == EventComponent::RANDOM_STATUS_MODE_APPEND)

@@ -117,7 +117,13 @@ uint64_t WorldHash::compute(unsigned long tick) {
 	// --- header ---
 	h = mixI32(h, TAG_HEADER);
 	h = mixU64(h, static_cast<uint64_t>(tick));
-	h = mixString(h, mapr ? mapr->getFilename() : std::string());
+	// wmap, not mapr: getFilename() reads Map-owned data (P1.4a) and wmap is never NULL, client
+	// or headless. mapr is NULL on a headless server (P1.4c), so this unconditionally hashed an
+	// empty string there -- every tick's digest was blind to which map was even loaded, the same
+	// shape of gap as the menu/inv guard fixed alongside the P1.4a-gap commit, just missed then
+	// because nothing had made mapr NULL yet to expose it. Found by bisecting a full-corpus
+	// digest mismatch down to a state that matched bit-for-bit everywhere else this file hashes.
+	h = mixString(h, wmap ? wmap->getFilename() : std::string());
 
 	// --- player ---
 	h = mixI32(h, TAG_PLAYER);

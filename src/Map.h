@@ -215,6 +215,15 @@ protected:
 	void clearLayers();
 	void clearEntities();
 
+	// Moved from MapRenderer -- P1.4c. Both are called only from load()'s own tail, and both are
+	// 100% sim: enemyGroupPlaceEnemy() reads collider (already Map-owned) and pushes onto
+	// `enemies` (already Map-owned, "enemy load handling" below); pushEnemyGroup() is the
+	// RNG-driven placement loop around it. Neither ever touched a widget even in the original --
+	// this was a gap in P1.4a's own "must move" table, the same shape as the
+	// executeOnLoadEvents()/executeOnMapExitEvents() gap that plan's own commit fixed.
+	bool enemyGroupPlaceEnemy(float x, float y, const Map_Group &g);
+	void pushEnemyGroup(Map_Group &g);
+
 	std::vector<StatBlock> statblocks;
 
 	std::string filename;

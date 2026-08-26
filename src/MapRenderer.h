@@ -51,9 +51,6 @@ private:
 	bool drawn_hero;
 	Rect hero_bounds;
 
-	bool enemyGroupPlaceEnemy(float x, float y, const Map_Group &g);
-	void pushEnemyGroup(Map_Group &g);
-
 	void clearObjects();
 
 	void drawRenderable(std::vector<Renderable>::iterator r_cursor);
