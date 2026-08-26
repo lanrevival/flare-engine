@@ -96,4 +96,28 @@ death     patrol    1400  4  -  no   0  1  1  map_event,step,hit,lowhp_start
 deathfull deathfull 1400  5  test_deathpenalty  no   0  2  1  map_event,step,hit,lowhp_start
 autoequip autoequip 900   6  test_autoequip     yes  1  0  1  map_event,step
 equipswap equipswap 900   7  test_equipswap     yes  6  0  2  map_event,step
-invdrag   invdrag   900   8  test_equipswap     yes  1  0  1  map_event,step
+
+# invdrag WAS a row here (900 ticks, slot 8, mods test_equipswap, survives yes, requires
+# map_event,step, expected equipped=1 carried=0) -- dropped by P1.4c, not weakened. It replays a
+# mouse drag from a carried slot onto the chest equipment slot, which only ever worked because
+# every server before P1.4c embedded the FULL client stack minus rendering: MenuInventory's own
+# widget hit-testing (slot rectangles from menus/inventory.txt) and its drag-state machine
+# (MenuInventory::activate(), drag_prev_slot/drag_prev_src) ran the mouse coordinates into a real
+# equip exactly as the client would, with nothing ever drawn. P1.4c's whole point was to stop
+# being "client minus rendering" -- MenuManager and MenuInventory are gone from flare-server, on
+# purpose, and with them the only code that could turn this recording's mouse input into an equip.
+#
+# MEASURED, not assumed: replaying invdrag.rec against the pre-P1.4c server (commit 6a531b36,
+# still carrying MenuManager/MenuInventory) gives equipped=1 carried=0 -- passes. The same
+# recording against P1.4c's server gives equipped=0 carried=1 -- the item never leaves CARRIED,
+# because nothing server-side ever reads a mouse-drag as an equip action. This is not a bug in
+# the P1.4c rewrite to chase further; it is the rewrite doing exactly what it says on the tin.
+#
+# There is no sim-side substitute to port this to, the same way checkHotspots() (point-and-click
+# map interaction) and RESPEC's stat-point spending have none: both need a screen position and a
+# widget layout to mean anything, and a dedicated server has neither. A LAN client will drive
+# equip changes through its own request, not a replayed mouse coordinate -- when that request
+# exists, it gets its own recording and its own row, not this one reinstated.
+#
+# invdrag.rec is kept, unplayed by this suite, as the record of what P1.3d-4's storage-move once
+# proved on a client-backed server. See plans/phase1/P1.4c-main-server-rewrite.md.

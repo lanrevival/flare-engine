@@ -19,13 +19,19 @@ FLARE.  If not, see http://www.gnu.org/licenses/
  * flare-server entry point.
  *
  * Runs the simulation with no window, no GPU and no audio device, using the null devices
- * from DeviceList. This is init() and mainLoop() from main.cpp with everything
- * presentation-shaped removed; it is not shared code yet because the sim/presentation split
- * is P1.4. Until then the duplication is deliberate and the two must be kept in step.
+ * from DeviceList. Through P1.4b this ran main.cpp's client game-state machine
+ * (GameSwitcher -> GameStateTitle/GameStateLoad/GameStatePlay -> MenuManager) headlessly, backed
+ * by null devices -- the "headless" property came from the devices, not from actually not
+ * running the client stack. P1.4c is what stops that: this file now constructs the simulation's
+ * own objects directly (the same ones GameStatePlay's constructor builds, minus menu/mapr/quests
+ * -- see SharedGameResources.h's wmap/mapr note) and drives them with a tick function ported from
+ * GameStatePlay::logic(), not through any GameState at all. See plans/phase1/P1.4c's plan doc for
+ * the full classification this rewrite is built from.
  *
  * There is no networking here. That is Phase 3.
  */
 
+#include <algorithm>
 #include <csignal>
 #include <cstdio>
 #include <ctime>
@@ -34,23 +40,36 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "ActionBarState.h"
 #include "AnimationManager.h"
 #include "Avatar.h"
+#include "CampaignManager.h"
+#include "PlayerCommand.h"
 #include "PlayerInventory.h"
+#include "PowerBonusState.h"
 #include "SharedGameResources.h"
 #include "CombatText.h"
 #include "CommonIncludes.h"
 #include "DeviceList.h"
 #include "EngineSettings.h"
+#include "EnemyGroupManager.h"
+#include "EntityManager.h"
+#include "EventManager.h"
+#include "FileParser.h"
+#include "FogOfWar.h"
 #include "FontEngine.h"
-#include "GameSwitcher.h"
+#include "HazardManager.h"
 #include "InputState.h"
+#include "LootManager.h"
+#include "Map.h"
 #include "MenuActionBar.h"
-#include "MenuInventory.h"
 #include "MenuManager.h"
 #include "MessageEngine.h"
 #include "ModManager.h"
+#include "NPCManager.h"
+#include "PowerManager.h"
+#include "QuestLog.h"
 #include "RenderDevice.h"
 #include "Replay.h"
 #include "SimEvents.h"
+#include "StatBlock.h"
 #include "WorldHash.h"
 #include "Rng.h"
 #include "SaveLoad.h"
@@ -63,12 +82,72 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "UtilsFileSystem.h"
 #include "UtilsParsing.h"
 #include "Version.h"
+#include "XPScaling.h"
 
 #include "NullRenderDevice.h"
 
 #include <SDL.h>
 
-GameSwitcher *gswitch;
+// Character titles (engine/titles.txt). GameStatePlay::loadTitles()/checkTitle()'s server-side
+// equivalents. Title itself is a plain data class declared in GameStatePlay.h -- duplicated here
+// rather than pulled in via that header, the same call ActionBarState/PlayerInventory already
+// make for their own small presentation-adjacent constants (see e.g. ActionBarState::MENU_COUNT).
+class Title {
+public:
+	std::string title;
+	int level;
+	PowerID power;
+	std::vector<StatusID> requires_status;
+	std::vector<StatusID> requires_not_status;
+	std::string primary_stat_1;
+	std::string primary_stat_2;
+
+	Title()
+		: title("")
+		, level(0)
+		, power(0)
+		, requires_status()
+		, requires_not_status()
+		, primary_stat_1("")
+		, primary_stat_2("") {
+	}
+};
+
+static std::vector<Title> server_titles;
+
+// Set true the moment a permadeath character's death finishes teleport-processing (see
+// serverCheckTeleport()) -- the server-appropriate equivalent of the client switching to
+// GameStateTitle, which does not exist here.
+static bool server_exit_requested = false;
+
+// GameStatePlay::checkTeleport()'s is_first_map_load, moved here for the same reason: without
+// it, the server's very first tick would call save_load->saveGame() (eset->misc.save_onload
+// defaults true) on a character that was just loaded from that exact save -- harmless to the
+// corpus's digest, but a real, avoidable divergence from what the client does on the same input.
+static bool server_is_first_map_load = true;
+
+// GameStatePlay's MenuInventory::changed_equipment, tracked directly since no MenuInventory
+// exists headless. Genuinely load-bearing, not cosmetic: pc->loadAnimations() (called from
+// serverCheckEquipmentChange() below when this is true) unconditionally rebuilds Entity::anims
+// and calls setAnimation("stance") on the way (Entity::loadAnimations(), Entity.cpp), which
+// resets activeAnimation to frame 0 -- including the ATTACK animation mid-cast. Calling
+// loadAnimations() every tick regardless of this flag -- P1.4c's first attempt, on the theory
+// that it was cheap and safe to over-call -- silently froze every power cast: Avatar::logic()'s
+// ENTITY_POWER case only calls powers->activate() on activeAnimation->isActiveFrame(), which a
+// frame-0 reset every tick can never reach. Found by bisecting the replay corpus's melee digest,
+// which only reads as "wrong" hundreds of ticks downstream (enemies never take damage, never
+// die, no loot, no currency) -- the actual break is a stall on the very first attack. Starts
+// true to match MenuInventory's own constructor default (MenuInventory.cpp), which is what
+// makes the *very first* logic tick redundantly reload animations already loaded once by
+// SaveLoad::loadGame() -- harmless duplication, replicated for fidelity rather than special-cased
+// away.
+static bool server_equipment_changed = true;
+
+// quests was a private GameStatePlay member, not a SharedGameResources.h global -- nothing else
+// in the sim reads a global named "quests", so this server holds its own pointer, purely to
+// construct QuestLog once (for camp->registerStatus()'s side effect -- see serverConstructSim())
+// and delete it once. Never dereferenced beyond that; see the construction site's own comment.
+static QuestLog* server_quests = NULL;
 
 class ServerCmdLineArgs {
 public:
@@ -104,6 +183,735 @@ static volatile sig_atomic_t shutdown_requested = 0;
 extern "C" void serverSignalHandler(int sig) {
 	(void)sig;
 	shutdown_requested = 1;
+}
+
+// Ported unchanged from GameStatePlay::loadTitles() -- pure FileParser parsing, no presentation
+// reference at all.
+static void serverLoadTitles() {
+	FileParser infile;
+	if (infile.open("engine/titles.txt", FileParser::MOD_FILE, FileParser::ERROR_NORMAL)) {
+		while (infile.next()) {
+			if (infile.new_section && infile.section == "title") {
+				Title t;
+				server_titles.push_back(t);
+			}
+
+			if (server_titles.empty()) continue;
+
+			Title& title = server_titles.back();
+
+			if (infile.key == "title") {
+				title.title = infile.val;
+			}
+			else if (infile.key == "level") {
+				title.level = Parse::toInt(infile.val);
+			}
+			else if (infile.key == "power") {
+				title.power = powers->verifyID(Parse::toPowerID(infile.val), &infile, !PowerManager::ALLOW_ZERO_ID);
+			}
+			else if (infile.key == "requires_status") {
+				std::string repeat_val = Parse::popFirstString(infile.val);
+				while (!repeat_val.empty()) {
+					title.requires_status.push_back(camp->registerStatus(repeat_val));
+					repeat_val = Parse::popFirstString(infile.val);
+				}
+			}
+			else if (infile.key == "requires_not_status") {
+				std::string repeat_val = Parse::popFirstString(infile.val);
+				while (!repeat_val.empty()) {
+					title.requires_not_status.push_back(camp->registerStatus(repeat_val));
+					repeat_val = Parse::popFirstString(infile.val);
+				}
+			}
+			else if (infile.key == "primary_stat") {
+				title.primary_stat_1 = Parse::popFirstString(infile.val);
+				title.primary_stat_2 = Parse::popFirstString(infile.val);
+			}
+			else infile.error("main_server: '%s' is not a valid key.", infile.key.c_str());
+		}
+		infile.close();
+	}
+}
+
+// Ported unchanged from GameStatePlay::checkPrimaryStat().
+static bool serverCheckPrimaryStat(const std::string& first, const std::string& second) {
+	int high = 0;
+	size_t high_index = eset->primary_stats.list.size();
+	size_t low_index = eset->primary_stats.list.size();
+
+	for (size_t i = 0; i < eset->primary_stats.list.size(); ++i) {
+		int stat = pc->stats.get_primary(i);
+		if (stat > high) {
+			if (high_index != eset->primary_stats.list.size()) {
+				low_index = high_index;
+			}
+			high = stat;
+			high_index = i;
+		}
+		else if (stat == high && low_index == eset->primary_stats.list.size()) {
+			low_index = i;
+		}
+		else if (low_index == eset->primary_stats.list.size() || (low_index < eset->primary_stats.list.size() && stat > pc->stats.get_primary(low_index))) {
+			low_index = i;
+		}
+	}
+
+	if (high_index != eset->primary_stats.list.size() && first != eset->primary_stats.list[high_index].id)
+		return false;
+
+	if (!second.empty()) {
+		if (low_index != eset->primary_stats.list.size() && second != eset->primary_stats.list[low_index].id)
+			return false;
+	}
+	else if (pc->stats.get_primary(high_index) == pc->stats.get_primary(low_index)) {
+		// titles that require a single stat are ignored if two stats are equal
+		return false;
+	}
+
+	return true;
+}
+
+// Ported unchanged from GameStatePlay::checkTitle() -- 100% sim, no presentation reference at all.
+static void serverCheckTitle() {
+	if (!pc->stats.check_title || server_titles.empty())
+		return;
+
+	int title_id = -1;
+
+	for (unsigned i = 0; i < server_titles.size(); i++) {
+		if (server_titles[i].title.empty())
+			continue;
+
+		if (server_titles[i].level > 0 && pc->stats.level < server_titles[i].level)
+			continue;
+		if (server_titles[i].power > 0 && std::find(pc->stats.powers_list.begin(), pc->stats.powers_list.end(), server_titles[i].power) == pc->stats.powers_list.end())
+			continue;
+		if (!server_titles[i].primary_stat_1.empty() && !serverCheckPrimaryStat(server_titles[i].primary_stat_1, server_titles[i].primary_stat_2))
+			continue;
+
+		bool status_failed = false;
+		for (size_t j = 0; j < server_titles[i].requires_status.size(); ++j) {
+			if (!camp->checkStatus(server_titles[i].requires_status[j])) {
+				status_failed = true;
+				break;
+			}
+		}
+		for (size_t j = 0; j < server_titles[i].requires_not_status.size(); ++j) {
+			if (camp->checkStatus(server_titles[i].requires_not_status[j])) {
+				status_failed = true;
+				break;
+			}
+		}
+
+		if (status_failed)
+			continue;
+
+		title_id = static_cast<int>(i);
+		break;
+	}
+
+	if (title_id != -1) pc->stats.character_subclass = server_titles[static_cast<size_t>(title_id)].title;
+	pc->stats.check_title = false;
+	pc->stats.refresh_stats = true;
+}
+
+// The sim-relevant subset of GameStatePlay::resetGame(). Dropped: menu->questlog/menu->hudlog
+// clearing (no widgets), quests->createQuestList() (QuestLog isn't constructed -- see P1.4c's
+// plan doc, "Dropping QuestLog"), menu->talker->setHero() (widget), pc->loadSounds() (audio
+// asset queueing, presentation-lifetime per P1.2). menu->act->clear()'s STATE half -- nothing
+// else clears pab's slots at startup, since no MenuActionBar ever parses menus/actionbar.txt
+// here -- is replaced by looping pab->clearSlot() directly.
+static void serverResetGame() {
+	camp->resetAllStatuses();
+	pc->init();
+	pc->stats.currency = 0;
+	for (unsigned i = 0; i < pab->slots_count; ++i)
+		pab->clearSlot(i);
+	pinv->inventory[0].clear();
+	pinv->inventory[1].clear();
+	pinv->currency = 0;
+
+	wmap->teleportation = true;
+	wmap->teleport_mapname = "maps/spawn.txt";
+}
+
+// The non-widget data flow of GameStateLoad::logicLoading() -- construct-then-load, with no slot
+// browser: --load-slot names the slot directly (the same number SaveLoad::setGameSlot() takes),
+// not an index into a directory scan of existing saves the way GameStateLoad's own
+// settings->load_slot handling works. A headless server has no character-creation UI
+// (GameStateNew, and the SaveLoad::loadClass() path it drives -- both left with their existing
+// unconditional menu-> dereferences, deliberately not fixed: see the SaveLoad.cpp fix commit),
+// so an empty --load-slot is a hard error rather than a silent "new game": every corpus fixture,
+// and every real host, loads an existing save.
+static bool serverLoadGame(const std::string& load_slot_arg) {
+	if (load_slot_arg.empty()) {
+		Utils::logError("main_server: --load-slot is required (no character-creation UI exists headless).");
+		return false;
+	}
+
+	serverResetGame();
+
+	save_load->setGameSlot(Parse::toInt(load_slot_arg));
+	save_load->loadGame();
+	return true;
+}
+
+// The sim-relevant subset of GameStatePlay::checkCutscene() -- GameStateCutscene itself is 100%
+// presentation and cannot run headless. wmap->cutscene is reset here even though the client
+// never does: the client relies on the whole GameStatePlay/Map being torn down and rebuilt
+// across a cutscene transition to clear it, which a headless server -- with no cutscene state to
+// transition through -- never does. Left set, this would re-fire
+// eset->misc.save_oncutscene's saveGame() every tick forever. Not exercised by the corpus (no
+// fixture uses a cutscene event) -- documented, not measured.
+static void serverCheckCutscene() {
+	if (!wmap->cutscene)
+		return;
+
+	if (wmap->teleportation) {
+		if (wmap->teleport_mapname != "")
+			wmap->respawn_map = wmap->teleport_mapname;
+		wmap->respawn_point = wmap->teleport_destination;
+	}
+	else {
+		wmap->respawn_point = pc->stats.pos;
+	}
+
+	if (eset->misc.save_oncutscene)
+		save_load->saveGame();
+
+	wmap->cutscene = false;
+}
+
+// Ported unchanged from GameStatePlay::checkSaveEvent() (mapr-> renamed wmap->, per P1.4a).
+static void serverCheckSaveEvent() {
+	if (wmap->save_game) {
+		wmap->respawn_point = pc->stats.pos;
+		save_load->saveGame();
+		wmap->save_game = false;
+	}
+}
+
+// The sim-relevant subset of GameStatePlay::checkTeleport() -- collision block/unblock, entity
+// repositioning, on-load/on-exit event execution and respawn-point tracking are all ported
+// unchanged (mapr-> renamed wmap->, per P1.4a). Dropped: menu->enemy->handleNewMap() (mouseover
+// widget), menu->stash->visible (UI), menu->mini->prerender() (minimap widget),
+// showLoading()/setLoadingFrame() (loading-screen state), render_device->cleanupQueuedImages()
+// (presentation asset cache), resetNPC() (100% presentation -- see P1.4c's classification
+// table). save_load->saveFOW() is kept: the SaveLoad.cpp fix made it safe headless, and
+// persisting fog-of-war is genuinely part of "host owns the world".
+//
+// permadeath-to-title: the client switches to GameStateTitle, which does not exist here. The
+// server-appropriate equivalent is ending the simulation -- a permadead character has nothing
+// left to simulate, and Phase 3 (the only reason a second player could still be present) is not
+// built yet. Sets server_exit_requested rather than looping forever pointed at a map that no
+// longer has a living player on it. Not exercised by the corpus (no fixture both enables
+// permadeath and teleports after death) -- documented, not measured.
+static void serverCheckTeleport() {
+	bool on_load_teleport = false;
+
+	if (wmap->teleportation || pc->stats.teleportation) {
+
+		if (wmap->fogofwar)
+			if (fow->fog_layer_id != 0)
+				fow->handleIntramapTeleport();
+
+		wmap->collider.unblock(pc->stats.pos.x, pc->stats.pos.y);
+
+		if (wmap->teleportation) {
+			pc->stats.pos.x = wmap->teleport_destination.x;
+			pc->stats.pos.y = wmap->teleport_destination.y;
+			pc->teleport_camera_lock = true;
+		}
+		else {
+			pc->stats.pos.x = pc->stats.teleport_destination.x;
+			pc->stats.pos.y = pc->stats.teleport_destination.y;
+		}
+
+		// if we're not changing map, move allies to the player's new position
+		if (wmap->teleport_mapname.empty()) {
+			FPoint spawn_pos = wmap->collider.getRandomNeighbor(Point(pc->stats.pos), 1, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES);
+			for (unsigned int i = 0; i < entitym->entities.size(); i++) {
+				if (entitym->entities[i]->stats.hero_ally && entitym->entities[i]->stats.alive && entitym->entities[i]->stats.speed > 0) {
+					wmap->collider.unblock(entitym->entities[i]->stats.pos.x, entitym->entities[i]->stats.pos.y);
+					entitym->entities[i]->stats.pos = spawn_pos;
+					wmap->collider.block(entitym->entities[i]->stats.pos.x, entitym->entities[i]->stats.pos.y, MapCollision::IS_ALLY);
+				}
+			}
+		}
+
+		// process intermap teleport
+		if (wmap->teleportation && !wmap->teleport_mapname.empty()) {
+			wmap->executeOnMapExitEvents();
+			std::string teleport_mapname = wmap->teleport_mapname;
+			wmap->teleport_mapname = "";
+			inpt->lock_all = (teleport_mapname == "maps/spawn.txt");
+			save_load->saveFOW();
+			wmap->load(teleport_mapname);
+
+			// use the default hero spawn position for this map
+			if (wmap->force_spawn_pos || (wmap->teleport_destination.x == -1 && wmap->teleport_destination.y == -1)) {
+				pc->stats.pos.x = wmap->hero_pos.x;
+				pc->stats.pos.y = wmap->hero_pos.y;
+
+				if (wmap->teleport_destination_id > 0) {
+					for (size_t i = 0; i < wmap->events.size(); ++i) {
+						EventComponent* ec_hero_pos = wmap->events[i].getComponent(EventComponent::INTERMAP_ID);
+						if (ec_hero_pos && ec_hero_pos->data[0].Int == wmap->teleport_destination_id) {
+							pc->stats.pos.x = static_cast<float>(wmap->events[i].location.x) + 0.5f;
+							pc->stats.pos.y = static_cast<float>(wmap->events[i].location.y) + 0.5f;
+							break;
+						}
+					}
+				}
+			}
+
+			// store this as the new respawn point (provided the tile is open)
+			if (wmap->collider.isValidPosition(pc->stats.pos.x, pc->stats.pos.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_HERO)) {
+				wmap->respawn_map = teleport_mapname;
+				wmap->respawn_point = pc->stats.pos;
+			}
+			else {
+				Utils::logError("main_server: Spawn position (%d, %d) is blocked.", static_cast<int>(pc->stats.pos.x), static_cast<int>(pc->stats.pos.y));
+			}
+
+			pc->handleNewMap();
+			hazards->handleNewMap();
+			loot->handleNewMap();
+			powers->handleNewMap(&wmap->collider);
+
+			// switch off teleport flag so we can check if an on_load event has teleportation
+			wmap->teleportation = false;
+
+			wmap->executeOnLoadEvents();
+			if (wmap->teleportation)
+				on_load_teleport = true;
+
+			// enemies and npcs should be initialized AFTER on_load events execute
+			entitym->handleNewMap();
+			npcs->handleNewMap();
+
+			// return to title (permadeath) OR auto-save
+			if (pc->stats.permadeath && pc->stats.cur_state == StatBlock::ENTITY_DEAD) {
+				Utils::logInfo("main_server: permadeath character died -- ending simulation.");
+				server_exit_requested = true;
+			}
+			else if (eset->misc.save_onload) {
+				if (!server_is_first_map_load)
+					save_load->saveGame();
+				else
+					server_is_first_map_load = false;
+			}
+		}
+
+		if (wmap->collider.isOutsideMap(pc->stats.pos.x, pc->stats.pos.y)) {
+			Utils::logError("main_server: Teleport position is outside of map bounds.");
+			pc->stats.pos.x = 0.5f;
+			pc->stats.pos.y = 0.5f;
+		}
+
+		wmap->collider.block(pc->stats.pos.x, pc->stats.pos.y, !MapCollision::IS_ALLY);
+
+		pc->stats.teleportation = false;
+
+		if (settings->mouse_move) {
+			pc->mm_target_object = Avatar::MM_TARGET_NONE;
+			pc->setDesiredMMTarget(pc->stats.pos);
+		}
+	}
+
+	if (!on_load_teleport && wmap->teleport_mapname.empty())
+		wmap->teleportation = false;
+}
+
+// The sim-relevant subset of GameStatePlay::checkLoot() -- auto-pickup only. Dropped: the
+// menu->isDragging() guard (no UI, never dragging) and the manual click-pickup branch
+// (mapr->cam.pos-based, mouse-only). The caller gates this on pc->stats.alive, matching
+// logic()'s own call site.
+static void serverCheckLoot() {
+	ItemStack pickup = loot->checkAutoPickup(pc->stats.pos);
+
+	if (!pickup.empty()) {
+		pinv->add(pickup, PlayerInventory::CARRIED, ItemStorage::NO_SLOT, PlayerInventory::ADD_PLAY_SOUND, PlayerInventory::ADD_AUTO_EQUIP);
+		if (items->isValid(pickup.item)) {
+			StatusID pickup_status = camp->registerStatus(items->items[pickup.item]->pickup_status);
+			camp->setStatus(pickup_status);
+		}
+		pickup.clear();
+	}
+}
+
+// The sim-relevant subset of GameStatePlay::checkLootDrop() -- menu->drop_stack and
+// menu->inv->drop_stack are UI-triggered overflow queues (drag-and-drop) with no headless
+// producer; camp->drop_stack and pinv->drop_stack are sim-triggered and drain unchanged.
+static void serverCheckLootDrop() {
+	while (!camp->drop_stack.empty()) {
+		if (!camp->drop_stack.front().empty()) {
+			loot->addLoot(camp->drop_stack.front(), pc->stats.pos, LootManager::DROPPED_BY_HERO);
+		}
+		camp->drop_stack.pop();
+	}
+
+	while (!pinv->drop_stack.empty()) {
+		if (!pinv->drop_stack.front().empty()) {
+			loot->addLoot(pinv->drop_stack.front(), pc->stats.pos, LootManager::DROPPED_BY_HERO);
+		}
+		pinv->drop_stack.pop();
+	}
+}
+
+// The sim-relevant subset of GameStatePlay::checkLog() -- drains pc->log_msg so the queue
+// doesn't grow unbounded over a long-running server. The pushes into menu->hudlog/menu->questlog
+// are dropped along with the widgets they'd update.
+static void serverCheckLog() {
+	while (!pc->log_msg.empty()) {
+		pc->log_msg.pop();
+	}
+}
+
+// The sim-relevant subset of GameStatePlay::checkEquipmentChange() -- ported to read
+// server_equipment_changed (see its own comment) instead of menu->inv->changed_equipment, which
+// doesn't exist without a MenuInventory. Gated exactly like the original: pab->updated only
+// flips true when equipment genuinely changed, matching GameStatePlay.cpp's own
+// checkEquipmentChange() body, not the unconditional version P1.4c shipped first.
+//
+// pc->loadAnimations()/pc->loadStepFX() were ORIGINALLY dropped here as "presentation, sprite
+// state" -- wrong, twice over. First: they matter at all, because the power's own cast duration
+// is not power-data-only -- Avatar::logic()'s ENTITY_POWER case sets
+// power_cast_timers[...]->setDuration(activeAnimation->getDuration()), reading the actual loaded
+// sprite ANIMATION's frame timing. Second, and more load-bearing: calling loadAnimations()
+// unconditionally every tick (this function's first fix) is actively wrong, not just wasteful --
+// Entity::loadAnimations() (Entity.cpp) unconditionally calls setAnimation("stance") on every
+// invocation, which resets activeAnimation to frame 0. Called every tick regardless of whether
+// gear changed, that stalls Avatar::logic()'s ENTITY_POWER case forever: it only calls
+// powers->activate() on activeAnimation->isActiveFrame(), a frame a stance-reset animation can
+// never reach starting from frame 0 every tick. Found by bisecting the replay corpus's melee
+// digest down to tick 32 -- the tick the player's first attack should have connected but didn't,
+// visible as mp never being deducted -- against a freshly regenerated, uncontaminated fixture (a
+// prior bisection against a fixture whose on-disk save had drifted from repeated reuse pointed at
+// a much later, unrelated tick). Both calls are safe to call headless when server_equipment_changed
+// is genuinely true: anim (AnimationManager) and render_device (NullRenderDevice) are already
+// constructed in serverInit(), and this exact code path already ran headlessly every tick before
+// P1.4c, via the full client stack -- P1.4c changed WHERE it's called from and added the flag
+// gate, not whether it's safe to call. loadStepFX() is restored alongside it for the same
+// reason: it isn't just presentation either -- it populates sound_steps, whose emptiness gates
+// whether Avatar::logic() ever pushes an SFX_STEP SimEvent at all (Avatar.cpp's ENTITY_MOVE case
+// checks !sound_steps.empty() before pushing), so a stale/empty sound_steps after a footwear
+// change would silently stop "step" coverage exactly like the corpus's own step-event check
+// exists to catch.
+static void serverCheckEquipmentChange() {
+	if (server_equipment_changed) {
+		// force the actionbar to update when we change gear
+		pab->updated = true;
+
+		pc->loadAnimations();
+
+		if (pc->feet_index != -1) {
+			ItemID feet_id = pinv->inventory[PlayerInventory::EQUIPMENT][pc->feet_index].item;
+			if (items->isValid(feet_id))
+				pc->loadStepFX(items->items[feet_id]->stepfx);
+		}
+	}
+
+	server_equipment_changed = false;
+}
+
+// Ported from GameStatePlay::checkUsedItems() -- the equipped-item loop was already sim-only.
+// The carried-item loop calls pinv->remove() directly instead of menu->inv->remove(): the
+// special case that wrapper adds (consuming the exact clicked slot) is UI interaction state with
+// no simulation meaning outside a live click -- see PlayerInventory.h's own comment.
+// pinv->remove()'s general-case fallback is already the correct sim-side equivalent.
+static void serverCheckUsedItems() {
+	for (unsigned i = 0; i < powers->used_items.size(); i++) {
+		pinv->remove(powers->used_items[i], 1);
+	}
+	for (unsigned i = 0; i < powers->used_equipped_items.size(); i++) {
+		pinv->inventory[PlayerInventory::EQUIPMENT].remove(powers->used_equipped_items[i], 1);
+		pinv->applyEquipment();
+	}
+	powers->used_items.clear();
+	powers->used_equipped_items.clear();
+}
+
+// Ported unchanged from GameStatePlay::updateActionBar() / its UPDATE_ACTIONBAR_ALL constant.
+static const unsigned SERVER_ACTIONBAR_ALL = 0;
+static void serverUpdateActionBar(unsigned index) {
+	if (pab->slots_count == 0 || index > pab->slots_count - 1) return;
+	if (items->items.empty()) return;
+
+	for (unsigned i = index; i < pab->slots_count; i++) {
+		if (pab->hotkeys[i] == 0) continue;
+
+		PowerID id = pinv->getPowerMod(pab->hotkeys_mod[i]);
+		if (id > 0) {
+			pab->hotkeys_mod[i] = id;
+			return serverUpdateActionBar(i);
+		}
+	}
+}
+
+// The tick-order-preserving port of GameStatePlay::logic(), replacing gswitch->logic(). See
+// P1.4c's plan doc for the classification every drop/port/substitution below is based on.
+static Timer server_second_timer;
+
+static void serverLogic() {
+	PlayerCommand player_cmd;
+	PlayerInputLocks player_locks;
+	player_locks.copyFrom(*inpt);
+
+	serverCheckCutscene();
+
+	// See GameStatePlay.cpp's own comment: sits immediately before menu->logic() there so the
+	// tick it lands on doesn't move -- there is no menu->logic() here to be "immediately before".
+	pinv->applyDeathPenalty();
+
+	// menu->logic() itself is dropped, but one piece of sim-relevant state inside it was missed by
+	// that "everything sim-relevant already moved out" assumption: MenuManager.cpp's own
+	// `if (chr->checkUpgrade() || pc->stats.level_up) { inv->applyEquipment(); pc->stats.hp =
+	// HP_MAX; pc->stats.mp = MP_MAX; pc->stats.level_up = false; }`. chr->checkUpgrade() is
+	// correctly dropped -- it only fires from a character-sheet "+" click on a stat point, the
+	// same class of menu-only gap as RESPEC's stat-point spending. But pc->stats.level_up has no
+	// UI dependency at all: Avatar::logic() sets it (Avatar.cpp, the level-up check) the tick XP
+	// crosses a level threshold, and nothing except this block ever reads or clears it -- without
+	// a consumer, it would stay true forever after the first level gained. Its two other effects
+	// are just as real: a full HP/MP heal on level-up, and an equipment-slot re-evaluation
+	// (passive powers or level requirements can newly enable a slot).
+	//
+	// The applyEquipment() call carries a side effect that is NOT cosmetic: PlayerInventory.cpp's
+	// applyEquipment() ends with `if (cur_state == ENTITY_POWER) cur_state = ENTITY_STANCE;`,
+	// interrupting an in-progress attack. Found by bisecting the replay corpus's melee digest
+	// past every earlier fix, down to a tick where a mid-swing player, mid-level-up, exits to
+	// STANCE one tick later in a headless run than in the reference client -- because this whole
+	// block was simply missing, so nothing here ever interrupted the swing. Placement matters as
+	// much as content: this must run BEFORE serverCheckLoot()/pc->logic() below, matching
+	// MenuManager::logic()'s own position (menu->logic() runs before checkLoot() and pc->logic()
+	// in GameStatePlay::logic()) -- level_up is set inside THIS tick's own upcoming pc->logic()
+	// call, so the interrupt+heal a tick sees is for the PREVIOUS tick's level-up, one full tick
+	// after Avatar::logic() sets the flag. Moving this after pc->logic() would apply it a tick
+	// early instead and desync from every golden that already banked the one-tick delay.
+	if (pc->stats.level_up) {
+		pinv->applyEquipment();
+		pc->stats.hp = pc->stats.get(Stats::HP_MAX);
+		pc->stats.mp = pc->stats.get(Stats::MP_MAX);
+		pc->stats.level_up = false;
+	}
+
+	// isPaused() is the constant false server-side (settings->headless is always true -- see
+	// GameStatePlay::isPaused()'s own body), so this whole block always executes.
+	{
+		if (!server_second_timer.isEnd())
+			server_second_timer.tick();
+		else {
+			pc->time_played++;
+			server_second_timer.reset(Timer::BEGIN);
+		}
+
+		if (pc->stats.alive) serverCheckLoot();
+		// checkEnemyFocus()/checkNPCFocus() dropped -- mouseover highlighting only.
+		if (pc->stats.alive) {
+			// checkHotspots() dropped -- mouse-only (gated on !inpt->usingMouse() at its own
+			// top). Point-and-click map-event interaction has no headless equivalent.
+			wmap->checkNearestEventInteraction();
+			// checkNPCInteraction() dropped -- NPC dialog is menu->talker-driven, no headless
+			// equivalent.
+		}
+		serverCheckTitle();
+
+		// The one place player intent is read out of global input. mapr->cam.pos becomes
+		// pc->stats.pos -- see P1.4c's "Camera-position substitution" note.
+		PlayerCommandBuilder::build(player_cmd, *inpt, pc->stats.pos);
+		pab->checkHotkeyActions(pc->action_queue);
+		player_cmd.actions = pc->action_queue;
+		player_cmd.click_consumed_by_ui = false;
+
+		// Respawn: no "Continue" button exists headless, so holding/pressing ACCEPT while dead
+		// is the server's respawn gesture. See P1.4c's "Respawn trigger" note -- the one piece
+		// of this plan with no client-side equivalent to diff against. death/deathfull are the
+		// corpus rows that exercise it.
+		player_cmd.respawn = inpt->pressing[Input::ACCEPT] && !pc->stats.alive;
+
+		if (pinv->applyEquipmentSetDelta(player_cmd.equip_set_delta)) {
+			inpt->lock[player_cmd.equip_set_delta > 0 ? Input::EQUIPMENT_SWAP : Input::EQUIPMENT_SWAP_PREV] = true;
+			// Mirrors MenuInventory's changeEquipmentSet() setting changed_equipment = true
+			// (MenuInventory.cpp) -- a switch changes which items are active, same as an equip/
+			// unequip drag would.
+			server_equipment_changed = true;
+		}
+
+		pc->logic(player_cmd, player_locks);
+
+		// transfer hero data to enemies, for AI use
+		if (pc->stats.get(Stats::STEALTH) > 100) entitym->hero_stealth = 100;
+		else entitym->hero_stealth = pc->stats.get(Stats::STEALTH);
+
+		entitym->logic();
+		hazards->logic();
+		loot->logic();
+		npcs->logic();
+
+		// comb->logic() dropped -- CombatText, floating damage numbers.
+	}
+
+	// close menus when the player dies, but still allow them to be reopened: no menus exist
+	// headless, so only the flags themselves need resetting -- matches the already-documented
+	// P1.3f-permadeath-gap.
+	if (pc->close_menus) {
+		pc->close_menus = false;
+	}
+	if (pc->show_game_over) {
+		pc->show_game_over = false;
+	}
+
+	// RESPEC. See P1.4c's "Powers reset" note: menu_powers->resetToBasePowers() (which itself
+	// calls setUnlockedPowers()) and the client's own separate, redundant setUnlockedPowers()
+	// call both boil down, once menu_powers doesn't exist, to pbs->current_cell reset +
+	// pbs->clearActionBarBonusLevels() -- current_cell is already a public field and
+	// clearActionBarBonusLevels() is already a public, presentation-free PowerBonusState method
+	// (P1.3g). A headless server defers class defaults and skill-tree auto-unlocks forever as a
+	// result -- a real, documented gap, not a silent one (RESPEC is unused by any corpus mod).
+	// See plans/00-ROADMAP.md's P1.3h note.
+	if (pc->respec_powers) {
+		pc->respec_powers = false;
+		EngineSettings::HeroClasses::HeroClass* pc_class = eset->hero_classes.getByName(pc->stats.character_class);
+
+		for (size_t i = 0; i < pbs->current_cell.size(); ++i)
+			pbs->current_cell[i] = 0;
+
+		if (pc_class && !pc->respec_use_engine_defaults) {
+			for (size_t j = 0; j < pc_class->powers.size(); j++) {
+				pc->stats.powers_list.push_back(pc_class->powers[j]);
+			}
+		}
+		pbs->clearActionBarBonusLevels();
+
+		for (unsigned i = 0; i < pab->slots_count; ++i)
+			pab->clearSlot(i);
+		if (pc_class && !pc->respec_use_engine_defaults) {
+			pab->set(pc_class->hotkeys, ActionBarState::SET_SKIP_EMPTY);
+		}
+	}
+
+	// these actions occur whether the game is paused or not.
+	serverCheckTeleport();
+	serverCheckLootDrop();
+	serverCheckLog();
+	// checkBook() dropped -- wmap->show_book is unconditionally overwritten (not gated) by the
+	// next show_book event, confirmed in EventManager.cpp, so leaving it unconsumed is harmless.
+	serverCheckEquipmentChange();
+	serverCheckUsedItems();
+	// checkStash() dropped -- MenuStash-driven, no corpus coverage; wmap->stash/stash_pos are
+	// overwritten by the next event, same reasoning as show_book.
+	serverCheckSaveEvent();
+	// checkNotifications() dropped -- action-bar notification badges only.
+	// checkCancel() dropped -- the server's shutdown path is SIGINT/SIGTERM (see
+	// serverSignalHandler), not a window-close/menu-exit click.
+
+	wmap->logic(false);
+	wmap->enemies_cleared = entitym->isCleared();
+	// quests->logic()/createQuestList() dropped -- QuestLog IS constructed (see
+	// serverConstructSim()'s own note on why), but these two write through its MenuLog* pointer
+	// unconditionally, which is NULL here; its only output otherwise feeds a widget nothing else
+	// reads (QuestLog.cpp/MenuLog.cpp/GameStatePlay.cpp only).
+
+	pc->checkTransform(player_locks);
+
+	// change hero powers on transformation
+	if (pc->setPowers) {
+		pc->setPowers = false;
+		// save ActionBar state and lock slots from removing/replacing power
+		for (int i = 0; i < MenuActionBar::SLOT_MAX; i++) {
+			pab->hotkeys_temp[i] = pab->hotkeys[i];
+			pab->hotkeys[i] = 0;
+		}
+		int count = MenuActionBar::SLOT_MAIN1;
+		// put creature powers on action bar
+		for (size_t i = 0; i < pc->charmed_stats->powers_ai.size(); i++) {
+			if (powers->isValid(pc->charmed_stats->powers_ai[i].id) && powers->powers[pc->charmed_stats->powers_ai[i].id]->beacon != true) {
+				pab->hotkeys[count] = pc->charmed_stats->powers_ai[i].id;
+				pab->locked[count] = true;
+				count++;
+				if (count == MenuActionBar::SLOT_MAX)
+					count = 0;
+				else if (count == MenuActionBar::SLOT_MAIN1)
+					// we've filled the actionbar, stop adding powers to it
+					break;
+			}
+		}
+		if (pc->stats.manual_untransform && powers->isValid(pc->untransform_power)) {
+			pab->hotkeys[count] = pc->untransform_power;
+			pab->locked[count] = true;
+		}
+		else if (pc->stats.manual_untransform && pc->untransform_power == 0)
+			Utils::logError("main_server: Untransform power not found, you can't untransform manually");
+
+		pab->updated = true;
+
+		// reapply equipment if the transformation allows it
+		if (pc->stats.transform_with_equipment)
+			pinv->applyEquipment();
+	}
+	// revert hero powers
+	if (pc->revertPowers) {
+		pc->revertPowers = false;
+
+		// restore ActionBar state
+		for (int i = 0; i < MenuActionBar::SLOT_MAX; i++) {
+			pab->hotkeys[i] = pab->hotkeys_temp[i];
+			pab->locked[i] = false;
+		}
+
+		pab->updated = true;
+
+		// also reapply equipment here, to account for items that give bonuses to base stats
+		pinv->applyEquipment();
+	}
+
+	// when the hero (re)spawns, reapply equipment & passive effects
+	if (pc->respawn) {
+		pc->stats.alive = true;
+		pc->stats.corpse = false;
+		pc->stats.cur_state = StatBlock::ENTITY_STANCE;
+		pinv->applyEquipment();
+		// Mirrors GameStatePlay.cpp's respawn block setting menu->inv->changed_equipment = true
+		// right before its own checkEquipmentChange() call.
+		server_equipment_changed = true;
+		serverCheckEquipmentChange();
+		pc->stats.hp = pc->stats.get(Stats::HP_MAX);
+		pc->stats.logic();
+		pc->stats.recalc();
+
+		// menu_powers->resetToBasePowers()/setUnlockedPowers() substitute -- see this
+		// function's own RESPEC comment above; the same pair applies here.
+		for (size_t i = 0; i < pbs->current_cell.size(); ++i)
+			pbs->current_cell[i] = 0;
+		pbs->clearActionBarBonusLevels();
+
+		powers->activatePassives(&pc->stats);
+		pc->respawn = false;
+	}
+
+	// menu->menus_open cursor block dropped -- no cursor state to set.
+
+	// update the action bar as it may have been changed by items
+	if (pab->updated) {
+		pab->updated = false;
+
+		// set all hotkeys to their base powers
+		for (unsigned i = 0; i < pab->slots_count; i++) {
+			pab->hotkeys_mod[i] = pab->hotkeys[i];
+		}
+
+		serverUpdateActionBar(SERVER_ACTIONBAR_ALL);
+	}
+
+	// menu->exit->reload_music dropped -- no menu, no music.
+
+	player_locks.copyTo(*inpt);
+
+	// Last thing in the tick, after both the simulation and the (nonexistent) menus have had
+	// their say. GameStatePlay::drainSimEvents()'s own doc comment already says a headless
+	// server "empties it without playing" -- that function lives in GameStatePlay.cpp
+	// (presentation), so this is its trivial standalone equivalent.
+	sim_events->clear();
 }
 
 static void serverInit(const ServerCmdLineArgs& args) {
@@ -194,12 +1002,152 @@ static void serverInit(const ServerCmdLineArgs& args) {
 	snd = getSoundManager(true);
 
 	tooltipm = new TooltipManager();
+}
 
-	gswitch = new GameSwitcher();
+// Everything that touches sim_rng -- directly, or indirectly through a constructor like
+// EntityManager's (handleNewMap() -> collider.getRandomNeighbor(), unconditional even with no
+// entities yet) -- has to run AFTER main() reseeds sim_rng from the replay/save, not before.
+// GameStatePlay itself is only ever constructed that late on the client: GameSwitcher's initial
+// state is GameStateTitle, and GameStatePlay doesn't exist until GameStateLoad::logicLoading()
+// runs, several ticks into gswitch->logic() -- well after main.cpp's own reseed-from-replay line.
+// This function is that reseed's replacement in the timeline: serverInit() above only sets up
+// device/mod/settings state that reseeding doesn't depend on and that the sim doesn't draw
+// against, and main() calls this function after the reseed, not from inside serverInit().
+// Getting this wrong doesn't crash anything -- it just draws the sim's very first random numbers
+// from the wrong seed, so every enemy spawn position onward silently diverges from a client
+// given the same save and the same recorded input. Found by bisecting the replay corpus down to
+// a single extra draw that could not be explained by any difference in what was drawn, only by
+// when: SharedGameResources.cpp's own globals confirm nothing here is order-sensitive for any
+// reason other than the RNG.
+static void serverConstructSim(const ServerCmdLineArgs& args) {
+	// Direct construction of the simulation's own objects -- the same set GameStatePlay's
+	// constructor builds, in the same order, except menu, mapr and quests: see
+	// SharedGameResources.h's wmap/mapr note and P1.4c's plan doc for why each is skipped.
+	// menu/mapr stay NULL (static storage duration zero-initializes SharedGameResources.cpp's
+	// globals), and every sim-side reader of menu/menu_powers/menu_act/mapr this plan found
+	// unconditionally dereferencing one of them -- StatBlock::canUsePower(), FogOfWar::logic(),
+	// WorldHash::compute(), and a dozen spots in SaveLoad.cpp -- was fixed to guard on it first.
+	//
+	// quests IS constructed, unlike menu/mapr -- see the note at its own construction line below
+	// for why "drop QuestLog entirely" (this plan's original design) turned out to be wrong.
+	if (items == NULL)
+		items = new ItemManager();
+
+	camp = new CampaignManager();
+	eventm = new EventManager();
+
+	loot = new LootManager();
+	powers = new PowerManager();
+	fow = new FogOfWar();
+	wmap = new Map();
+	pc = new Avatar();
+	entitym = new EntityManager();
+	enemyg = new EnemyGroupManager();
+	hazards = new HazardManager();
+	pinv = new PlayerInventory();
+	pab = new ActionBarState();
+	pbs = new PowerBonusState();
+	npcs = new NPCManager();
+
+	// QuestLog's own display state (the quests[] vector, log formatting) has no sim consumer --
+	// confirmed, see this plan's own "Dropping QuestLog" note -- but its CONSTRUCTOR has a real
+	// side effect nothing else replicates: QuestLog::load() calls camp->registerStatus() for
+	// every quest's complete_status/requires_status/requires_not_status key, registering those
+	// StatusIDs into camp's shared, WorldHash-covered status map. Skipping construction entirely
+	// (this plan's first attempt) silently dropped those registrations -- found by bisecting a
+	// full-corpus digest mismatch down to camp->status being empty on a headless server and
+	// non-empty on the client, with every other hashed field already matching bit-for-bit.
+	// QuestLog(NULL) is safe: its constructor and load() never dereference the MenuLog* it's
+	// given (confirmed by reading both). What stays unsafe, and stays dropped, is logic()/
+	// createQuestList() -- both write through log-> unconditionally the moment any quest is
+	// active or complete, so this object is constructed and then never called again.
+	server_quests = new QuestLog(NULL);
+
+	xp_scaling = new XPScaling();
+
+	// pinv/pab's D1-style menu-free sizing -- see PlayerInventory.h's own header comment and
+	// ActionBarState.h's new P1.4c note.
+	//
+	// pinv->loadEquipmentData() reads engine/equipment.txt directly, exactly the "no menu layout
+	// file at all" path P1.3d-4d built for this. A mod chain without one has no menus/
+	// inventory.txt-derived fallback available here (that path needs a live MenuInventory to
+	// parse screen rectangles this server has no reason to draw), so it's a hard, loud error
+	// rather than a silent zero-slot character.
+	if (!pinv->loadEquipmentData()) {
+		Utils::logError("main_server: mod chain has no engine/equipment.txt -- headless play requires it (see P1.3d-4d).");
+		Utils::Exit(1);
+	}
+
+	// MenuInventory's own constructor defaults the active set to 1 whenever the mod defines any
+	// (menus/inventory.txt/menus/actionbar.txt's usual "wraparound arithmetic on
+	// active_equipment_set" narrative -- PlayerInventory.h -- covers changing it, never covers
+	// this one-time default). Nothing else in the sim ever sets it, so a headless server, never
+	// constructing a MenuInventory, left it at active_equipment_set's constructor default of 0
+	// forever: PlayerInventory::isEquipSlotActive() treats set 0 as "no non-shared slot is ever
+	// active." Found by bisecting a one-field divergence in the replay corpus (equipset stayed 0
+	// instead of reaching 1) down to construction time, not gameplay -- pinv->active_equipment_set
+	// was already 1 on the very first tick of the working build, before any input had been read.
+	if (pinv->max_equipment_set > 0) {
+		pinv->active_equipment_set = 1;
+	}
+
+	// The action bar has no equivalent engine-data file yet (D1 is unsolved for it, unlike
+	// equipment): menus/actionbar.txt's slot= lines are screen positions AND the only place
+	// slot count/lock flags come from. Substituted with the compile-time assumption
+	// SaveLoad.cpp's own actionbar save/load loops already make -- MenuActionBar::SLOT_MAX
+	// (12) slots, none locked. Measured against the corpus's actual mod
+	// (tests/flaredata/mods/fantasycore/menus/actionbar.txt): exactly 12 slots, no slot defines
+	// a lock flag, so this is exact for every corpus fixture, not just a plausible default.
+	// A mod that locks a slot, or defines fewer than 12, would diverge here -- documented, not
+	// measured for that case.
+	pab->initSlots(MenuActionBar::SLOT_MAX);
+	pab->prevent_changing.resize(MenuActionBar::SLOT_MAX, false);
+	for (unsigned i = 0; i < pab->slots_count; ++i)
+		pab->clearSlot(i);
+
+	serverLoadTitles();
+
+	if (!serverLoadGame(args.load_slot)) {
+		Utils::Exit(1);
+	}
 }
 
 static void serverCleanup() {
-	delete gswitch;
+	// Same deletion order GameStatePlay::~GameStatePlay() uses for the objects both sides
+	// construct; menu/mapr are simply absent from both the construction and this list.
+	delete server_quests;
+	delete npcs;
+	delete hazards;
+	delete entitym;
+	delete pc;
+	delete pinv;
+	delete pab;
+	delete pbs;
+	delete loot;
+	delete camp;
+	delete items;
+	delete powers;
+	delete fow;
+	delete xp_scaling;
+	delete enemyg;
+	delete eventm;
+	delete wmap;
+
+	server_quests = NULL;
+	pc = NULL;
+	pinv = NULL;
+	pab = NULL;
+	pbs = NULL;
+	camp = NULL;
+	enemyg = NULL;
+	entitym = NULL;
+	eventm = NULL;
+	items = NULL;
+	loot = NULL;
+	wmap = NULL;
+	powers = NULL;
+	fow = NULL;
+	xp_scaling = NULL;
 
 	delete anim;
 	delete comb;
@@ -230,9 +1178,9 @@ static float getSecondsElapsed(uint64_t prev_ticks, uint64_t now_ticks) {
 }
 
 /**
- * main.cpp's mainLoop() with every presentation step removed: no blankScreen(), no
- * gswitch->render(), no commitFrame(), no FPS counter. The fixed-step logic ticker is kept
- * exactly as-is; pinning the tick rate is P0.4 and must not be done here.
+ * main.cpp's mainLoop() with every presentation step removed: no blankScreen(), no render(), no
+ * commitFrame(), no FPS counter. The fixed-step logic ticker is kept exactly as-is; pinning the
+ * tick rate is P0.4 and must not be done here.
  */
 // Mirrors main.cpp. A stall must not become a fast-forward.
 static const int MAX_CATCHUP_TICKS = 5;
@@ -283,11 +1231,6 @@ static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_
 		if (now_ticks > logic_ticks + max_debt)
 			logic_ticks = now_ticks - max_debt;
 		while (now_ticks >= logic_ticks && loops < MAX_CATCHUP_TICKS) {
-			if (gswitch->isLoadingFrame()) {
-				logic_ticks = now_ticks;
-				break;
-			}
-
 			// No SDL_PumpEvents(): there is no event queue worth pumping without a window.
 			// inpt->handle() is still called because NullInputState inherits InputState's
 			// bookkeeping, which the game logic expects to have run.
@@ -301,7 +1244,22 @@ static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_
 			else if (replay && replay->isRecording())
 				replay->recordTick(total_ticks + 1);
 
-			gswitch->logic();
+			// The client's tick 1 is spent entirely in GameStateTitle, which requests a switch
+			// to GameStateLoad but does not run GameStatePlay::logic() -- this function's
+			// ancestor -- itself until the tick after. replay->applyTick()/recordTick() above
+			// still consume/produce that tick's input regardless of which GameState is active,
+			// exactly as they do here, so the corpus's golden hashes and every recording's
+			// input-to-tick mapping were captured against a server whose first REAL simulated
+			// tick is tick 2, not tick 1. Replicated verbatim rather than eliminated: skipping
+			// this makes every subsequent tick of serverLogic() run one tick "early" against
+			// input recorded for the tick after it -- found by bisecting a divergence that
+			// looked like a single mismatched field (enemy positions) down to every entity
+			// having been placed one full tick's worth of RNG draws off from the golden run.
+			static bool first_tick = true;
+			if (first_tick)
+				first_tick = false;
+			else
+				serverLogic();
 			inpt->resetScroll();
 
 			total_ticks++;
@@ -331,7 +1289,7 @@ static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_
 			if (total_ticks % TRAJECTORY_SAMPLE_TICKS == 0)
 				traj = WorldHash::mixU64(traj, WorldHash::compute(total_ticks));
 
-			done = gswitch->done || shutdown_requested;
+			done = server_exit_requested || shutdown_requested;
 			if (max_ticks > 0 && total_ticks >= max_ticks)
 				done = true;
 
@@ -345,11 +1303,6 @@ static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_
 
 			logic_ticks += static_cast<uint64_t>(seconds_per_sim_tick * static_cast<float>(SDL_GetPerformanceFrequency()));
 			loops++;
-
-			if (gswitch->isPaused()) {
-				logic_ticks = now_ticks;
-				break;
-			}
 		}
 
 		if (shutdown_requested)
@@ -446,7 +1399,7 @@ int main(int argc, char *argv[]) {
 				args.mod_list.push_back(Parse::popFirstString(mod_list_str));
 		}
 		else if (arg == "load-slot") {
-			settings->load_slot = parseServerArgValue(arg_full);
+			args.load_slot = parseServerArgValue(arg_full);
 		}
 		else if (arg == "max-ticks") {
 			args.max_ticks = strtoul(parseServerArgValue(arg_full).c_str(), NULL, 10);
@@ -491,6 +1444,12 @@ int main(int argc, char *argv[]) {
 	signal(SIGINT, serverSignalHandler);
 	signal(SIGTERM, serverSignalHandler);
 
+	if (args.load_slot.empty()) {
+		Utils::logError("main_server: --load-slot is required.");
+		delete settings;
+		return 1;
+	}
+
 	serverInit(args);
 
 	// After serverInit so the mod list is loaded and can be validated against the recording.
@@ -513,6 +1472,10 @@ int main(int argc, char *argv[]) {
 			Utils::Exit(1);
 		}
 	}
+
+	// After the reseed above, not before -- see serverConstructSim()'s own comment for why this
+	// ordering is load-bearing rather than cosmetic.
+	serverConstructSim(args);
 
 	uint64_t trajectory = WorldHash::init();
 	unsigned long last_event_tick = 0;
@@ -611,8 +1574,10 @@ int main(int argc, char *argv[]) {
 		// broken alias here would be invisible to every golden AND to 'equipped'/'carried' -- this
 		// is the only thing that can see it. Two readers of the same claimed-single hotkeys array:
 		// one through pab (the new owner) and one through menu->act (MenuActionBar's reference
-		// member, bound to pab->hotkeys in its constructor). If ActionBarState ever became a copy
-		// instead of the owner, this pair is where that shows up as two different counts.
+		// member, bound to pab->hotkeys in its constructor). Since P1.4c, menu->act does not exist
+		// on the server at all, so hotkeys_menu is always 0 here -- not a broken alias, just a
+		// diagnostic with nothing on the other side to compare against any more. Not pinned in the
+		// MANIFEST, so this is cosmetic, not a regression.
 		int hotkeys_pab = 0;
 		if (pab) {
 			for (unsigned i = 0; i < pab->slots_count; ++i)
