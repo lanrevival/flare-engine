@@ -28,6 +28,7 @@ class EventManager;
 class HazardManager;
 class ItemManager;
 class LootManager;
+class Map;
 class MapRenderer;
 class MenuActionBar;
 class MenuManager;
@@ -50,6 +51,12 @@ extern EventManager *eventm;
 extern HazardManager *hazards;
 extern ItemManager *items;
 extern LootManager *loot;
+// wmap is the simulation's view of the map: collision, teleport/cutscene/stash/save-game signals,
+// map-power activation. mapr is presentation's view: camera, tileset, drawing. On the client they
+// are the same object (wmap = mapr, an upcast -- MapRenderer IS-A Map) so nothing has to stay in
+// sync. A headless server (P1.4c) constructs a plain Map and points only wmap at it; mapr stays
+// NULL, and MapRenderer.cpp is never compiled into flare_sim at all. See P1.4a.
+extern Map *wmap;
 extern MapRenderer *mapr;
 extern MenuActionBar *menu_act;
 extern ActionBarState *pab;

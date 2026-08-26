@@ -948,13 +948,13 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 	}
 
 	// Delay event execution
-	// When an event is delayed, we create a copy and push it to mapr->delayed_events.
+	// When an event is delayed, we create a copy and push it to wmap->delayed_events.
 	// The original starts both the cooldown and delay timers.
 	// The delay will finish, followed by the cooldown, which gives the correct timing for repeating events.
 	// The copy only starts the delay timer. The cooldown is not needed because the copy never repeats.
 	if (ev.delay.getDuration() > 0 && !skip_delay) {
 		ev.delay.reset(Timer::BEGIN);
-		mapr->delayed_events.push_back(ev);
+		wmap->delayed_events.push_back(ev);
 		ev.cooldown.reset(Timer::BEGIN);
 
 		return !ev.keep_after_trigger;
@@ -971,7 +971,7 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 	}
 
 	EventComponent *ec;
-	MapRenderer::MapLoot *map_loot = NULL;
+	Map::MapLoot *map_loot = NULL;
 
 	for (unsigned i = 0; i < ev.components.size(); ++i) {
 		ec = &ev.components[i];
@@ -994,19 +994,19 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 			}
 
 			if (Filesystem::fileExists(mods->locate(ec->s))) {
-				mapr->teleportation = true;
-				mapr->teleport_mapname = ec->s;
+				wmap->teleportation = true;
+				wmap->teleport_mapname = ec->s;
 
 				if (ec->data[0].Int == -1 && ec->data[1].Int == -1) {
 					// the teleport destination will be set to the map's hero_pos once the map is loaded
-					mapr->teleport_destination.x = -1;
-					mapr->teleport_destination.y = -1;
-					mapr->teleport_destination_id = ec->data[3].Int;
+					wmap->teleport_destination.x = -1;
+					wmap->teleport_destination.y = -1;
+					wmap->teleport_destination_id = ec->data[3].Int;
 				}
 				else {
-					mapr->teleport_destination.x = static_cast<float>(ec->data[0].Int) + 0.5f;
-					mapr->teleport_destination.y = static_cast<float>(ec->data[1].Int) + 0.5f;
-					mapr->teleport_destination_id = 0;
+					wmap->teleport_destination.x = static_cast<float>(ec->data[0].Int) + 0.5f;
+					wmap->teleport_destination.y = static_cast<float>(ec->data[1].Int) + 0.5f;
+					wmap->teleport_destination_id = 0;
 				}
 			}
 			else {
@@ -1016,10 +1016,10 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 			}
 		}
 		else if (ec->type == EventComponent::INTRAMAP) {
-			mapr->teleportation = true;
-			mapr->teleport_mapname = "";
-			mapr->teleport_destination.x = static_cast<float>(ec->data[0].Int) + 0.5f;
-			mapr->teleport_destination.y = static_cast<float>(ec->data[1].Int) + 0.5f;
+			wmap->teleportation = true;
+			wmap->teleport_mapname = "";
+			wmap->teleport_destination.x = static_cast<float>(ec->data[0].Int) + 0.5f;
+			wmap->teleport_destination.y = static_cast<float>(ec->data[1].Int) + 0.5f;
 		}
 		else if (ec->type == EventComponent::MAPMOD) {
 			int tile_x = ec->data[0].Int;
@@ -1027,21 +1027,21 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 			unsigned short tile_id = static_cast<unsigned short>(ec->data[2].Int);
 
 			if (ec->s == "collision") {
-				if (tile_x >= 0 && tile_x < mapr->w && tile_y >= 0 && tile_y < mapr->h) {
-					mapr->collider.colmap[tile_x][tile_y] = tile_id;
-					mapr->map_change = true;
+				if (tile_x >= 0 && tile_x < wmap->w && tile_y >= 0 && tile_y < wmap->h) {
+					wmap->collider.colmap[tile_x][tile_y] = tile_id;
+					wmap->map_change = true;
 				}
 				else
 					Utils::logError("EventManager: Mapmod at position (%d, %d) is out of bounds 0-255.", tile_x, tile_y);
 			}
 			else {
-				size_t index = static_cast<size_t>(distance(mapr->layernames.begin(), find(mapr->layernames.begin(), mapr->layernames.end(), ec->s)));
+				size_t index = static_cast<size_t>(distance(wmap->layernames.begin(), find(wmap->layernames.begin(), wmap->layernames.end(), ec->s)));
 				if (!mapr->isValidTile(tile_id))
 					Utils::logError("EventManager: Mapmod at position (%d, %d) contains invalid tile id (%d).", tile_x, tile_y, tile_id);
-				else if (index >= mapr->layers.size())
+				else if (index >= wmap->layers.size())
 					Utils::logError("EventManager: Mapmod at position (%d, %d) is on an invalid layer.", tile_x, tile_y);
-				else if (tile_x >= 0 && tile_x < mapr->w && tile_y >= 0 && tile_y < mapr->h)
-					mapr->layers[index][tile_x][tile_y] = tile_id;
+				else if (tile_x >= 0 && tile_x < wmap->w && tile_y >= 0 && tile_y < wmap->h)
+					wmap->layers[index][tile_x][tile_y] = tile_id;
 				else
 					Utils::logError("EventManager: Mapmod at position (%d, %d) is out of bounds 0-255.", tile_x, tile_y);
 			}
@@ -1053,30 +1053,30 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 			unsigned short tile_b = static_cast<unsigned short>(ec->data[3].Int);
 
 			if (ec->s == "collision") {
-				if (tile_x >= 0 && tile_x < mapr->w && tile_y >= 0 && tile_y < mapr->h) {
-					unsigned short &map_tile = mapr->collider.colmap[tile_x][tile_y];
+				if (tile_x >= 0 && tile_x < wmap->w && tile_y >= 0 && tile_y < wmap->h) {
+					unsigned short &map_tile = wmap->collider.colmap[tile_x][tile_y];
 					if (map_tile == tile_a) {
 						map_tile = tile_b;
-						mapr->map_change = true;
+						wmap->map_change = true;
 					}
 					else if (map_tile == tile_b) {
 						map_tile = tile_a;
-						mapr->map_change = true;
+						wmap->map_change = true;
 					}
 				}
 				else
 					Utils::logError("EventManager: Mapmod at position (%d, %d) is out of bounds 0-255.", tile_x, tile_y);
 			}
 			else {
-				size_t index = static_cast<size_t>(distance(mapr->layernames.begin(), find(mapr->layernames.begin(), mapr->layernames.end(), ec->s)));
+				size_t index = static_cast<size_t>(distance(wmap->layernames.begin(), find(wmap->layernames.begin(), wmap->layernames.end(), ec->s)));
 				if (!mapr->isValidTile(tile_a))
 					Utils::logError("EventManager: Mapmod at position (%d, %d) contains invalid tile id (%d).", tile_x, tile_y, tile_a);
 				else if (!mapr->isValidTile(tile_b))
 					Utils::logError("EventManager: Mapmod at position (%d, %d) contains invalid tile id (%d).", tile_x, tile_y, tile_b);
-				else if (index >= mapr->layers.size())
+				else if (index >= wmap->layers.size())
 					Utils::logError("EventManager: Mapmod at position (%d, %d) is on an invalid layer.", tile_x, tile_y);
-				else if (tile_x >= 0 && tile_x < mapr->w && tile_y >= 0 && tile_y < mapr->h) {
-					unsigned short &map_tile = mapr->layers[index][tile_x][tile_y];
+				else if (tile_x >= 0 && tile_x < wmap->w && tile_y >= 0 && tile_y < wmap->h) {
+					unsigned short &map_tile = wmap->layers[index][tile_x][tile_y];
 					if (map_tile == tile_a) {
 						map_tile = tile_b;
 					}
@@ -1129,8 +1129,8 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 			ec->data[LootManager::LOOT_EC_POSY].Int = ev.hotspot.y;
 
 			if (!map_loot) {
-				mapr->loot.resize(mapr->loot.size()+1);
-				map_loot = &mapr->loot.back();
+				wmap->loot.resize(wmap->loot.size()+1);
+				map_loot = &wmap->loot.back();
 			}
 			if (map_loot) {
 				map_loot->first.push_back(*ec);
@@ -1221,37 +1221,37 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 
 			// ec->id is power id
 			// ec->data[0] is statblock index
-			mapr->activatePower(ec->id, ec->data[0].Int, target);
+			wmap->activatePower(ec->id, ec->data[0].Int, target);
 		}
 		else if (ec->type == EventComponent::STASH) {
-			mapr->stash = ec->data[0].Bool;
-			if (mapr->stash) {
-				mapr->stash_pos.x = static_cast<float>(ev.location.x) + 0.5f;
-				mapr->stash_pos.y = static_cast<float>(ev.location.y) + 0.5f;
+			wmap->stash = ec->data[0].Bool;
+			if (wmap->stash) {
+				wmap->stash_pos.x = static_cast<float>(ev.location.x) + 0.5f;
+				wmap->stash_pos.y = static_cast<float>(ev.location.y) + 0.5f;
 			}
 		}
 		else if (ec->type == EventComponent::NPC) {
-			mapr->event_npc = ec->s;
+			wmap->event_npc = ec->s;
 		}
 		else if (ec->type == EventComponent::MUSIC) {
-			mapr->music_filename = ec->s;
+			wmap->music_filename = ec->s;
 			mapr->loadMusic();
 		}
 		else if (ec->type == EventComponent::CUTSCENE) {
-			mapr->cutscene = true;
-			mapr->cutscene_file = ec->s;
+			wmap->cutscene = true;
+			wmap->cutscene_file = ec->s;
 		}
 		else if (ec->type == EventComponent::REPEAT) {
 			ev.keep_after_trigger = ec->data[0].Bool;
 		}
 		else if (ec->type == EventComponent::SAVE_GAME) {
-			mapr->save_game = ec->data[0].Bool;
+			wmap->save_game = ec->data[0].Bool;
 		}
 		else if (ec->type == EventComponent::NPC_ID) {
-			mapr->npc_id = ec->data[0].Int;
+			wmap->npc_id = ec->data[0].Int;
 		}
 		else if (ec->type == EventComponent::BOOK) {
-			mapr->show_book = ec->s;
+			wmap->show_book = ec->s;
 		}
 		else if (ec->type == EventComponent::SCRIPT) {
 			if (ev.center.x != -1 && ev.center.y != -1)
@@ -1382,12 +1382,12 @@ void EventManager::executeScript(const std::string& filename, float x, float y) 
 		// create StatBlocks if we need them
 		EventComponent *ec_power = evnt.getComponent(EventComponent::POWER);
 		if (ec_power) {
-			ec_power->data[0].Int = mapr->addEventStatBlock(evnt);
+			ec_power->data[0].Int = wmap->addEventStatBlock(evnt);
 		}
 
 		if (evnt.delay.getDuration() > 0) {
 			// handle delayed events
-			mapr->delayed_events.push_back(evnt);
+			wmap->delayed_events.push_back(evnt);
 		}
 		else if (isActive(evnt)) {
 			executeEvent(evnt);
@@ -1398,15 +1398,15 @@ void EventManager::executeScript(const std::string& filename, float x, float y) 
 
 EventComponent EventManager::getRandomMapFromFile(const std::string& fname) {
 	// map pool is the same, so pick the next one in the "playlist"
-	if (fname == mapr->intermap_random_filename && !mapr->intermap_random_queue.empty()) {
-		EventComponent ec = mapr->intermap_random_queue.front();
-		mapr->intermap_random_queue.pop();
+	if (fname == wmap->intermap_random_filename && !wmap->intermap_random_queue.empty()) {
+		EventComponent ec = wmap->intermap_random_queue.front();
+		wmap->intermap_random_queue.pop();
 		return ec;
 	}
 
 	// starting a new map pool, so clear the queue
-	while (!mapr->intermap_random_queue.empty()) {
-		mapr->intermap_random_queue.pop();
+	while (!wmap->intermap_random_queue.empty()) {
+		wmap->intermap_random_queue.pop();
 	}
 
 	FileParser infile;
@@ -1419,7 +1419,7 @@ EventComponent EventManager::getRandomMapFromFile(const std::string& fname) {
 			if (infile.key == "map") {
 				EventComponent ec;
 				ec.s = Parse::popFirstString(infile.val);
-				if (ec_list.empty() || ec.s != mapr->getFilename()) {
+				if (ec_list.empty() || ec.s != wmap->getFilename()) {
 					ec.data[0].Int = -1;
 					ec.data[1].Int = -1;
 
@@ -1438,20 +1438,20 @@ EventComponent EventManager::getRandomMapFromFile(const std::string& fname) {
 	}
 
 	if (ec_list.empty()) {
-		mapr->intermap_random_filename = "";
+		wmap->intermap_random_filename = "";
 		return EventComponent();
 	}
 	else {
-		mapr->intermap_random_filename = fname;
+		wmap->intermap_random_filename = fname;
 
 		while (!ec_list.empty()) {
 			size_t index = sim_rng->index(ec_list.size());
-			mapr->intermap_random_queue.push(ec_list[index]);
+			wmap->intermap_random_queue.push(ec_list[index]);
 			ec_list.erase(ec_list.begin() + index);
 		}
 
-		EventComponent ec = mapr->intermap_random_queue.front();
-		mapr->intermap_random_queue.pop();
+		EventComponent ec = wmap->intermap_random_queue.front();
+		wmap->intermap_random_queue.pop();
 		return ec;
 	}
 }

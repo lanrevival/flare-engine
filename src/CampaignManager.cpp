@@ -311,15 +311,15 @@ bool CampaignManager::checkAllRequirements(const EventComponent& ec) {
 			return true;
 	}
 	else if (ec.type == EventComponent::REQUIRES_TILE) {
-		size_t index = static_cast<size_t>(distance(mapr->layernames_hashed.begin(), find(mapr->layernames_hashed.begin(), mapr->layernames_hashed.end(), ec.id)));
-		if (mapr && index < mapr->layers.size() && ec.data[0].Int >= 0 && ec.data[0].Int < mapr->w && ec.data[1].Int >= 0 && ec.data[1].Int < mapr->h)
-			if (mapr->layers[index][ec.data[0].Int][ec.data[1].Int] == static_cast<unsigned short>(ec.data[2].Int))
+		size_t index = static_cast<size_t>(distance(wmap->layernames_hashed.begin(), find(wmap->layernames_hashed.begin(), wmap->layernames_hashed.end(), ec.id)));
+		if (mapr && index < wmap->layers.size() && ec.data[0].Int >= 0 && ec.data[0].Int < wmap->w && ec.data[1].Int >= 0 && ec.data[1].Int < wmap->h)
+			if (wmap->layers[index][ec.data[0].Int][ec.data[1].Int] == static_cast<unsigned short>(ec.data[2].Int))
 				return true;
 	}
 	else if (ec.type == EventComponent::REQUIRES_NOT_TILE) {
-		size_t index = static_cast<size_t>(distance(mapr->layernames_hashed.begin(), find(mapr->layernames_hashed.begin(), mapr->layernames_hashed.end(), ec.id)));
-		if (mapr && index < mapr->layers.size() && ec.data[0].Int >= 0 && ec.data[0].Int < mapr->w && ec.data[1].Int >= 0 && ec.data[1].Int < mapr->h)
-			if (mapr->layers[index][ec.data[0].Int][ec.data[1].Int] != static_cast<unsigned short>(ec.data[2].Int))
+		size_t index = static_cast<size_t>(distance(wmap->layernames_hashed.begin(), find(wmap->layernames_hashed.begin(), wmap->layernames_hashed.end(), ec.id)));
+		if (mapr && index < wmap->layers.size() && ec.data[0].Int >= 0 && ec.data[0].Int < wmap->w && ec.data[1].Int >= 0 && ec.data[1].Int < wmap->h)
+			if (wmap->layers[index][ec.data[0].Int][ec.data[1].Int] != static_cast<unsigned short>(ec.data[2].Int))
 				return true;
 	}
 	else {

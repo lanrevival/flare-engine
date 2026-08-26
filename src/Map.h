@@ -234,6 +234,8 @@ protected:
 	int procgen_branches_per_door_level_max;
 
 public:
+	typedef std::pair< std::vector<EventComponent>, Point> MapLoot;
+
 	static const bool LOAD_PROCGEN_CACHE = true;
 
 	Map();
@@ -244,6 +246,50 @@ public:
 	void removeLayer(unsigned index);
 
 	int load(const std::string& filename, bool load_procgen_cache = false);
+
+	void logic(bool paused);
+	void checkEvents(const FPoint& loc);
+	void activatePower(PowerID power_index, unsigned statblock_index, const FPoint &target);
+
+	MapCollision collider;
+
+	// event-created loot or items
+	std::vector<MapLoot> loot;
+
+	// indicates that the map was changed by an event, so the GameStatePlay
+	// will tell the mini map to update.
+	bool map_change;
+
+	// teleport handling
+	bool teleportation;
+	FPoint teleport_destination;
+	int teleport_destination_id;
+	std::string teleport_mapname;
+	std::string respawn_map;
+	FPoint respawn_point;
+
+	// cutscene handling
+	bool cutscene;
+	std::string cutscene_file;
+
+	// stash handling
+	bool stash;
+	FPoint stash_pos;
+
+	// enemy clear
+	bool enemies_cleared;
+
+	// event talker
+	std::string event_npc;
+
+	// trigger for save game events
+	bool save_game;
+
+	// npc handling
+	int npc_id;
+
+	// book from map event
+	std::string show_book;
 
 	std::string music_filename;
 

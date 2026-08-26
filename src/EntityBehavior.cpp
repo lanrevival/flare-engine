@@ -121,12 +121,12 @@ void EntityBehavior::doUpkeep() {
 	// check for teleport powers
 	if (e->stats.teleportation) {
 
-		mapr->collider.unblock(e->stats.pos.x,e->stats.pos.y);
+		wmap->collider.unblock(e->stats.pos.x,e->stats.pos.y);
 
 		e->stats.pos.x = e->stats.teleport_destination.x;
 		e->stats.pos.y = e->stats.teleport_destination.y;
 
-		mapr->collider.block(e->stats.pos.x,e->stats.pos.y, e->stats.hero_ally);
+		wmap->collider.block(e->stats.pos.x,e->stats.pos.y, e->stats.hero_ally);
 
 		e->stats.teleportation = false;
 	}
@@ -168,10 +168,10 @@ void EntityBehavior::findTarget() {
 
 	// if the minion gets too far, transport it to the player pos
 	if (e->stats.hero_ally && e->stats.speed > 0 && (warp_to_hero || hero_dist > ALLY_TELEPORT_DISTANCE) && !e->stats.in_combat) {
-		mapr->collider.unblock(e->stats.pos.x, e->stats.pos.y);
+		wmap->collider.unblock(e->stats.pos.x, e->stats.pos.y);
 		e->stats.pos.x = pc->stats.pos.x;
 		e->stats.pos.y = pc->stats.pos.y;
-		mapr->collider.block(e->stats.pos.x, e->stats.pos.y, MapCollision::IS_ALLY);
+		wmap->collider.block(e->stats.pos.x, e->stats.pos.y, MapCollision::IS_ALLY);
 		hero_dist = 0;
 		warp_to_hero = false;
 	}
@@ -200,7 +200,7 @@ void EntityBehavior::findTarget() {
 
 	// check line-of-sight
 	if (target_stats && target_dist < e->stats.threat_range && pc->stats.alive)
-		los = mapr->collider.lineOfSight(e->stats.pos.x, e->stats.pos.y, target_stats->pos.x, target_stats->pos.y);
+		los = wmap->collider.lineOfSight(e->stats.pos.x, e->stats.pos.y, target_stats->pos.x, target_stats->pos.y);
 	else
 		los = false;
 
@@ -289,7 +289,7 @@ void EntityBehavior::findTarget() {
 	// if hero is facing the summon
 	if (e->stats.hero_ally && eset->misc.enable_ally_collision_ai) {
 		if (!entitym->player_blocked && hero_dist < ALLY_FLEE_DISTANCE
-				&& mapr->collider.isFacing(pc->stats.pos.x,pc->stats.pos.y,pc->stats.direction,e->stats.pos.x,e->stats.pos.y)) {
+				&& wmap->collider.isFacing(pc->stats.pos.x,pc->stats.pos.y,pc->stats.direction,e->stats.pos.x,e->stats.pos.y)) {
 			entitym->player_blocked = true;
 			entitym->player_blocked_timer.reset(Timer::BEGIN);
 		}
@@ -297,7 +297,7 @@ void EntityBehavior::findTarget() {
 		bool player_closer_than_target = Utils::calcDist(e->stats.pos, pursue_pos) > Utils::calcDist(e->stats.pos, pc->stats.pos);
 
 		if (entitym->player_blocked && (!e->stats.in_combat || player_closer_than_target)
-				&& mapr->collider.isFacing(pc->stats.pos.x,pc->stats.pos.y,pc->stats.direction,e->stats.pos.x,e->stats.pos.y)) {
+				&& wmap->collider.isFacing(pc->stats.pos.x,pc->stats.pos.y,pc->stats.direction,e->stats.pos.x,e->stats.pos.y)) {
 			fleeing = true;
 			pursue_pos = pc->stats.pos;
 		}
@@ -330,7 +330,7 @@ void EntityBehavior::findTarget() {
 			int test_dir = Utils::rotateDirection(middle_dir, i);
 
 			FPoint test_pos = Utils::calcVector(e->stats.pos, test_dir, 1);
-			if (mapr->collider.isValidPosition(test_pos.x, test_pos.y, e->stats.movement_type, MapCollision::COLLIDE_TYPE_ALL_ENTITIES)) {
+			if (wmap->collider.isValidPosition(test_pos.x, test_pos.y, e->stats.movement_type, MapCollision::COLLIDE_TYPE_ALL_ENTITIES)) {
 				if (test_dir == e->stats.direction) {
 					// if we're already moving in a good direction, favor it over other directions
 					flee_dirs.clear();
@@ -477,7 +477,7 @@ void EntityBehavior::checkMove() {
 	turn_timer.setCurrent(turn_ticks);
 
 	// clear current space to allow correct movement
-	mapr->collider.unblock(e->stats.pos.x, e->stats.pos.y);
+	wmap->collider.unblock(e->stats.pos.x, e->stats.pos.y);
 
 	path_found_fail_timer.tick();
 
@@ -487,7 +487,7 @@ void EntityBehavior::checkMove() {
 		if (turn_timer.isEnd()) {
 
 			// if blocked, face in pathfinder direction instead
-			if (!mapr->collider.lineOfMovement(e->stats.pos.x, e->stats.pos.y, pursue_pos.x, pursue_pos.y, e->stats.movement_type)) {
+			if (!wmap->collider.lineOfMovement(e->stats.pos.x, e->stats.pos.y, pursue_pos.x, pursue_pos.y, e->stats.movement_type)) {
 
 				// if a path is returned, target first waypoint
 
@@ -533,7 +533,7 @@ void EntityBehavior::checkMove() {
 				if (recalculate_path) {
 					chance_calc_path = -100;
 					path.clear();
-					path_found = mapr->collider.computePath(e->stats.pos, pursue_pos, path, e->stats.movement_type, MapCollision::DEFAULT_PATH_LIMIT);
+					path_found = wmap->collider.computePath(e->stats.pos, pursue_pos, path, e->stats.movement_type, MapCollision::DEFAULT_PATH_LIMIT);
 
 					if (!path_found) {
 						path_found_fails++;
@@ -608,7 +608,7 @@ void EntityBehavior::checkMove() {
 	}
 
 	// re-block current space to allow correct movement
-	mapr->collider.block(e->stats.pos.x, e->stats.pos.y, e->stats.hero_ally);
+	wmap->collider.block(e->stats.pos.x, e->stats.pos.y, e->stats.hero_ally);
 
 }
 
@@ -919,11 +919,11 @@ void EntityBehavior::updateState() {
 
 				//allow free movement over the corpse
 				if (!e->stats.corpse_has_collision) {
-					mapr->collider.unblock(e->stats.pos.x, e->stats.pos.y);
+					wmap->collider.unblock(e->stats.pos.x, e->stats.pos.y);
 				}
 
 				// remove corpses that land on blocked tiles, such as water or pits
-				if (!mapr->collider.isValidPosition(e->stats.pos.x, e->stats.pos.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES)) {
+				if (!wmap->collider.isValidPosition(e->stats.pos.x, e->stats.pos.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES)) {
 					e->stats.corpse_timer.reset(Timer::END);
 				}
 
@@ -954,11 +954,11 @@ void EntityBehavior::updateState() {
 
 				//allow free movement over the corpse
 				if (!e->stats.corpse_has_collision) {
-					mapr->collider.unblock(e->stats.pos.x, e->stats.pos.y);
+					wmap->collider.unblock(e->stats.pos.x, e->stats.pos.y);
 				}
 
 				// remove corpses that land on blocked tiles, such as water or pits
-				if (!mapr->collider.isValidPosition(e->stats.pos.x, e->stats.pos.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES)) {
+				if (!wmap->collider.isValidPosition(e->stats.pos.x, e->stats.pos.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES)) {
 					e->stats.corpse_timer.reset(Timer::END);
 				}
 
@@ -986,8 +986,8 @@ FPoint EntityBehavior::getWanderPoint() {
 	waypoint.x = static_cast<float>(e->stats.wander_area.x) + static_cast<float>(sim_rng->range(0, e->stats.wander_area.w - 1)) + 0.5f;
 	waypoint.y = static_cast<float>(e->stats.wander_area.y) + static_cast<float>(sim_rng->range(0, e->stats.wander_area.h - 1)) + 0.5f;
 
-	if (mapr->collider.isValidPosition(waypoint.x, waypoint.y, e->stats.movement_type, mapr->collider.getCollideType(e->stats.hero)) &&
-	    mapr->collider.lineOfMovement(e->stats.pos.x, e->stats.pos.y, waypoint.x, waypoint.y, e->stats.movement_type))
+	if (wmap->collider.isValidPosition(waypoint.x, waypoint.y, e->stats.movement_type, wmap->collider.getCollideType(e->stats.hero)) &&
+	    wmap->collider.lineOfMovement(e->stats.pos.x, e->stats.pos.y, waypoint.x, waypoint.y, e->stats.movement_type))
 	{
 		return waypoint;
 	}

@@ -148,24 +148,24 @@ int FogOfWar::load() {
 	}
 
 	if (!def_mask) {
-		mapr->fogofwar = FogOfWar::TYPE_NONE;
+		wmap->fogofwar = FogOfWar::TYPE_NONE;
 		invalid_config = true;
 	}
 
-	if (mapr->fogofwar == FogOfWar::TYPE_OVERLAY) {
+	if (wmap->fogofwar == FogOfWar::TYPE_OVERLAY) {
 		if (this->tileset_dark.empty()) {
 			if (!loaded)
 				Utils::logError("FogOfWar: tileset_dark is not set");
 
-			mapr->fogofwar = FogOfWar::TYPE_TINT;
+			wmap->fogofwar = FogOfWar::TYPE_TINT;
 		}
 		if (this->tileset_fog.empty()) {
 			if (!loaded)
 				Utils::logError("FogOfWar: tileset_fog is not set");
 
-			mapr->fogofwar = FogOfWar::TYPE_TINT;
+			wmap->fogofwar = FogOfWar::TYPE_TINT;
 		}
-		if (!invalid_config && !loaded && mapr->fogofwar == FogOfWar::TYPE_OVERLAY) {
+		if (!invalid_config && !loaded && wmap->fogofwar == FogOfWar::TYPE_OVERLAY) {
 			tset_dark.load(tileset_dark);
 			tset_fog.load(tileset_fog);
 		}
@@ -195,17 +195,17 @@ void FogOfWar::handleIntramapTeleport() {
 
 	for (int x = bounds.x; x <= bounds.w; x++) {
 		for (int y = bounds.y; y <= bounds.h; y++) {
-			if (x>=0 && y>=0 && x < mapr->w && y < mapr->h) {
-				mapr->layers[fog_layer_id][x][y] = TILE_HIDDEN;
+			if (x>=0 && y>=0 && x < wmap->w && y < wmap->h) {
+				wmap->layers[fog_layer_id][x][y] = TILE_HIDDEN;
 			}
 		}
 	}
 }
 
 Color FogOfWar::getTileColorMod(const int_fast16_t x, const int_fast16_t y) {
-	if (mapr->layers[dark_layer_id][x][y] == 0 && mapr->layers[fog_layer_id][x][y] > 0)
+	if (wmap->layers[dark_layer_id][x][y] == 0 && wmap->layers[fog_layer_id][x][y] > 0)
 		return color_fog;
-	else if (mapr->layers[dark_layer_id][x][y] > 0)
+	else if (wmap->layers[dark_layer_id][x][y] > 0)
 		return color_dark;
 	else
 		return color_sight;
@@ -226,8 +226,8 @@ void FogOfWar::calcMiniBoundaries() {
 
 	if (bounds.x < 0) bounds.x = 0;
 	if (bounds.y < 0) bounds.y = 0;
-	if (bounds.w > mapr->w) bounds.w = mapr->w;
-	if (bounds.h > mapr->h) bounds.h = mapr->h;
+	if (bounds.w > wmap->w) bounds.w = wmap->w;
+	if (bounds.h > wmap->h) bounds.h = wmap->h;
 }
 
 void FogOfWar::updateTiles() {
@@ -239,13 +239,13 @@ void FogOfWar::updateTiles() {
 
 	for (int x = bounds.x; x <= bounds.w; x++) {
 		for (int y = bounds.y; y <= bounds.h; y++) {
-			if (x>=0 && y>=0 && x < mapr->w && y < mapr->h) {
-				unsigned short prev_dark_tile = mapr->layers[dark_layer_id][x][y];
+			if (x>=0 && y>=0 && x < wmap->w && y < wmap->h) {
+				unsigned short prev_dark_tile = wmap->layers[dark_layer_id][x][y];
 
-				mapr->layers[dark_layer_id][x][y] &= *mask;
-				mapr->layers[fog_layer_id][x][y] = *mask;
+				wmap->layers[dark_layer_id][x][y] &= *mask;
+				wmap->layers[fog_layer_id][x][y] = *mask;
 
-				if (prev_dark_tile != mapr->layers[dark_layer_id][x][y]) {
+				if (prev_dark_tile != wmap->layers[dark_layer_id][x][y]) {
 					update_minimap = true;
 				}
 			}

@@ -49,10 +49,10 @@ NPCManager::NPCManager()
 
 void NPCManager::addRenders(std::vector<Renderable> &r) {
 	for (unsigned i=0; i<npcs.size(); i++) {
-		if (mapr && mapr->collider.isOutsideMap(npcs[i]->stats.pos.x, npcs[i]->stats.pos.y))
+		if (mapr && wmap->collider.isOutsideMap(npcs[i]->stats.pos.x, npcs[i]->stats.pos.y))
 			continue;
 
-		if (mapr->fogofwar > FogOfWar::TYPE_MINIMAP) {
+		if (wmap->fogofwar > FogOfWar::TYPE_MINIMAP) {
 			float delta = Utils::calcDist(pc->stats.pos, npcs[i]->stats.pos);
 			if (delta > fow->mask_radius-1.0) {
 				continue;
@@ -81,8 +81,8 @@ void NPCManager::handleNewMap() {
 	npcs.clear();
 
 	// read the queued NPCs in the map file
-	for (size_t i = 0; i < mapr->map_npcs.size(); ++i) {
-		Map_NPC &mn = mapr->map_npcs[i];
+	for (size_t i = 0; i < wmap->map_npcs.size(); ++i) {
+		Map_NPC &mn = wmap->map_npcs[i];
 
 		if (!camp->checkRequirementsInVector(mn.requirements))
 			continue;
@@ -122,7 +122,7 @@ void NPCManager::handleNewMap() {
 		// npc->stock.sort();
 		npcs.push_back(npc);
 		createMapEvent(*npc, npcs.size());
-		if (!mapr->collider.isValidPosition(npc->stats.pos.x, npc->stats.pos.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_NONE))
+		if (!wmap->collider.isValidPosition(npc->stats.pos.x, npc->stats.pos.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_NONE))
 			Utils::logInfo("NPC: Collision tile detected at NPC position (%.2f, %.2f).", npc->stats.pos.x, npc->stats.pos.y);
 	}
 
@@ -130,13 +130,13 @@ void NPCManager::handleNewMap() {
 		NPC *npc = allies.begin()->second;
 		allies.erase(allies.begin());
 
-		npc->stats.pos = mapr->collider.getRandomNeighbor(Point(pc->stats.pos), 1, npc->stats.movement_type, MapCollision::COLLIDE_TYPE_ALL_ENTITIES);
+		npc->stats.pos = wmap->collider.getRandomNeighbor(Point(pc->stats.pos), 1, npc->stats.movement_type, MapCollision::COLLIDE_TYPE_ALL_ENTITIES);
 		npc->stats.direction = pc->stats.direction;
 
 		npcs.push_back(npc);
 		createMapEvent(*npc, npcs.size());
 
-		mapr->collider.block(npc->stats.pos.x, npc->stats.pos.y, !MapCollision::IS_ALLY);
+		wmap->collider.block(npc->stats.pos.x, npc->stats.pos.y, !MapCollision::IS_ALLY);
 
 		entitym->entities.push_back(npc);
 	}
@@ -181,7 +181,7 @@ void NPCManager::createMapEvent(const NPC& npc, size_t _npcs) {
 
 	ev.type = npc.filename;
 
-	mapr->events.push_back(ev);
+	wmap->events.push_back(ev);
 }
 
 void NPCManager::logic() {

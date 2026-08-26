@@ -225,7 +225,7 @@ void Entity::playSound(int sound_type) {
 
 void Entity::move_from_offending_tile() {
 	// don't bother if there's no possible tile for a stuck entity to move to
-	if (!mapr->collider.hasEmptyTile())
+	if (!wmap->collider.hasEmptyTile())
 		return;
 
 	// If we got stuck on a tile, which we're not allowed to be on, move away
@@ -239,24 +239,24 @@ void Entity::move_from_offending_tile() {
 
 	FPoint original_pos = stats.pos;
 	bool original_pos_is_bad = false;
-	int collide_type = mapr->collider.getCollideType(stats.hero);
+	int collide_type = wmap->collider.getCollideType(stats.hero);
 
-	while (!mapr->collider.isValidPosition(stats.pos.x, stats.pos.y, stats.movement_type, collide_type)) {
+	while (!wmap->collider.isValidPosition(stats.pos.x, stats.pos.y, stats.movement_type, collide_type)) {
 		original_pos_is_bad = true;
 
 		float pushx = 0;
 		float pushy = 0;
 
-		if (mapr->collider.isValidPosition(stats.pos.x + 1, stats.pos.y, stats.movement_type, collide_type))
+		if (wmap->collider.isValidPosition(stats.pos.x + 1, stats.pos.y, stats.movement_type, collide_type))
 			pushx += 0.1f * (2 - (static_cast<float>(static_cast<int>(stats.pos.x + 1)) + 0.5f - stats.pos.x));
 
-		if (mapr->collider.isValidPosition(stats.pos.x - 1, stats.pos.y, stats.movement_type, collide_type))
+		if (wmap->collider.isValidPosition(stats.pos.x - 1, stats.pos.y, stats.movement_type, collide_type))
 			pushx -= 0.1f * (2 - (stats.pos.x - (static_cast<float>(static_cast<int>(stats.pos.x - 1)) + 0.5f)));
 
-		if (mapr->collider.isValidPosition(stats.pos.x, stats.pos.y + 1, stats.movement_type, collide_type))
+		if (wmap->collider.isValidPosition(stats.pos.x, stats.pos.y + 1, stats.movement_type, collide_type))
 			pushy += 0.1f * (2 - (static_cast<float>(static_cast<int>(stats.pos.y + 1)) + 0.5f - stats.pos.y));
 
-		if (mapr->collider.isValidPosition(stats.pos.x, stats.pos.y- 1, stats.movement_type, collide_type))
+		if (wmap->collider.isValidPosition(stats.pos.x, stats.pos.y- 1, stats.movement_type, collide_type))
 			pushy -= 0.1f * (2 - (stats.pos.y - (static_cast<float>(static_cast<int>(stats.pos.y - 1)) + 0.5f)));
 
 		stats.pos.x += pushx;
@@ -272,10 +272,10 @@ void Entity::move_from_offending_tile() {
 			float shortest_dist = 0;
 			int radius = 1;
 
-			while (radius <= std::max(mapr->w, mapr->h)) {
+			while (radius <= std::max(wmap->w, wmap->h)) {
 				for (int i = src_pos.x - radius; i <= src_pos.x + radius; ++i) {
 					for (int j = src_pos.y - radius; j <= src_pos.y + radius; ++j) {
-						if (mapr->collider.isValidPosition(static_cast<float>(i), static_cast<float>(j), stats.movement_type, collide_type)) {
+						if (wmap->collider.isValidPosition(static_cast<float>(i), static_cast<float>(j), stats.movement_type, collide_type)) {
 							float test_dist = Utils::calcDist(stats.pos, shortest_pos);
 							if (shortest_dist == 0 || test_dist < shortest_dist) {
 								shortest_dist = test_dist;
@@ -326,7 +326,7 @@ bool Entity::move() {
 	float dx = speed * StatBlock::DIRECTION_DELTA_X[stats.direction];
 	float dy = speed * StatBlock::DIRECTION_DELTA_Y[stats.direction];
 
-	bool full_move = mapr->collider.move(stats.pos.x, stats.pos.y, dx, dy, stats.movement_type, mapr->collider.getCollideType(stats.hero));
+	bool full_move = wmap->collider.move(stats.pos.x, stats.pos.y, dx, dy, stats.movement_type, wmap->collider.getCollideType(stats.hero));
 
 	return full_move;
 }
@@ -369,7 +369,7 @@ bool Entity::takeHit(Hazard &h) {
 		return false;
 
 	// prevent hazard aoe from hitting targets behind walls
-	if (h.power->walls_block_aoe && !mapr->collider.lineOfMovement(stats.pos.x, stats.pos.y, h.pos.x, h.pos.y, MapCollision::MOVE_NORMAL))
+	if (h.power->walls_block_aoe && !wmap->collider.lineOfMovement(stats.pos.x, stats.pos.y, h.pos.x, h.pos.y, MapCollision::MOVE_NORMAL))
 		return false;
 
 	// some enemies can be invicible based on campaign status
@@ -861,7 +861,7 @@ Rect Entity::getRenderBounds(const FPoint& cam) const {
 }
 
 void Entity::addRenders(std::vector<Renderable> &r) {
-	if (mapr && mapr->collider.isOutsideMap(stats.pos.x, stats.pos.y))
+	if (mapr && wmap->collider.isOutsideMap(stats.pos.x, stats.pos.y))
 		return;
 
 	if (!stats.layer_reference_order.empty()) {

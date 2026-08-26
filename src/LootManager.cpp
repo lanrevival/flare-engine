@@ -142,7 +142,7 @@ void LootManager::logic() {
 
 	// clear any tiles that were blocked from dropped loot
 	for (unsigned i=0; i<tiles_to_unblock.size(); i++) {
-		mapr->collider.unblock(static_cast<float>(tiles_to_unblock[i].x), static_cast<float>(tiles_to_unblock[i].y));
+		wmap->collider.unblock(static_cast<float>(tiles_to_unblock[i].x), static_cast<float>(tiles_to_unblock[i].y));
 	}
 	tiles_to_unblock.clear();
 }
@@ -162,7 +162,7 @@ void LootManager::renderTooltips(const FPoint& cam) {
 		it->tip_visible = false;
 
 		if (it->on_ground) {
-			if (mapr->fogofwar > FogOfWar::TYPE_MINIMAP) {
+			if (wmap->fogofwar > FogOfWar::TYPE_MINIMAP) {
 				float delta = Utils::calcDist(pc->stats.pos, it->pos);
 				if (delta > fow->mask_radius-1.0) {
 					break;
@@ -299,22 +299,22 @@ void LootManager::checkEnemiesForLoot() {
  * As map events occur, some might have a component named "loot"
  */
 void LootManager::checkMapForLoot() {
-	for (size_t i = 0; i < mapr->loot.size(); ++i) {
+	for (size_t i = 0; i < wmap->loot.size(); ++i) {
 		unsigned drops;
-		if (mapr->loot[i].second.y != 0) {
-			drops = sim_rng->range(mapr->loot[i].second.x, mapr->loot[i].second.y);
+		if (wmap->loot[i].second.y != 0) {
+			drops = sim_rng->range(wmap->loot[i].second.x, wmap->loot[i].second.y);
 		}
 		else {
 			drops = sim_rng->range(1, eset->loot.drop_max);
 		}
 
 		while (drops > 0) {
-			checkLoot(mapr->loot[i].first, NULL, NULL);
+			checkLoot(wmap->loot[i].first, NULL, NULL);
 			drops--;
 		}
 	}
 
-	mapr->loot.clear();
+	wmap->loot.clear();
 }
 
 void LootManager::addEnemyLoot(StatBlock *e) {
@@ -595,10 +595,10 @@ ItemStack LootManager::checkNearestPickup(const FPoint& hero_pos) {
 void LootManager::addRenders(std::vector<Renderable> &ren, std::vector<Renderable> &ren_dead) {
 	std::vector<Loot>::iterator it;
 	for (it = loot.begin(); it != loot.end(); ++it) {
-		if (mapr && mapr->collider.isOutsideMap(it->pos.x, it->pos.y))
+		if (mapr && wmap->collider.isOutsideMap(it->pos.x, it->pos.y))
 			continue;
 
-		if (mapr->fogofwar > FogOfWar::TYPE_MINIMAP) {
+		if (wmap->fogofwar > FogOfWar::TYPE_MINIMAP) {
 			float delta = Utils::calcDist(pc->stats.pos, it->pos);
 			if (delta > fow->mask_radius-1.0) {
 				continue;
@@ -820,17 +820,17 @@ void LootManager::checkLootComponent(EventComponent* ec, FPoint *pos, std::vecto
 	p.x = static_cast<float>(src.x) + 0.5f;
 	p.y = static_cast<float>(src.y) + 0.5f;
 
-	if (!mapr->collider.isValidPosition(p.x, p.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES)) {
-		p = mapr->collider.getRandomNeighbor(src, eset->loot.drop_radius, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES);
+	if (!wmap->collider.isValidPosition(p.x, p.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES)) {
+		p = wmap->collider.getRandomNeighbor(src, eset->loot.drop_radius, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES);
 
-		if (!mapr->collider.isValidPosition(p.x, p.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES)) {
+		if (!wmap->collider.isValidPosition(p.x, p.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES)) {
 			p = pc->stats.pos;
 		}
 		else {
 			if (src.x == static_cast<int>(p.x) && src.y == static_cast<int>(p.y))
 				p = pc->stats.pos;
 
-			mapr->collider.block(p.x, p.y, !MapCollision::IS_ALLY);
+			wmap->collider.block(p.x, p.y, !MapCollision::IS_ALLY);
 			tiles_to_unblock.push_back(Point(p));
 		}
 	}

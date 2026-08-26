@@ -157,9 +157,9 @@ void Avatar::init() {
 	// other init
 	sprites = 0;
 	stats.cur_state = StatBlock::ENTITY_STANCE;
-	if (mapr->hero_pos_enabled) {
-		stats.pos.x = mapr->hero_pos.x;
-		stats.pos.y = mapr->hero_pos.y;
+	if (wmap->hero_pos_enabled) {
+		stats.pos.x = wmap->hero_pos.x;
+		stats.pos.y = wmap->hero_pos.y;
 	}
 	current_power = 0;
 	current_power_original = 0;
@@ -312,7 +312,7 @@ void Avatar::set_direction(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 		if (mm_is_distant) {
 			if (cmd.mm_pressed && (!locks.lock[mm_key] || drag_walking)) {
 				FPoint mm_target_test = cmd.mm_map_target;
-				if (mapr->collider.isValidPosition(mm_target_test.x, mm_target_test.y, stats.movement_type, MapCollision::COLLIDE_TYPE_HERO)) {
+				if (wmap->collider.isValidPosition(mm_target_test.x, mm_target_test.y, stats.movement_type, MapCollision::COLLIDE_TYPE_HERO)) {
 					locks.lock[mm_key] = true;
 					mm_target_desired = mm_target_test;
 				}
@@ -321,7 +321,7 @@ void Avatar::set_direction(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 			mm_target = mm_target_desired;
 
 			// if blocked, face in pathfinder direction instead
-			if (collided || !mapr->collider.lineOfMovement(stats.pos.x, stats.pos.y, mm_target.x, mm_target.y, stats.movement_type)) {
+			if (collided || !wmap->collider.lineOfMovement(stats.pos.x, stats.pos.y, mm_target.x, mm_target.y, stats.movement_type)) {
 
 				// if a path is returned, target first waypoint
 
@@ -367,7 +367,7 @@ void Avatar::set_direction(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 				if (recalculate_path) {
 					chance_calc_path = -100;
 					path.clear();
-					path_found = mapr->collider.computePath(stats.pos, mm_target, path, stats.movement_type, MapCollision::DEFAULT_PATH_LIMIT);
+					path_found = wmap->collider.computePath(stats.pos, mm_target, path, stats.movement_type, MapCollision::DEFAULT_PATH_LIMIT);
 
 					if (!path_found) {
 						path_found_fails++;
@@ -466,7 +466,7 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 	}
 
 	// clear current space to allow correct movement
-	mapr->collider.unblock(stats.pos.x, stats.pos.y);
+	wmap->collider.unblock(stats.pos.x, stats.pos.y);
 
 	// turn on all passive powers
 	if ((stats.hp > 0 || stats.effects.triggered_death) && !respawn && !transform_triggered)
@@ -574,9 +574,9 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 	}
 
 	// save a valid tile position in the event that we untransform on an invalid tile
-	if (stats.transformed && mapr->collider.isValidPosition(stats.pos.x, stats.pos.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_HERO)) {
+	if (stats.transformed && wmap->collider.isValidPosition(stats.pos.x, stats.pos.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_HERO)) {
 		transform_pos = stats.pos;
-		transform_map = mapr->getFilename();
+		transform_map = wmap->getFilename();
 	}
 
 	if (settings->mouse_move) {
@@ -810,7 +810,7 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 					if (activeAnimation->isActiveFrame() && !stats.hold_state) {
 						// some powers check if the caster is blocking a tile
 						// so we block the player tile prematurely here
-						mapr->collider.block(stats.pos.x, stats.pos.y, !MapCollision::IS_ALLY);
+						wmap->collider.block(stats.pos.x, stats.pos.y, !MapCollision::IS_ALLY);
 
 						powers->activate(current_power, &stats, stats.pos, act_target);
 						power_cooldown_timers[current_power]->setDuration(power->cooldown);
@@ -918,20 +918,20 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 				// Named without the arrow on purpose: the acceptance greps for menu access count
 				// comments as well as code, which is how a guard avoids rotting into decoration.
 				if (cmd.respawn) {
-					mapr->teleportation = true;
-					mapr->teleport_mapname = mapr->respawn_map;
+					wmap->teleportation = true;
+					wmap->teleport_mapname = wmap->respawn_map;
 
 					if (stats.permadeath) {
 						// set these positions so it doesn't flash before jumping to Title
-						mapr->teleport_destination.x = stats.pos.x;
-						mapr->teleport_destination.y = stats.pos.y;
+						wmap->teleport_destination.x = stats.pos.x;
+						wmap->teleport_destination.y = stats.pos.y;
 					}
 					else {
 						respawn = true;
 
 						// set teleportation variables.  GameEngine acts on these.
-						mapr->teleport_destination.x = mapr->respawn_point.x;
-						mapr->teleport_destination.y = mapr->respawn_point.y;
+						wmap->teleport_destination.x = wmap->respawn_point.x;
+						wmap->teleport_destination.y = wmap->respawn_point.y;
 					}
 				}
 
@@ -946,7 +946,7 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 	mapr->cam.setTarget(stats.pos);
 
 	// check for map events
-	mapr->checkEvents(stats.pos);
+	wmap->checkEvents(stats.pos);
 
 	// decrement all cooldowns
 	for (size_t i = 0; i < power_cooldown_ids.size(); ++i) {
@@ -956,7 +956,7 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 	}
 
 	// make the current square solid
-	mapr->collider.block(stats.pos.x, stats.pos.y, !MapCollision::IS_ALLY);
+	wmap->collider.block(stats.pos.x, stats.pos.y, !MapCollision::IS_ALLY);
 
 	if (stats.state_timer.isEnd() && stats.hold_state)
 		stats.hold_state = false;
@@ -1075,7 +1075,7 @@ void Avatar::transform(PlayerInputLocks& locks) {
 	stats.applyEffects();
 
 	transform_pos = stats.pos;
-	transform_map = mapr->getFilename();
+	transform_map = wmap->getFilename();
 }
 
 void Avatar::untransform(PlayerInputLocks& locks) {
@@ -1083,14 +1083,14 @@ void Avatar::untransform(PlayerInputLocks& locks) {
 	locks.unlockActionBar();
 
 	// For timed transformations, move the player to the last valid tile when untransforming
-	mapr->collider.unblock(stats.pos.x, stats.pos.y);
-	if (!mapr->collider.isValidPosition(stats.pos.x, stats.pos.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_HERO)) {
+	wmap->collider.unblock(stats.pos.x, stats.pos.y);
+	if (!wmap->collider.isValidPosition(stats.pos.x, stats.pos.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_HERO)) {
 		logMsg(msg->get("Transformation expired. You have been moved back to a safe place."), MSG_NORMAL);
-		if (transform_map != mapr->getFilename()) {
-			mapr->teleportation = true;
-			mapr->teleport_mapname = transform_map;
-			mapr->teleport_destination.x = floorf(transform_pos.x) + 0.5f;
-			mapr->teleport_destination.y = floorf(transform_pos.y) + 0.5f;
+		if (transform_map != wmap->getFilename()) {
+			wmap->teleportation = true;
+			wmap->teleport_mapname = transform_map;
+			wmap->teleport_destination.x = floorf(transform_pos.x) + 0.5f;
+			wmap->teleport_destination.y = floorf(transform_pos.y) + 0.5f;
 			transform_map = "";
 		}
 		else {
@@ -1098,7 +1098,7 @@ void Avatar::untransform(PlayerInputLocks& locks) {
 			stats.pos.y = floorf(transform_pos.y) + 0.5f;
 		}
 	}
-	mapr->collider.block(stats.pos.x, stats.pos.y, !MapCollision::IS_ALLY);
+	wmap->collider.block(stats.pos.x, stats.pos.y, !MapCollision::IS_ALLY);
 
 	stats.transformed = false;
 	transform_triggered = true;

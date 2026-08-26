@@ -460,13 +460,13 @@ int NPC::loadSound(const std::string& fname, int vox_type) {
 }
 
 void NPC::logic() {
-	mapr->collider.unblock(stats.pos.x, stats.pos.y);
+	wmap->collider.unblock(stats.pos.x, stats.pos.y);
 
 	Entity::logic();
 	moveMapEvents();
 
 	if (!stats.hero_ally)
-		mapr->collider.block(stats.pos.x, stats.pos.y, true);
+		wmap->collider.block(stats.pos.x, stats.pos.y, true);
 }
 
 bool NPC::playSoundIntro() {
@@ -633,7 +633,7 @@ void NPC::moveMapEvents() {
 
 	std::vector<Event>::iterator it;
 
-	for (it = mapr->events.end(); it != mapr->events.begin(); ) {
+	for (it = wmap->events.end(); it != wmap->events.begin(); ) {
 		--it;
 
 		if (it->type == filename) {
@@ -657,7 +657,7 @@ void NPC::moveMapEvents() {
 			}
 			else {
 				// NPC is dead! Remove the map event
-				it = mapr->events.erase(it);
+				it = wmap->events.erase(it);
 			}
 		}
 	}

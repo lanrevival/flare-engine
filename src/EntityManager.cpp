@@ -138,9 +138,9 @@ void EntityManager::handleNewMap () {
 	prototypes.clear();
 
 	// load new entities
-	while (!mapr->enemies.empty()) {
-		me = mapr->enemies.front();
-		mapr->enemies.pop();
+	while (!wmap->enemies.empty()) {
+		me = wmap->enemies.front();
+		wmap->enemies.pop();
 
 		if (me.type.empty()) {
 			Utils::logError("EntityManager: Entity(%f, %f) doesn't have type attribute set, skipping", me.pos.x, me.pos.y);
@@ -170,11 +170,11 @@ void EntityManager::handleNewMap () {
 
 		entities.push_back(e);
 
-		mapr->collider.block(me.pos.x, me.pos.y, !MapCollision::IS_ALLY);
+		wmap->collider.block(me.pos.x, me.pos.y, !MapCollision::IS_ALLY);
 	}
 
 	// TODO support spawning flying enemies over pits?
-	FPoint spawn_pos = mapr->collider.getRandomNeighbor(Point(pc->stats.pos), 1, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES);
+	FPoint spawn_pos = wmap->collider.getRandomNeighbor(Point(pc->stats.pos), 1, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES);
 	while (!allies.empty()) {
 
 		Entity *e = allies.front();
@@ -189,7 +189,7 @@ void EntityManager::handleNewMap () {
 
 		entities.push_back(e);
 
-		mapr->collider.block(e->stats.pos.x, e->stats.pos.y, MapCollision::IS_ALLY);
+		wmap->collider.block(e->stats.pos.x, e->stats.pos.y, MapCollision::IS_ALLY);
 	}
 
 	// load entities that can be spawn by avatar's powers
@@ -223,10 +223,10 @@ void EntityManager::handleNewMap () {
 	}
 
 	// load entities that can be spawn by map events
-	for (size_t i = 0; i < mapr->events.size(); i++) {
-		for (size_t j = 0; j < mapr->events[i].components.size(); j++) {
-			if (mapr->events[i].components[j].type == EventComponent::SPAWN) {
-				std::vector<Enemy_Level> spawn_enemies = enemyg->getEnemiesInCategory(mapr->events[i].components[j].s);
+	for (size_t i = 0; i < wmap->events.size(); i++) {
+		for (size_t j = 0; j < wmap->events[i].components.size(); j++) {
+			if (wmap->events[i].components[j].type == EventComponent::SPAWN) {
+				std::vector<Enemy_Level> spawn_enemies = enemyg->getEnemiesInCategory(wmap->events[i].components[j].s);
 				for (size_t k = 0; k < spawn_enemies.size(); k++) {
 					loadEntityPrototype(spawn_enemies[k].type);
 				}
@@ -249,7 +249,7 @@ void EntityManager::handleSpawn() {
 		espawn = powers->map_enemies.front();
 		powers->map_enemies.pop();
 
-		mapr->collider.unblock(espawn.pos.x, espawn.pos.y);
+		wmap->collider.unblock(espawn.pos.x, espawn.pos.y);
 
 		Entity *e = new Entity();
 
@@ -296,12 +296,12 @@ void EntityManager::handleSpawn() {
 			e->stats.recalc();
 		}
 
-		if (mapr->collider.isValidPosition(espawn.pos.x, espawn.pos.y, e->stats.movement_type, MapCollision::COLLIDE_TYPE_ALL_ENTITIES) || !e->stats.hero_ally) {
+		if (wmap->collider.isValidPosition(espawn.pos.x, espawn.pos.y, e->stats.movement_type, MapCollision::COLLIDE_TYPE_ALL_ENTITIES) || !e->stats.hero_ally) {
 			e->stats.pos.x = espawn.pos.x;
 			e->stats.pos.y = espawn.pos.y;
 		}
 		else {
-			e->stats.pos = mapr->collider.getRandomNeighbor(Point(pc->stats.pos), 1, e->stats.movement_type, MapCollision::COLLIDE_TYPE_ALL_ENTITIES);
+			e->stats.pos = wmap->collider.getRandomNeighbor(Point(pc->stats.pos), 1, e->stats.movement_type, MapCollision::COLLIDE_TYPE_ALL_ENTITIES);
 		}
 
 		// special animation state for spawning entities
@@ -333,7 +333,7 @@ void EntityManager::handleSpawn() {
 
 		entities.push_back(e);
 
-		mapr->collider.block(e->stats.pos.x, e->stats.pos.y, e->stats.hero_ally);
+		wmap->collider.block(e->stats.pos.x, e->stats.pos.y, e->stats.hero_ally);
 	}
 }
 
@@ -466,11 +466,11 @@ void EntityManager::spawn(const std::string& entity_type, const Point& target, E
 	// quick spawns start facing a random direction
 	espawn.direction = sim_rng->range(0, 7);
 
-	if (!mapr->collider.isValidPosition(espawn.pos.x, espawn.pos.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_NONE)) {
+	if (!wmap->collider.isValidPosition(espawn.pos.x, espawn.pos.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_NONE)) {
 		return;
 	}
 	else {
-		mapr->collider.block(espawn.pos.x, espawn.pos.y, !MapCollision::IS_ALLY);
+		wmap->collider.block(espawn.pos.x, espawn.pos.y, !MapCollision::IS_ALLY);
 	}
 
 	if (ec_spawn_level) {
@@ -488,7 +488,7 @@ void EntityManager::spawn(const std::string& entity_type, const Point& target, E
 void EntityManager::addRenders(std::vector<Renderable> &r, std::vector<Renderable> &r_dead) {
 	std::vector<Entity*>::iterator it;
 	for (it = entities.begin(); it != entities.end(); ++it) {
-		if (mapr->fogofwar > FogOfWar::TYPE_MINIMAP) {
+		if (wmap->fogofwar > FogOfWar::TYPE_MINIMAP) {
 			float delta = Utils::calcDist(pc->stats.pos, (*it)->stats.pos);
 			if (delta > fow->mask_radius-1.0) {
 				continue;

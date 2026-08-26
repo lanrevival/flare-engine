@@ -67,19 +67,6 @@ MapRenderer::MapRenderer()
 	, show_tooltip(false)
 	, drawn_hero(false)
 	, cam()
-	, map_change(false)
-	, teleportation(false)
-	, teleport_destination()
-	, teleport_destination_id(0)
-	, respawn_point()
-	, cutscene(false)
-	, cutscene_file("")
-	, stash(false)
-	, stash_pos()
-	, enemies_cleared(false)
-	, save_game(false)
-	, npc_id(-1)
-	, show_book("")
 	, index_objectlayer(0)
 	, is_spawn_map(false)
 {
@@ -282,49 +269,22 @@ void MapRenderer::loadMusic() {
 }
 
 void MapRenderer::logic(bool paused) {
-	if (fogofwar) {
-		fow->logic();
-	}
+	// statblock power cooldowns, event/delayed-event timers: Map::logic(). See there for why
+	// fow->logic() runs even while paused and the rest doesn't.
+	Map::logic(paused);
 
-	// handle tile set logic e.g. animations
+	// handle tile set logic e.g. animations. Runs even while paused, same as fow->logic() above --
+	// visual animation (water, lava) has never stopped for a menu, and this is the same relative
+	// position in the tick as before Map::logic() existed, just reached one call away instead of
+	// inline. Independent of the sim state Map::logic() just ticked, so the reorder is silent.
 	tset.logic();
 	if (fogofwar == FogOfWar::TYPE_OVERLAY) {
 		fow->tset_dark.logic();
 		fow->tset_fog.logic();
 	}
 
-	// TODO there's a bit too much "logic" here for a class that's supposed to be dedicated to rendering
-	// some of these timers should be moved out at some point
 	if (paused)
 		return;
-
-	// handle statblock logic for map powers
-	for (unsigned i=0; i<statblocks.size(); ++i) {
-		for (size_t j=0; j<statblocks[i].powers_ai.size(); ++j) {
-			statblocks[i].powers_ai[j].cooldown.tick();
-		}
-	}
-
-	// handle event cooldowns
-	std::vector<Event>::iterator it;
-	for (it = events.begin(); it < events.end(); ++it) {
-		if (!it->delay.isEnd())
-			it->delay.tick();
-		else
-			it->cooldown.tick();
-	}
-
-	// handle delayed events
-	for (it = delayed_events.end(); it != delayed_events.begin(); ) {
-		--it;
-
-		it->delay.tick();
-
-		if (it->delay.isEnd()) {
-			eventm->executeDelayedEvent(*it);
-			it = delayed_events.erase(it);
-		}
-	}
 
 	cam.logic();
 }
@@ -1169,60 +1129,6 @@ void MapRenderer::executeOnMapExitEvents() {
 	}
 }
 
-void MapRenderer::checkEvents(const FPoint& loc) {
-	Point maploc;
-	maploc.x = int(loc.x);
-	maploc.y = int(loc.y);
-	std::vector<Event>::iterator it;
-
-	// loop in reverse because we may erase elements
-	for (it = events.end(); it != events.begin(); ) {
-		--it;
-
-		// skip inactive events
-		if (!eventm->isActive(*it)) continue;
-
-		// static events are run every frame without interaction from the player
-		if ((*it).activate_type == Event::ACTIVATE_STATIC) {
-			if (eventm->executeEvent(*it))
-				it = events.erase(it);
-			continue;
-		}
-
-		if ((*it).activate_type == Event::ACTIVATE_ON_CLEAR) {
-			if (enemies_cleared && eventm->executeEvent(*it))
-				it = events.erase(it);
-			continue;
-		}
-
-		bool inside = maploc.x >= (*it).location.x &&
-					  maploc.y >= (*it).location.y &&
-					  maploc.x <= (*it).location.x + (*it).location.w-1 &&
-					  maploc.y <= (*it).location.y + (*it).location.h-1;
-
-		if ((*it).activate_type == Event::ACTIVATE_ON_LEAVE) {
-			if (inside) {
-				if (!(*it).getComponent(EventComponent::WAS_INSIDE_EVENT_AREA)) {
-					(*it).components.push_back(EventComponent());
-					(*it).components.back().type = EventComponent::WAS_INSIDE_EVENT_AREA;
-				}
-			}
-			else {
-				if ((*it).getComponent(EventComponent::WAS_INSIDE_EVENT_AREA)) {
-					(*it).deleteAllComponents(EventComponent::WAS_INSIDE_EVENT_AREA);
-					if (eventm->executeEvent(*it))
-						it = events.erase(it);
-				}
-			}
-		}
-		else if ((*it).activate_type == Event::ACTIVATE_ON_TRIGGER) {
-			if (inside)
-				if (eventm->executeEvent(*it))
-					it = events.erase(it);
-		}
-	}
-}
-
 /**
  * Some events have a hotspot (rectangle screen area) where the user can click
  * to trigger the event.
@@ -1449,24 +1355,6 @@ void MapRenderer::createTooltip(EventComponent *ec) {
 /**
  * Activate a power that is attached to an event
  */
-void MapRenderer::activatePower(PowerID power_index, unsigned statblock_index, const FPoint &target) {
-	if (!powers->isValid(power_index)) {
-		Utils::logError("MapRenderer: Power index %d is not valid.", power_index);
-		return;
-	}
-
-	if (statblock_index < statblocks.size()) {
-		// check power cooldown before activating
-		if (statblocks[statblock_index].powers_ai[0].cooldown.isEnd()) {
-			statblocks[statblock_index].powers_ai[0].cooldown.setDuration(powers->powers[power_index]->cooldown);
-			powers->activate(power_index, &statblocks[statblock_index], statblocks[statblock_index].pos, target);
-		}
-	}
-	else {
-		Utils::logError("MapRenderer: StatBlock index is out of bounds.");
-	}
-}
-
 bool MapRenderer::isValidTile(const unsigned &tile) {
 	if (tile == 0)
 		return true;

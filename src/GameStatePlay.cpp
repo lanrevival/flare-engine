@@ -108,6 +108,7 @@ GameStatePlay::GameStatePlay()
 	powers = new PowerManager();
 	fow = new FogOfWar();
 	mapr = new MapRenderer();
+	wmap = mapr; // the simulation's view of the same object. See SharedGameResources.h, P1.4a.
 	pc = new Avatar();
 	entitym = new EntityManager();
 	enemyg = new EnemyGroupManager();
@@ -1339,6 +1340,7 @@ GameStatePlay::~GameStatePlay() {
 	items = NULL;
 	loot = NULL;
 	mapr = NULL;
+	wmap = NULL; // does not own the object mapr's delete above already freed
 	menu_act = NULL;
 	menu_powers = NULL;
 	powers = NULL;

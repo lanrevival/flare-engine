@@ -97,8 +97,6 @@ private:
 	Map_Layer drawn_tiles;
 
 public:
-	typedef std::pair< std::vector<EventComponent>, Point> MapLoot;
-
 	static const unsigned PROCGEN_CHUNK_SIZE = 32; // the size of each chunk tile when drawing the map to the dev console with drawProcgenChunkMap()
 
 	// functions
@@ -111,7 +109,6 @@ public:
 	void logic(bool paused);
 	void render(std::vector<Renderable> &r, std::vector<Renderable> &r_dead);
 
-	void checkEvents(const FPoint& loc);
 	void checkHotspots();
 	void checkNearestEvent();
 	void checkTooltip();
@@ -121,9 +118,6 @@ public:
 
 	// some events are triggered on exiting the map
 	void executeOnMapExitEvents();
-
-	// some events can trigger powers
-	void activatePower(PowerID power_index, unsigned statblock_index, const FPoint &target);
 
 	bool isValidTile(const unsigned &tile);
 	Point centerTile(const Point& p);
@@ -135,48 +129,8 @@ public:
 	// cam is where on the map the camera is pointing
 	Camera cam;
 
-	// indicates that the map was changed by an event, so the GameStatePlay
-	// will tell the mini map to update.
-	bool map_change;
-
-	MapCollision collider;
-
-	// event-created loot or items
-	std::vector<MapLoot> loot;
-
-	// teleport handling
-	bool teleportation;
-	FPoint teleport_destination;
-	int teleport_destination_id;
-	std::string teleport_mapname;
-	std::string respawn_map;
-	FPoint respawn_point;
-
-	// cutscene handling
-	bool cutscene;
-	std::string cutscene_file;
-
-	// stash handling
-	bool stash;
-	FPoint stash_pos;
-
-	// enemy clear
-	bool enemies_cleared;
-
-	// event talker
-	std::string event_npc;
-
-	// trigger for save game events
-	bool save_game;
-
 	// map soundids
 	std::vector<SoundID> sids;
-
-	// npc handling
-	int npc_id;
-
-	// book from map event
-	std::string show_book;
 
 	void loadMusic();
 

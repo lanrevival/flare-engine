@@ -42,6 +42,7 @@ EventManager *eventm = NULL;
 HazardManager *hazards = NULL;
 ItemManager *items = NULL;
 LootManager *loot = NULL;
+Map *wmap = NULL;
 MapRenderer *mapr = NULL;
 MenuActionBar *menu_act= NULL;
 ActionBarState *pab = NULL;
