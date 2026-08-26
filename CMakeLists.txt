@@ -115,131 +115,14 @@ EndIf (NOT SDL2TTF_FOUND)
 
 # Sources
 
+# Defines FLARE_SIM_SOURCES (no SDL2_image/SDL2_mixer/SDL2_ttf dependency, see P1.4b) and
+# FLARE_PRESENTATION_SOURCES. FLARE_SOURCES below must stay their exact union, or flare's own
+# build silently drops files.
+Include (FlareSimSources)
+
 Set (FLARE_SOURCES
-	./src/Animation.cpp
-	./src/AnimationMedia.cpp
-	./src/AnimationManager.cpp
-	./src/AnimationSet.cpp
-	./src/AStarContainer.cpp
-	./src/AStarNode.cpp
-	./src/ActionBarState.cpp
-	./src/Avatar.cpp
-	./src/Camera.cpp
-	./src/CampaignManager.cpp
-	./src/CombatText.cpp
-	./src/CursorManager.cpp
-	./src/DeviceList.cpp
-	./src/EffectManager.cpp
-	./src/EnemyGroupManager.cpp
-	./src/EngineSettings.cpp
-	./src/Entity.cpp
-	./src/EntityBehavior.cpp
-	./src/EntityManager.cpp
-	./src/EventManager.cpp
-	./src/FileParser.cpp
-	./src/FogOfWar.cpp
-	./src/FontEngine.cpp
-	./src/GameSlotPreview.cpp
-	./src/GameState.cpp
-	./src/GameStateConfig.cpp
-	./src/GameStateCutscene.cpp
-	./src/GameStateTitle.cpp
-	./src/GameStateLoad.cpp
-	./src/GameStatePlay.cpp
-	./src/GameStateNew.cpp
-	./src/GameSwitcher.cpp
-	./src/GetText.cpp
-	./src/Hazard.cpp
-	./src/HazardManager.cpp
-	./src/IconManager.cpp
-	./src/InputState.cpp
-	./src/ItemManager.cpp
-	./src/ItemStorage.cpp
-	./src/Loot.cpp
-	./src/LootManager.cpp
-	./src/Map.cpp
-	./src/MapCollision.cpp
-	./src/MapParallax.cpp
-	./src/MapRenderer.cpp
-	./src/MapSaver.cpp
-	./src/Menu.cpp
-	./src/MenuActionBar.cpp
-	./src/MenuActiveEffects.cpp
-	./src/MenuBook.cpp
-	./src/MenuCharacter.cpp
-	./src/MenuConfig.cpp
-	./src/MenuConfirm.cpp
-	./src/MenuDevConsole.cpp
-	./src/MenuEnemy.cpp
-	./src/MenuExit.cpp
-	./src/MenuGameOver.cpp
-	./src/MenuHUDLog.cpp
-	./src/MenuInventory.cpp
-	./src/MenuItemStorage.cpp
-	./src/MenuLog.cpp
-	./src/MenuManager.cpp
-	./src/MenuMiniMap.cpp
-	./src/MenuNumPicker.cpp
-	./src/MenuPowers.cpp
-	./src/MenuRegionTitle.cpp
-	./src/MenuStash.cpp
-	./src/MenuStatBar.cpp
-	./src/MenuTalker.cpp
-	./src/MenuTouchControls.cpp
-	./src/MenuVendor.cpp
-	./src/MessageEngine.cpp
-	./src/ModManager.cpp
-	./src/NPC.cpp
-	./src/NullInputState.cpp
-	./src/NullRenderDevice.cpp
-	./src/NullSoundManager.cpp
-	./src/NPCManager.cpp
-	./src/PlayerCommand.cpp
-	./src/PlayerInventory.cpp
-	./src/PowerBonusState.cpp
-	./src/PowerManager.cpp
-	./src/QuestLog.cpp
-	./src/RenderDevice.cpp
-	./src/Replay.cpp
-	./src/Rng.cpp
-	./src/SaveLoad.cpp
-	./src/SDLInputState.cpp
-	./src/SDLSoftwareRenderDevice.cpp
-	./src/SDLSoundManager.cpp
-	./src/SDLHardwareRenderDevice.cpp
-	./src/SDLFontEngine.cpp
-	./src/Settings.cpp
-	./src/SimEvents.cpp
-	./src/SharedGameResources.cpp
-	./src/SharedResources.cpp
-	./src/SoundManager.cpp
-	./src/StatBlock.cpp
-	./src/Stats.cpp
-	./src/Subtitles.cpp
-	./src/TileSet.cpp
-	./src/TooltipData.cpp
-	./src/TooltipManager.cpp
-	./src/Utils.cpp
-	./src/UtilsDebug.cpp
-	./src/UtilsFileSystem.cpp
-	./src/UtilsParsing.cpp
-	./src/Version.cpp
-	./src/Widget.cpp
-	./src/WorldHash.cpp
-	./src/WidgetCheckBox.cpp
-	./src/WidgetButton.cpp
-	./src/WidgetHorizontalList.cpp
-	./src/WidgetInput.cpp
-	./src/WidgetLabel.cpp
-	./src/WidgetListBox.cpp
-	./src/WidgetLog.cpp
-	./src/WidgetScrollBar.cpp
-	./src/WidgetScrollBox.cpp
-	./src/WidgetSlider.cpp
-	./src/WidgetSlot.cpp
-	./src/WidgetTabControl.cpp
-	./src/WidgetTooltip.cpp
-	./src/XPScaling.cpp
+	${FLARE_SIM_SOURCES}
+	${FLARE_PRESENTATION_SOURCES}
 	./src/main.cpp
 )
 
@@ -285,6 +168,7 @@ Set (FLARE_HEADERS
 	./src/InputState.h
 	./src/ItemManager.h
 	./src/ItemStorage.h
+	./src/LabelInfo.h
 	./src/Loot.h
 	./src/LootManager.h
 	./src/Map.h
@@ -381,9 +265,17 @@ IF (WIN32)
 ENDIF (WIN32)
 
 # The server reuses the whole engine, but swaps the client entry point for a headless one.
+# TODO(P1.4c): once main_server.cpp is rewritten as a thin sim loop, this becomes
+# flare_sim + FLARE_NET_SOURCES + main_server.cpp instead.
 Set (FLARE_SERVER_SOURCES ${FLARE_SOURCES})
 List (REMOVE_ITEM FLARE_SERVER_SOURCES ./src/main.cpp)
 List (APPEND FLARE_SERVER_SOURCES ./src/main_server.cpp)
+
+# The simulation, in isolation: no SDL2_image, SDL2_mixer, or SDL2_ttf dependency. Not yet linked
+# into flare-server (P1.4c does that) -- this target exists so the boundary can be verified now,
+# per P1.4b.
+Add_Library (flare_sim STATIC ${FLARE_SIM_SOURCES})
+Target_Link_Libraries (flare_sim ${CMAKE_LD_FLAGS} ${SDL2_LIBRARY})
 
 Add_Executable (flare ${FLARE_SOURCES} ${FLARE_HEADERS})
 Add_Executable (flare-server ${FLARE_SERVER_SOURCES} ${FLARE_HEADERS})

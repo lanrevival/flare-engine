@@ -30,15 +30,6 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "SharedResources.h"
 #include "WidgetLabel.h"
 
-LabelInfo::LabelInfo()
-	: x(0)
-	, y(0)
-	, justify(FontEngine::JUSTIFY_LEFT)
-	, valign(VALIGN_TOP)
-	, hidden(false)
-	, font_style("font_regular") {
-}
-
 const std::string WidgetLabel::DEFAULT_FONT = "font_regular";
 
 WidgetLabel::WidgetLabel()

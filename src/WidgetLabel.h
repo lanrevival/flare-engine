@@ -29,24 +29,9 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #define WIDGET_LABEL_H
 
 #include "CommonIncludes.h"
+#include "LabelInfo.h"
 #include "Utils.h"
 #include "Widget.h"
-
-class LabelInfo {
-public:
-	enum {
-		VALIGN_CENTER = 0,
-		VALIGN_TOP = 1,
-		VALIGN_BOTTOM = 2
-	};
-
-	int x,y;
-	int justify,valign;
-	bool hidden;
-	std::string font_style;
-
-	LabelInfo();
-};
 
 class WidgetLabel : public Widget {
 private:

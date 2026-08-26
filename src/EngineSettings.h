@@ -23,8 +23,8 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #define ENGINESETTINGS_H
 
 #include "CommonIncludes.h"
+#include "LabelInfo.h"
 #include "Utils.h"
-#include "WidgetLabel.h"
 
 class EngineSettings {
 public:

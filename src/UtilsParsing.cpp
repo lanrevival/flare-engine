@@ -21,10 +21,10 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "CommonIncludes.h"
 #include "FontEngine.h"
 #include "ItemManager.h"
+#include "LabelInfo.h"
 #include "Settings.h"
 #include "SharedResources.h"
 #include "UtilsParsing.h"
-#include "WidgetLabel.h"
 
 #include <cstdlib>
 #include <math.h>

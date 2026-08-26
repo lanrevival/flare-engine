@@ -52,7 +52,6 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "UtilsFileSystem.h"
 #include "UtilsMath.h"
 #include "UtilsParsing.h"
-#include "WidgetLabel.h"
 
 #include <cassert>
 #include <climits>
