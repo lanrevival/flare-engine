@@ -150,8 +150,27 @@ void SpawnLevel::applyToStatBlock(StatBlock *src_stats, StatBlock *ratio_stats) 
 	if (!src_stats)
 		return;
 
-	if (pc && ratio_source == RATIO_SOURCE_HERO) {
-		ratio_stats = &pc->stats;
+	// D15 (P2.2 step 7b): with several players, "the hero" a spawn_level=hero_level ratio scales
+	// off is the party average, not a single hard-coded player. This used to substitute the
+	// single global pc here unconditionally, discarding whatever ratio_stats the caller passed
+	// in (EntityManager.cpp, Map.cpp:1268 below) -- the fix belongs in this one function, which
+	// is the only place ratio_source is actually consulted, not at each caller. With one player
+	// the average is that player's own stats exactly (integer sums divided by 1), so this is a
+	// no-op for AC-REPLAY. 31 Empyrean maps use spawn_level=hero_level, including Iron Labyrinth.
+	StatBlock average_stats;
+	if (ratio_source == RATIO_SOURCE_HERO && !playerm->players.empty()) {
+		int level_sum = 0;
+		std::vector<int> primary_sum(eset->primary_stats.list.size(), 0);
+		for (size_t i = 0; i < playerm->players.size(); ++i) {
+			level_sum += playerm->players[i]->stats.level;
+			for (size_t j = 0; j < primary_sum.size(); ++j)
+				primary_sum[j] += playerm->players[i]->stats.get_primary(j);
+		}
+		average_stats.level = level_sum / static_cast<int>(playerm->players.size());
+		for (size_t j = 0; j < primary_sum.size(); ++j)
+			average_stats.primary[j] = primary_sum[j] / static_cast<int>(playerm->players.size());
+
+		ratio_stats = &average_stats;
 	}
 
 	if (mode == MODE_FIXED) {

@@ -36,6 +36,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "InputState.h"
 #include "MapRenderer.h"
 #include "MenuActionBar.h"
+#include "PlayerManager.h"
 #include "PowerManager.h"
 #include "RenderDevice.h"
 #include "Rng.h"
@@ -159,9 +160,14 @@ void EntityManager::handleNewMap () {
 		e->stats.setWanderArea(me.wander_radius);
 		e->stats.invincible_requirements = me.invincible_requirements;
 
-		// Set level
-		if (pc) {
-			me.spawn_level.applyToStatBlock(&e->stats, &pc->stats);
+		// Set level. If spawn_level's ratio_source is RATIO_SOURCE_HERO, applyToStatBlock
+		// (Map.cpp, P2.2 step 7b/D15) ignores this argument entirely and substitutes the party
+		// average instead -- this argument only matters for other ratio_source/mode
+		// combinations. No specific triggering player exists for a map-defined enemy spawn, so
+		// this keeps the pre-P2.2 simplification of using playerm->local().
+		Avatar* local = playerm->local();
+		if (local) {
+			me.spawn_level.applyToStatBlock(&e->stats, &local->stats);
 		}
 
 		// apply Effects and set HP to max HP
@@ -173,7 +179,10 @@ void EntityManager::handleNewMap () {
 	}
 
 	// TODO support spawning flying enemies over pits?
-	FPoint spawn_pos = wmap->collider.getRandomNeighbor(Point(pc->stats.pos), 1, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES);
+	// Persistent ally NPC anchor, same reasoning/limitation as NPCManager::handleNewMap()'s
+	// identical pattern: no per-player companion-ownership concept exists yet, so this keeps the
+	// pre-P2.2 simplification of anchoring to playerm->local().
+	FPoint spawn_pos = local ? wmap->collider.getRandomNeighbor(Point(local->stats.pos), 1, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES) : FPoint();
 	while (!allies.empty()) {
 
 		Entity *e = allies.front();
@@ -184,31 +193,39 @@ void EntityManager::handleNewMap () {
 		delete temp;
 
 		e->stats.pos = spawn_pos;
-		e->stats.direction = pc->stats.direction;
+		if (local) e->stats.direction = local->stats.direction;
 
 		entities.push_back(e);
 
 		wmap->collider.block(e->stats.pos.x, e->stats.pos.y, MapCollision::IS_ALLY);
 	}
 
-	// load entities that can be spawn by avatar's powers
-	for (size_t i = 0; i < pc->stats.powers_list.size(); i++) {
-		PowerID power_index = pc->stats.powers_list[i];
-		if (powers->isValid(power_index)) {
-			const std::string& spawn_type = powers->powers[power_index]->spawn_type;
-			if (!spawn_type.empty() && spawn_type != "untransform") {
-				std::vector<Enemy_Level> spawn_enemies = enemyg->getEnemiesInCategory(spawn_type);
-				for (size_t j = 0; j < spawn_enemies.size(); j++) {
-					loadEntityPrototype(spawn_enemies[j].type);
+	// Load entities that can be spawned by any connected player's powers or action bar.
+	// P2.2 step 7b: the original draft only named the powers_list half of this loop; the
+	// action-bar hotkeys half right below it has the exact same bug -- a player whose summon is bound
+	// only to a hotkey (not also in their known-powers list) had no loaded prototype. Both now
+	// iterate every player in playerm, not just local().
+	for (size_t p = 0; p < playerm->players.size(); ++p) {
+		std::vector<PowerID>& powers_list = playerm->players[p]->stats.powers_list;
+		for (size_t i = 0; i < powers_list.size(); i++) {
+			PowerID power_index = powers_list[i];
+			if (powers->isValid(power_index)) {
+				const std::string& spawn_type = powers->powers[power_index]->spawn_type;
+				if (!spawn_type.empty() && spawn_type != "untransform") {
+					std::vector<Enemy_Level> spawn_enemies = enemyg->getEnemiesInCategory(spawn_type);
+					for (size_t j = 0; j < spawn_enemies.size(); j++) {
+						loadEntityPrototype(spawn_enemies[j].type);
+					}
 				}
 			}
 		}
 	}
 
-	// load entities that can be spawn by powers in the action bar
-	if (pab != NULL) {
-		for (size_t i = 0; i < pab->hotkeys.size(); i++) {
-			PowerID power_index = pab->hotkeys[i];
+	for (size_t p = 0; p < playerm->actionbars.size(); ++p) {
+		ActionBarState* actionbar = playerm->actionbars[p];
+		if (!actionbar) continue;
+		for (size_t i = 0; i < actionbar->hotkeys.size(); i++) {
+			PowerID power_index = actionbar->hotkeys[i];
 			if (power_index != 0) {
 				const std::string& spawn_type = powers->powers[power_index]->spawn_type;
 				if (!spawn_type.empty() && spawn_type != "untransform") {
@@ -300,7 +317,16 @@ void EntityManager::handleSpawn() {
 			e->stats.pos.y = espawn.pos.y;
 		}
 		else {
-			e->stats.pos = wmap->collider.getRandomNeighbor(Point(pc->stats.pos), 1, e->stats.movement_type, MapCollision::COLLIDE_TYPE_ALL_ENTITIES);
+			// Kind A: espawn.summoner (set just above, from the power activation that queued this
+			// summon) is precisely "the player who triggered this" -- more precise than any
+			// nearest/local fallback, and it's already right here. Only fall back to
+			// playerm->local() for the (today never exercised) case of a summon with no summoner.
+			StatBlock* anchor = espawn.summoner;
+			if (!anchor) {
+				Avatar* local = playerm->local();
+				if (local) anchor = &local->stats;
+			}
+			if (anchor) e->stats.pos = wmap->collider.getRandomNeighbor(Point(anchor->pos), 1, e->stats.movement_type, MapCollision::COLLIDE_TYPE_ALL_ENTITIES);
 		}
 
 		// special animation state for spawning entities
@@ -310,23 +336,32 @@ void EntityManager::handleSpawn() {
 		powers->effect(&e->stats, (espawn.summoner != NULL ? espawn.summoner : &e->stats), e->stats.summoned_power_index, e->stats.hero_ally ? Power::SOURCE_TYPE_HERO : Power::SOURCE_TYPE_ENEMY);
 
 		//apply party passives
-		//synchronise tha party passives in the pc stat block with the passives in the allies stat blocks
+		//synchronise the party passives in every connected player's stat block with the passives
+		//in the allies stat blocks (P2.2: kind C -- buff_party is explicitly party-wide, so this
+		//now checks every player in playerm, not just local(); de-duplicated since two players
+		//could carry the identical party-buff passive, which must apply once, not stack).
 		//at the time the summon is spawned, it takes the passives available at that time. if the passives change later, the changes wont affect summons retrospectively. could be exploited with equipment switching
-		for (unsigned i=0; i< pc->stats.powers_passive.size(); i++) {
-			PowerID pwr = pc->stats.powers_passive[i];
-			if (powers->isValid(pwr) && powers->powers[pwr]->passive && powers->powers[pwr]->buff_party && (e->stats.hero_ally || e->stats.enemy_ally)
-					&& (powers->powers[pwr]->buff_party_power_id == 0 || powers->powers[pwr]->buff_party_power_id == e->stats.summoned_power_index)) {
+		for (size_t p = 0; p < playerm->players.size(); ++p) {
+			StatBlock& pstats = playerm->players[p]->stats;
 
-				e->stats.powers_passive.push_back(pwr);
+			for (unsigned i=0; i< pstats.powers_passive.size(); i++) {
+				PowerID pwr = pstats.powers_passive[i];
+				if (powers->isValid(pwr) && powers->powers[pwr]->passive && powers->powers[pwr]->buff_party && (e->stats.hero_ally || e->stats.enemy_ally)
+						&& (powers->powers[pwr]->buff_party_power_id == 0 || powers->powers[pwr]->buff_party_power_id == e->stats.summoned_power_index)
+						&& std::find(e->stats.powers_passive.begin(), e->stats.powers_passive.end(), pwr) == e->stats.powers_passive.end()) {
+
+					e->stats.powers_passive.push_back(pwr);
+				}
 			}
-		}
 
-		for (unsigned i=0; i<pc->stats.powers_list_items.size(); i++) {
-			PowerID pwr = pc->stats.powers_list_items[i];
-			if (powers->isValid(pwr) && powers->powers[pwr]->passive && powers->powers[pwr]->buff_party && (e->stats.hero_ally || e->stats.enemy_ally)
-					&& (powers->powers[pwr]->buff_party_power_id == 0 || powers->powers[pwr]->buff_party_power_id == e->stats.summoned_power_index)) {
+			for (unsigned i=0; i<pstats.powers_list_items.size(); i++) {
+				PowerID pwr = pstats.powers_list_items[i];
+				if (powers->isValid(pwr) && powers->powers[pwr]->passive && powers->powers[pwr]->buff_party && (e->stats.hero_ally || e->stats.enemy_ally)
+						&& (powers->powers[pwr]->buff_party_power_id == 0 || powers->powers[pwr]->buff_party_power_id == e->stats.summoned_power_index)
+						&& std::find(e->stats.powers_passive.begin(), e->stats.powers_passive.end(), pwr) == e->stats.powers_passive.end()) {
 
-				e->stats.powers_passive.push_back(pwr);
+					e->stats.powers_passive.push_back(pwr);
+				}
 			}
 		}
 
@@ -358,7 +393,7 @@ void EntityManager::logic() {
 
 	handleSpawn();
 
-	bool pc_in_combat = false;
+	bool any_hostile_in_combat = false;
 
 	std::vector<Entity*>::iterator it;
 	for (it = entities.begin(); it != entities.end(); ++it) {
@@ -366,20 +401,27 @@ void EntityManager::logic() {
 		if (!(*it)->stats.npc) {
 			(*it)->logic();
 
-			if (!pc_in_combat && (*it)->stats.alive && !(*it)->stats.hero_ally && (*it)->stats.in_combat)
-				pc_in_combat = true;
+			if (!any_hostile_in_combat && (*it)->stats.alive && !(*it)->stats.hero_ally && (*it)->stats.in_combat)
+				any_hostile_in_combat = true;
 		}
 	}
 
-	if (pc_in_combat && !pc->stats.in_combat) {
+	// Kind C: whether a hostile is in combat is party-wide state -- every player's in_combat
+	// flag now tracks it, not just local(). The controller LED is real local hardware, so that
+	// part stays tied to playerm->local() specifically and only fires on the local player's own
+	// transition, same edge-triggered shape as before.
+	Avatar* local = playerm->local();
+	if (local && any_hostile_in_combat && !local->stats.in_combat) {
 		// if a supported controller is connected, change the LED to red when in combat
 		Color led_color(255, 0, 0);
 		inpt->setJoystickLED(led_color);
-		pc->stats.in_combat = true;
 	}
-	else if (!pc_in_combat && pc->stats.in_combat) {
+	else if (local && !any_hostile_in_combat && local->stats.in_combat) {
 		inpt->setJoystickLED(InputState::DEFAULT_CONTROLLER_LED_COLOR);
-		pc->stats.in_combat = false;
+	}
+
+	for (size_t p = 0; p < playerm->players.size(); ++p) {
+		playerm->players[p]->stats.in_combat = any_hostile_in_combat;
 	}
 }
 
@@ -484,10 +526,14 @@ void EntityManager::spawn(const std::string& entity_type, const Point& target, E
  * to collect all mobile sprites each frame.
  */
 void EntityManager::addRenders(std::vector<Renderable> &r, std::vector<Renderable> &r_dead) {
+	// This client's own render list -- always playerm->local(), same reasoning as
+	// LootManager::addRenders()/NPCManager::addRenders().
+	Avatar* local = playerm->local();
+
 	std::vector<Entity*>::iterator it;
 	for (it = entities.begin(); it != entities.end(); ++it) {
-		if (wmap->fogofwar > FogOfWar::TYPE_MINIMAP) {
-			float delta = Utils::calcDist(pc->stats.pos, (*it)->stats.pos);
+		if (wmap->fogofwar > FogOfWar::TYPE_MINIMAP && local) {
+			float delta = Utils::calcDist(local->stats.pos, (*it)->stats.pos);
 			if (delta > fow->mask_radius-1.0) {
 				continue;
 			}
