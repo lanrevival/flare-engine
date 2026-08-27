@@ -47,12 +47,13 @@ public:
 	/** The explicit-parameter overloads below are the real implementations (P2.3) -- they read
 	 * and write exactly one player's Avatar/PlayerInventory/ActionBarState/PowerBonusState, named
 	 * at the call site, never a global. The no-argument overloads are compatibility wrappers for
-	 * callers outside P2.3's scope (main_server.cpp, GameStateLoad.cpp, GameStateCutscene.cpp,
-	 * GameStateNew.cpp, MenuExit.cpp, SDLInputState.cpp, and the two Platform*.cpp files) that
-	 * still assume a single global local player; they forward to the explicit overload using the
-	 * pc/pinv/pab/pbs globals (SharedGameResources.h) unchanged. Both must keep working, and both
-	 * do exactly the same thing for today's single-player-per-client tree -- the split exists so
-	 * this file's own logic is provably off the globals, not because behaviour differs.
+	 * callers that still assume a single local player (main_server.cpp, GameStateLoad.cpp,
+	 * GameStateCutscene.cpp, GameStateNew.cpp, MenuExit.cpp, SDLInputState.cpp, and the two
+	 * Platform*.cpp files); they forward to the explicit overload using playerm->local() and its
+	 * three siblings (P2.3b -- the pc/pinv/pab/pbs globals these used to forward through directly
+	 * are gone). Both must keep working, and both do exactly the same thing for today's
+	 * single-player-per-client tree -- the split exists so this file's own logic is provably off
+	 * any global, not because behaviour differs.
 	 */
 	void saveGame();
 	void saveGame(Avatar* avatar, PlayerInventory* inventory, ActionBarState* actionbar, PowerBonusState* powerbonus);

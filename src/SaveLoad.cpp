@@ -75,7 +75,13 @@ SaveLoad::~SaveLoad() {
  * Before exiting the game, save to file
  */
 void SaveLoad::saveGame() {
-	saveGame(pc, pinv, pab, pbs);
+	// P2.3b: the pc/pinv/pab/pbs compatibility-alias globals this used to forward through are
+	// gone; playerm->local() and its three siblings are the direct equivalent (kind A -- SaveLoad
+	// is still single-character-per-slot, P4.1, so there is nothing to iterate here yet). This
+	// wrapper's eight out-of-P2.3-scope callers (main_server.cpp, GameStateLoad.cpp,
+	// GameStateCutscene.cpp, GameStateNew.cpp, MenuExit.cpp, SDLInputState.cpp, and the two
+	// Platform*.cpp files) keep calling this no-arg form unchanged.
+	saveGame(playerm->local(), playerm->inventoryFor(playerm->local_id), playerm->actionbarFor(playerm->local_id), playerm->powerbonusFor(playerm->local_id));
 }
 
 void SaveLoad::saveGame(Avatar* avatar, PlayerInventory* inventory, ActionBarState* actionbar, PowerBonusState* powerbonus) {
@@ -295,7 +301,8 @@ void SaveLoad::saveGame(Avatar* avatar, PlayerInventory* inventory, ActionBarSta
 }
 
 void SaveLoad::saveExtendedItems(bool save_storage_items) {
-	saveExtendedItems(save_storage_items, pinv);
+	// P2.3b: same as saveGame() above -- kind A, playerm->local()'s own inventory.
+	saveExtendedItems(save_storage_items, playerm->inventoryFor(playerm->local_id));
 }
 
 void SaveLoad::saveExtendedItems(bool save_storage_items, PlayerInventory* inventory) {
@@ -423,7 +430,8 @@ void SaveLoad::saveExtendedItems(bool save_storage_items, PlayerInventory* inven
  * When loading the game, load from file if possible
  */
 void SaveLoad::loadGame() {
-	loadGame(pc, pinv, pab, pbs);
+	// P2.3b: same as saveGame() above -- kind A, playerm->local() and its three siblings.
+	loadGame(playerm->local(), playerm->inventoryFor(playerm->local_id), playerm->actionbarFor(playerm->local_id), playerm->powerbonusFor(playerm->local_id));
 }
 
 void SaveLoad::loadGame(Avatar* avatar, PlayerInventory* inventory, ActionBarState* actionbar, PowerBonusState* powerbonus) {
@@ -634,7 +642,8 @@ void SaveLoad::loadGame(Avatar* avatar, PlayerInventory* inventory, ActionBarSta
  * Load a class definition, index
  */
 void SaveLoad::loadClass(int index) {
-	loadClass(index, pc, pinv, pab, pbs);
+	// P2.3b: same as saveGame() above -- kind A, playerm->local() and its three siblings.
+	loadClass(index, playerm->local(), playerm->inventoryFor(playerm->local_id), playerm->actionbarFor(playerm->local_id), playerm->powerbonusFor(playerm->local_id));
 }
 
 void SaveLoad::loadClass(int index, Avatar* avatar, PlayerInventory* inventory, ActionBarState* actionbar, PowerBonusState* powerbonus) {

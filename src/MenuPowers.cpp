@@ -997,7 +997,7 @@ void MenuPowers::createTooltip(TooltipData* tip_data, MenuPowersCell* pcell, Pow
 
 	if (pwr->passive) tip_data->addText(msg->get("Passive"));
 	if (pwr->description != "") {
-		tip_data->addColoredText(Utils::substituteVarsInString(pwr->description, pc), font->getColor(FontEngine::COLOR_ITEM_FLAVOR));
+		tip_data->addColoredText(Utils::substituteVarsInString(pwr->description, player), font->getColor(FontEngine::COLOR_ITEM_FLAVOR));
 	}
 
 	// add mana cost

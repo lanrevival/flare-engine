@@ -297,7 +297,7 @@ void MenuTalker::createBuffer() {
 	label_name->setFont(font_who);
 
 
-	line = Utils::substituteVarsInString(npc->dialog[dialog_node][event_cursor].s, pc);
+	line = Utils::substituteVarsInString(npc->dialog[dialog_node][event_cursor].s, player);
 
 	// render dialog text to the scrollbox buffer
 	Point line_size = font->calcSizeWrapped(line,textbox->pos.w-(text_offset.x*2));

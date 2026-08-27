@@ -30,6 +30,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "InputState.h"
 #include "MenuBook.h"
 #include "MessageEngine.h"
+#include "PlayerManager.h"
 #include "RenderDevice.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
@@ -395,7 +396,8 @@ void MenuBook::refreshText() {
 	for (size_t i = text.size(); i > 0;) {
 		i--;
 
-		std::string text_new = Utils::substituteVarsInString(msg->get(text[i].text_raw), pc);
+		// P2.3b: same MenuLog.cpp omission/fix -- kind A, playerm->local().
+		std::string text_new = Utils::substituteVarsInString(msg->get(text[i].text_raw), playerm->local());
 		if (text[i].text == text_new)
 			continue;
 

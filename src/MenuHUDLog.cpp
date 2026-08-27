@@ -28,6 +28,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "InputState.h"
 #include "Menu.h"
 #include "MenuHUDLog.h"
+#include "PlayerManager.h"
 #include "RenderDevice.h"
 #include "SharedResources.h"
 #include "SharedGameResources.h"
@@ -223,8 +224,8 @@ void MenuHUDLog::add(const std::string& s, int type) {
 
 	// Make sure we don't spam the same message repeatedly
 	if (log_msg.empty() || log_msg.back() != s || type == MSG_UNIQUE) {
-		// add new message
-		log_msg.push_back(Utils::substituteVarsInString(s, pc));
+		// add new message. P2.3b: same MenuLog.cpp omission/fix -- kind A, playerm->local().
+		log_msg.push_back(Utils::substituteVarsInString(s, playerm->local()));
 		msg_age.push_back(calcDuration(log_msg.back()));
 
 		// render the log entry and store it in a buffer

@@ -490,7 +490,11 @@ void GameStateNew::logic() {
 		delete_items = false;
 		showLoading();
 		GameStatePlay* play = new GameStatePlay();
-		Avatar *avatar = pc;
+		// P2.3b: GameStateNew wasn't in P2.3's own file list -- deliberately left alone there
+		// (see P2.3's own report), since it still has no bound player member. playerm->local() is
+		// already valid here: GameStatePlay's constructor (just run, above) calls
+		// playerm->setLocal(0) -- kind A, the local player, same as every other menu/state.
+		Avatar *avatar = playerm->local();
 		avatar->stats.gfx_base = hero_options[current_option].base;
 		avatar->stats.gfx_head = hero_options[current_option].head;
 		avatar->stats.gfx_portrait = hero_options[current_option].portrait;

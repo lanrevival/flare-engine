@@ -27,6 +27,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuLog.h"
 #include "MessageEngine.h"
 #include "ModManager.h"
+#include "PlayerManager.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
 #include "SoundManager.h"
@@ -163,7 +164,12 @@ void MenuLog::render() {
  * Add a new message to the log.
  */
 void MenuLog::add(const std::string& s, int log_type, int msg_type) {
-	log[log_type]->add(Utils::substituteVarsInString(s, pc), msg_type);
+	// P2.3b: MenuLog wasn't in P2.3's own file list (a real omission -- this call site passed the
+	// bare global by value, with no arrow, so it did not show up in that plan's own discovery grep
+	// either -- see plans/phase2/P2.3b-delete-player-globals.md). playerm->local() directly,
+	// rather than a constructor parameter, avoids touching MenuManager.cpp's construction call
+	// (out of this plan's scope) -- kind A, the local player, same as every other menu.
+	log[log_type]->add(Utils::substituteVarsInString(s, playerm->local()), msg_type);
 }
 
 void MenuLog::setNextColor(const Color& color, int log_type) {
