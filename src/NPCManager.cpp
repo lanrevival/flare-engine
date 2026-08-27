@@ -36,6 +36,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "NPC.h"
 #include "NPCManager.h"
 #include "RenderDevice.h"
+#include "PlayerManager.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
 #include "WidgetTooltip.h"
@@ -48,12 +49,16 @@ NPCManager::NPCManager()
 }
 
 void NPCManager::addRenders(std::vector<Renderable> &r) {
+	// This client's own render list -- always playerm->local(), same reasoning as
+	// LootManager::addRenders().
+	Avatar* local = playerm->local();
+
 	for (unsigned i=0; i<npcs.size(); i++) {
 		if (mapr && wmap->collider.isOutsideMap(npcs[i]->stats.pos.x, npcs[i]->stats.pos.y))
 			continue;
 
-		if (wmap->fogofwar > FogOfWar::TYPE_MINIMAP) {
-			float delta = Utils::calcDist(pc->stats.pos, npcs[i]->stats.pos);
+		if (wmap->fogofwar > FogOfWar::TYPE_MINIMAP && local) {
+			float delta = Utils::calcDist(local->stats.pos, npcs[i]->stats.pos);
 			if (delta > fow->mask_radius-1.0) {
 				continue;
 			}
@@ -126,12 +131,22 @@ void NPCManager::handleNewMap() {
 			Utils::logInfo("NPC: Collision tile detected at NPC position (%.2f, %.2f).", npc->stats.pos.x, npc->stats.pos.y);
 	}
 
+	// Persistent ally NPCs (quest companions) that followed the party from the previous map need
+	// an anchor point on this one. There's no per-player companion-ownership concept yet (that's
+	// later phases' territory, same as the party-average decision Map.cpp:153 needed for
+	// spawn_level=hero_level -- D15), so this keeps the pre-P2.2 simplification of anchoring to
+	// playerm->local() rather than guessing at a party-position policy the plan doesn't specify.
+	// Single-player behavior is unchanged either way.
+	Avatar* local = playerm->local();
+
 	while (!allies.empty()) {
 		NPC *npc = allies.begin()->second;
 		allies.erase(allies.begin());
 
-		npc->stats.pos = wmap->collider.getRandomNeighbor(Point(pc->stats.pos), 1, npc->stats.movement_type, MapCollision::COLLIDE_TYPE_ALL_ENTITIES);
-		npc->stats.direction = pc->stats.direction;
+		if (local) {
+			npc->stats.pos = wmap->collider.getRandomNeighbor(Point(local->stats.pos), 1, npc->stats.movement_type, MapCollision::COLLIDE_TYPE_ALL_ENTITIES);
+			npc->stats.direction = local->stats.direction;
+		}
 
 		npcs.push_back(npc);
 		createMapEvent(*npc, npcs.size());
