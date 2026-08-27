@@ -31,6 +31,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Hazard.h"
 #include "HazardManager.h"
 #include "MapRenderer.h"
+#include "PlayerManager.h"
 #include "PowerManager.h"
 #include "RenderDevice.h"
 #include "Rng.h"
@@ -139,13 +140,18 @@ void HazardManager::logic() {
 			}
 
 			// process hazards that can hurt the hero
+			// P2.2 step (kind C): with several players, a hazard can hit any/all of them
+			// independently -- checked and applied per player, not just the single old pc.
 			if (hazard->source_type != Power::SOURCE_TYPE_HERO && hazard->source_type != Power::SOURCE_TYPE_ALLY) { //enemy or neutral sources
-				if (pc->stats.hp > 0 && hazard->active) {
-					if (Utils::isWithinRadius(hazard->pos, hazard->power->radius, pc->stats.pos)) {
-						if (!hazard->hasEntity(pc)) {
-							// hit!
-							hazard->addEntity(pc);
-							hitEntity(hindex, pc->takeHit(*hazard));
+				for (size_t pindex = 0; pindex < playerm->players.size(); ++pindex) {
+					Avatar* player = playerm->players[pindex];
+					if (player->stats.hp > 0 && hazard->active) {
+						if (Utils::isWithinRadius(hazard->pos, hazard->power->radius, player->stats.pos)) {
+							if (!hazard->hasEntity(player)) {
+								// hit!
+								hazard->addEntity(player);
+								hitEntity(hindex, player->takeHit(*hazard));
+							}
 						}
 					}
 				}

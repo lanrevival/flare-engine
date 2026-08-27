@@ -39,6 +39,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuPowers.h"
 #include "MessageEngine.h"
 #include "ModManager.h"
+#include "PlayerManager.h"
 #include "PowerManager.h"
 #include "Rng.h"
 #include "Settings.h"
@@ -916,7 +917,16 @@ void StatBlock::takeDamage(float dmg, bool crit, int source_type) {
 				if (source_type == Power::SOURCE_TYPE_ALLY)
 					xp_multiplier = eset->misc.party_exp_percentage / 100.0f;
 
-				xp_multiplier *= xp_scaling->getMultiplier(this, &(pc->stats));
+				// Same "no killer identity tracked" gap as LootManager's checkEnemiesForLoot()/
+				// EntityManager's map-enemy spawn level (P2.2) -- nothing in this codebase
+				// records who actually killed an enemy, so the level-difference XP scaling below
+				// keeps the pre-P2.2 simplification of playerm->local(). camp->rewardXP() right
+				// below this also defaults to local() for the same reason. Real per-player XP
+				// attribution is P2.4/P5.1 territory (XP sharing/party-size rules), explicitly
+				// out of scope here.
+				Avatar* local = playerm->local();
+				if (local)
+					xp_multiplier *= xp_scaling->getMultiplier(this, &(local->stats));
 
 				camp->rewardXP(static_cast<float>(xp) * xp_multiplier, !CampaignManager::XP_SHOW_MSG);
 
@@ -1128,7 +1138,19 @@ void StatBlock::logic() {
 	// HP regen
 	if (hp <= get(Stats::HP_MAX) && hp > 0) {
 		float hp_regen_per_frame = 0;
-		if (!in_combat && !hero_ally && !hero && pc->stats.alive) {
+
+		// Kind B: "is there an alive player anywhere" (not distance-gated -- the original
+		// single-player check wasn't either), so this is a plain any-alive scan rather than
+		// PlayerManager::anyAliveWithin(), which needs a position/range this check doesn't have.
+		bool any_player_alive = false;
+		for (size_t i = 0; i < playerm->players.size(); ++i) {
+			if (playerm->players[i]->stats.alive) {
+				any_player_alive = true;
+				break;
+			}
+		}
+
+		if (!in_combat && !hero_ally && !hero && any_player_alive) {
 			if (resting_hp_regen_seconds > 0) {
 				// enemies heal rapidly (full heal in 5 seconds) while not in combat
 				hp_regen_per_frame = get(Stats::HP_MAX) / resting_hp_regen_seconds / Settings::SIM_TICK_HZ;
@@ -1584,9 +1606,27 @@ bool StatBlock::checkRequiredSpawns(int req_amount) const {
 	return true;
 }
 
+// P2.2: getPowerCooldown()/setPowerCooldown() below used to read/write the single global pc's
+// power_cooldown_timers regardless of which player's StatBlock `this` actually was -- an
+// aliasing bug of exactly the shape flagged in the P2.2 plan (every player's cooldown silently
+// redirected to whichever one was local()). power_cooldown_timers lives on Avatar, not
+// StatBlock, so there's no direct pointer back; this resolves it by identity match against
+// playerm's parallel arrays. With one player this is the same player every time, so behaviour
+// is unchanged; with several, each player's own cooldowns are now read/written correctly.
+static Avatar* findOwningAvatar(const StatBlock* stats) {
+	for (size_t i = 0; i < playerm->players.size(); ++i) {
+		if (&playerm->players[i]->stats == stats)
+			return playerm->players[i];
+	}
+	return NULL;
+}
+
 int StatBlock::getPowerCooldown(PowerID power_id) {
 	if (hero) {
-		return pc->power_cooldown_timers[power_id]->getDuration();
+		Avatar* owner = findOwningAvatar(this);
+		if (owner)
+			return owner->power_cooldown_timers[power_id]->getDuration();
+		return 0;
 	}
 	else {
 		for (size_t i = 0; i < powers_ai.size(); ++i) {
@@ -1600,7 +1640,9 @@ int StatBlock::getPowerCooldown(PowerID power_id) {
 
 void StatBlock::setPowerCooldown(PowerID power_id, int power_cooldown) {
 	if (hero) {
-		pc->power_cooldown_timers[power_id]->setDuration(power_cooldown);
+		Avatar* owner = findOwningAvatar(this);
+		if (owner)
+			owner->power_cooldown_timers[power_id]->setDuration(power_cooldown);
 	}
 	else {
 		for (size_t i = 0; i < powers_ai.size(); ++i) {
