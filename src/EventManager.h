@@ -26,6 +26,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "CommonIncludes.h"
 #include "Utils.h"
 
+class Avatar;
 class FileParser;
 
 class EventComponent {
@@ -170,16 +171,23 @@ public:
 	void loadEventComponent(FileParser &infile, Event* evnt, EventComponent* ec);
 	bool loadEventComponentString(std::string &key, std::string &val, Event* evnt, EventComponent* ec);
 
-	bool executeEvent(Event &e);
-	bool executeDelayedEvent(Event &e);
-	bool isActive(const Event &e);
+	// P2.2 kind-A migration, same shape and same caveat as CampaignManager's: `triggered_by` is
+	// the player this event's per-player requirements/rewards/messages should act on. It
+	// defaults to NULL, which resolves to playerm->local() -- the pre-P2.2 single-player
+	// behavior. Every current caller (Map.cpp, MapRenderer.cpp, MenuBook.cpp,
+	// MenuDevConsole.cpp, MenuMiniMap.cpp, NPC.cpp) is itself still single-player-shaped and out
+	// of scope for P2.2, so none of them pass a real value yet -- this is the plumbing, not yet
+	// the wiring. See the P2.2 report.
+	bool executeEvent(Event &e, Avatar* triggered_by = NULL);
+	bool executeDelayedEvent(Event &e, Avatar* triggered_by = NULL);
+	bool isActive(const Event &e, Avatar* triggered_by = NULL);
 	void executeScript(const std::string& filename, float x, float y);
 
 	std::string getIntermapIDString(size_t index);
 
 private:
 	static const bool SKIP_DELAY = true;
-	bool executeEventInternal(Event &e, bool skip_delay);
+	bool executeEventInternal(Event &e, bool skip_delay, Avatar* triggered_by);
 	EventComponent getRandomMapFromFile(const std::string& fname);
 	size_t getIntermapID(const std::string& s);
 

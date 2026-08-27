@@ -30,6 +30,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MessageEngine.h"
 #include "ModManager.h"
 #include "PlayerInventory.h"
+#include "PlayerManager.h"
 #include "PowerManager.h"
 #include "Rng.h"
 #include "Settings.h"
@@ -921,12 +922,12 @@ bool EventManager::loadEventComponentString(std::string &key, std::string &val, 
 	return true;
 }
 
-bool EventManager::executeEvent(Event &e) {
-	return executeEventInternal(e, !SKIP_DELAY);
+bool EventManager::executeEvent(Event &e, Avatar* triggered_by) {
+	return executeEventInternal(e, !SKIP_DELAY, triggered_by);
 }
 
-bool EventManager::executeDelayedEvent(Event &e) {
-	return executeEventInternal(e, SKIP_DELAY);
+bool EventManager::executeDelayedEvent(Event &e, Avatar* triggered_by) {
+	return executeEventInternal(e, SKIP_DELAY, triggered_by);
 }
 
 /**
@@ -935,9 +936,12 @@ bool EventManager::executeDelayedEvent(Event &e) {
  *
  * @param The triggered event
  * @param Delay ignore flag
+ * @param The player this event's per-player components (REQUIRES_ checks, REWARD_ grants,
+ *        RESTORE, MSG, etc.) act on. NULL resolves to playerm->local() -- see the header comment.
  * @return Returns true if the event shall not be run again.
  */
-bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
+bool EventManager::executeEventInternal(Event &ev, bool skip_delay, Avatar* triggered_by) {
+	Avatar* target = triggered_by ? triggered_by : playerm->local();
 	// skip executing events that are on cooldown
 	if (!ev.delay.isEnd() || !ev.cooldown.isEnd()) return false;
 
@@ -1011,7 +1015,7 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 			}
 			else {
 				ev.keep_after_trigger = false;
-				pc->logMsg(msg->get("Unknown destination"), Avatar::MSG_UNIQUE);
+				if (target) target->logMsg(msg->get("Unknown destination"), Avatar::MSG_UNIQUE);
 				Utils::logInfo("EventManager: Unknown intermap destination (%s)", ec->s.c_str());
 			}
 		}
@@ -1149,7 +1153,7 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 			}
 		}
 		else if (ec->type == EventComponent::MSG) {
-			pc->logMsg(ec->s, Avatar::MSG_UNIQUE);
+			if (target) target->logMsg(ec->s, Avatar::MSG_UNIQUE);
 		}
 		else if (ec->type == EventComponent::SHAKYCAM) {
 			// mapr is NULL on a headless server (P1.4c) -- no camera to shake.
@@ -1158,22 +1162,22 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 			inpt->joystickRumble(InputState::JOYSTICK_RUMBLE_STRENGTH, InputState::JOYSTICK_RUMBLE_STRENGTH, (ec->data[0].Int * 1000) / Settings::SIM_TICK_HZ);
 		}
 		else if (ec->type == EventComponent::REMOVE_CURRENCY) {
-			camp->removeCurrency(ec->data[0].Int);
+			camp->removeCurrency(ec->data[0].Int, target);
 		}
 		else if (ec->type == EventComponent::REMOVE_ITEM) {
-			camp->removeItem(ItemStack(ec->id, ec->data[0].Int));
+			camp->removeItem(ItemStack(ec->id, ec->data[0].Int), target);
 		}
 		else if (ec->type == EventComponent::REWARD_XP) {
-			camp->rewardXP(static_cast<float>(ec->data[0].Int), CampaignManager::XP_SHOW_MSG);
+			camp->rewardXP(static_cast<float>(ec->data[0].Int), CampaignManager::XP_SHOW_MSG, target);
 		}
 		else if (ec->type == EventComponent::REWARD_CURRENCY) {
-			camp->rewardCurrency(ec->data[0].Int);
+			camp->rewardCurrency(ec->data[0].Int, target);
 		}
 		else if (ec->type == EventComponent::REWARD_ITEM) {
 			std::vector<ItemStack> ex_stacks;
 			items->getExtendedStacks(ec->id, ec->data[0].Int, ex_stacks);
 			for (size_t j = 0; j < ex_stacks.size(); ++j) {
-				camp->rewardItem(ex_stacks[j]);
+				camp->rewardItem(ex_stacks[j], target);
 			}
 		}
 		else if (ec->type == EventComponent::REWARD_LOOT) {
@@ -1196,13 +1200,13 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 			}
 			for (size_t j = 0; j < rand_itemstacks.size(); ++j) {
 				if (rand_itemstacks[j].item == eset->misc.currency_id)
-					camp->rewardCurrency(rand_itemstacks[j].quantity);
+					camp->rewardCurrency(rand_itemstacks[j].quantity, target);
 				else
-					camp->rewardItem(rand_itemstacks[j]);
+					camp->rewardItem(rand_itemstacks[j], target);
 			}
 		}
 		else if (ec->type == EventComponent::RESTORE) {
-			camp->restoreHPMP(ec->s);
+			camp->restoreHPMP(ec->s, target);
 		}
 		else if (ec->type == EventComponent::SPAWN) {
 			Point spawn_pos;
@@ -1212,29 +1216,31 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 		}
 		else if (ec->type == EventComponent::POWER) {
 			EventComponent *ec_path = ev.getComponent(EventComponent::POWER_PATH);
-			FPoint target;
+			// Named power_target, not target, to avoid shadowing the Avatar* target resolved at
+			// the top of this function (the "targets hero option" below reads that one).
+			FPoint power_target;
 
 			if (ec_path) {
 				// targets hero option
-				if (ec_path->data[4].Bool) {
-					target.x = pc->stats.pos.x;
-					target.y = pc->stats.pos.y;
+				if (ec_path->data[4].Bool && target) {
+					power_target.x = target->stats.pos.x;
+					power_target.y = target->stats.pos.y;
 				}
 				// targets fixed path option
 				else {
-					target.x = static_cast<float>(ec_path->data[2].Int) + 0.5f;
-					target.y = static_cast<float>(ec_path->data[3].Int) + 0.5f;
+					power_target.x = static_cast<float>(ec_path->data[2].Int) + 0.5f;
+					power_target.y = static_cast<float>(ec_path->data[3].Int) + 0.5f;
 				}
 			}
 			// no path specified, targets self location
 			else {
-				target.x = static_cast<float>(ev.location.x) + 0.5f;
-				target.y = static_cast<float>(ev.location.y) + 0.5f;
+				power_target.x = static_cast<float>(ev.location.x) + 0.5f;
+				power_target.y = static_cast<float>(ev.location.y) + 0.5f;
 			}
 
 			// ec->id is power id
 			// ec->data[0] is statblock index
-			wmap->activatePower(ec->id, ec->data[0].Int, target);
+			wmap->activatePower(ec->id, ec->data[0].Int, power_target);
 		}
 		else if (ec->type == EventComponent::STASH) {
 			wmap->stash = ec->data[0].Bool;
@@ -1273,40 +1279,47 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 		else if (ec->type == EventComponent::SCRIPT) {
 			if (ev.center.x != -1 && ev.center.y != -1)
 				executeScript(ec->s, ev.center.x, ev.center.y);
-			else
-				executeScript(ec->s, pc->stats.pos.x, pc->stats.pos.y);
+			else if (target)
+				executeScript(ec->s, target->stats.pos.x, target->stats.pos.y);
 		}
-		else if (ec->type == EventComponent::RESPEC) {
+		else if (ec->type == EventComponent::RESPEC && target) {
+			// Kind A by construction -- RESPEC fires for the player who triggered it. `target`
+			// carries that identity correctly now; GameStatePlay's tick (out of scope for P2.2,
+			// P1.3f's one-shot-flag plumbing) still only reads respec_powers off its own pc
+			// alias, so with more than one Avatar able to carry this flag, only the local
+			// player's flag is actually consumed today. That consumption-side gap is real and is
+			// P2.3/P1.3h territory, not something fixed by this file alone -- see the P2.2 report.
 			bool use_engine_defaults = ec->data[1].Bool;
 			EngineSettings::HeroClasses::HeroClass* pc_class;
-			pc_class = eset->hero_classes.getByName(pc->stats.character_class);
+			pc_class = eset->hero_classes.getByName(target->stats.character_class);
 
 			if (ec->data[0].Int == 3) {
 				// xp
-				pc->stats.level = 1;
-				pc->stats.xp = 0;
+				target->stats.level = 1;
+				target->stats.xp = 0;
 			}
 			if (ec->data[0].Int >= 2) {
 				// stats
 				for (size_t j = 0; j < eset->primary_stats.list.size(); ++j) {
-					pc->stats.primary[j] = 1;
-					pc->stats.primary_additional[j] = 0;
+					target->stats.primary[j] = 1;
+					target->stats.primary_additional[j] = 0;
 
 					if (pc_class && !use_engine_defaults) {
-						pc->stats.primary[j] += pc_class->primary[j];
-						pc->stats.primary_starting[j] = pc->stats.primary[j];
+						target->stats.primary[j] += pc_class->primary[j];
+						target->stats.primary_starting[j] = target->stats.primary[j];
 					}
 				}
 
-				pc->stats.recalc();
-				pinv->applyEquipment();
-				pc->stats.logic();
+				target->stats.recalc();
+				PlayerInventory* target_inv = playerm->inventoryFor(target->id);
+				if (target_inv) target_inv->applyEquipment();
+				target->stats.logic();
 			}
 			if (ec->data[0].Int >= 1) {
 				// powers
-				pc->stats.powers_list.clear();
-				pc->stats.powers_passive.clear();
-				pc->stats.effects.clearEffects();
+				target->stats.powers_list.clear();
+				target->stats.powers_passive.clear();
+				target->stats.effects.clearEffects();
 
 				// The skill-tree unlock/notification refresh below is MenuPowers/MenuActionBar work --
 				// it re-derives which tree nodes are purchasable and refreshes widgets, none of which
@@ -1315,11 +1328,11 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 				// is unchanged; a dedicated server defers it forever, which is a real, known gap (no
 				// skill-tree auto-unlock on RESPEC without a menu) tracked as P1.3h in the roadmap
 				// rather than guessed at here.
-				pc->respec_powers = true;
-				pc->respec_use_engine_defaults = use_engine_defaults;
+				target->respec_powers = true;
+				target->respec_use_engine_defaults = use_engine_defaults;
 
-				pc->respawn = true; // re-applies equipment, also revives the player
-				pc->stats.refresh_stats = true;
+				target->respawn = true; // re-applies equipment, also revives the player
+				target->stats.refresh_stats = true;
 			}
 		}
 		else if (ec->type == EventComponent::PARALLAX_LAYERS) {
@@ -1345,8 +1358,8 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay) {
 }
 
 
-bool EventManager::isActive(const Event &e) {
-	return camp->checkRequirementsInVector(e.components);
+bool EventManager::isActive(const Event &e, Avatar* triggered_by) {
+	return camp->checkRequirementsInVector(e.components, triggered_by);
 }
 
 void EventManager::executeScript(const std::string& filename, float x, float y) {
