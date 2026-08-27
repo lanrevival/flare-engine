@@ -77,6 +77,7 @@ int Filesystem::getFileList(const std::string &dir, const std::string &ext, std:
 		return errno;
 
 	size_t extlen = ext.length();
+	size_t first_new = files.size();
 	while ((dirp = readdir(dp)) != NULL) {
 		std::string filename = std::string(dirp->d_name);
 		if (filename.length() > extlen)
@@ -84,6 +85,14 @@ int Filesystem::getFileList(const std::string &dir, const std::string &ext, std:
 				files.push_back(convertSlashes(dir + "/" + filename));
 	}
 	closedir(dp);
+
+	// readdir() order is filesystem-dependent, not portable. Callers that feed this list into
+	// anything RNG-indexed (e.g. EnemyGroupManager's candidate pools) need identical ordering
+	// on every platform, or the same seeded draw picks a different entry. Sort just the entries
+	// this call added, so callers that build up a list across multiple directories (mods
+	// overriding a base dir) keep their existing precedence between directories.
+	std::sort(files.begin() + static_cast<std::ptrdiff_t>(first_new), files.end());
+
 	return 0;
 }
 
@@ -100,6 +109,7 @@ int Filesystem::getDirList(const std::string &dir, std::vector<std::string> &dir
 		return errno;
 	}
 
+	size_t first_new = dirs.size();
 	while ((dirp = readdir(dp)) != NULL) {
 		//	do not use dirp->d_type, it's not portable
 		std::string directory = std::string(dirp->d_name);
@@ -113,6 +123,11 @@ int Filesystem::getDirList(const std::string &dir, std::vector<std::string> &dir
 		}
 	}
 	closedir(dp);
+
+	// See the matching comment in getFileList(): readdir() order is not portable, so sort the
+	// entries this call added (only those, to preserve precedence between separate calls).
+	std::sort(dirs.begin() + static_cast<std::ptrdiff_t>(first_new), dirs.end());
+
 	return 0;
 }
 
