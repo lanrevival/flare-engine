@@ -26,15 +26,15 @@ FLARE.  If not, see http://www.gnu.org/licenses/
  * P2.1-DESIGN-playermanager-shape.md for why this is four parallel arrays here rather than four
  * fields folded onto Avatar itself.
  *
- * The four SharedGameResources.h globals (Avatar/PlayerInventory/ActionBarState/PowerBonusState
- * pointers, named pc/pinv/pab/pbs) are compatibility aliases for whichever player is local() --
- * setLocal() keeps them in sync. Every reference to one of the four in the tree kept working
- * unchanged while P2.2 and P2.3 migrated consumers off them in reviewable batches, file by file,
- * onto explicit local-player bindings instead. As of P2.3, the sim (P2.2) and the 16 UI/save files
- * in its own scope (P2.3) no longer read the aliases -- but several files outside both plans'
- * scope (main_server.cpp and a handful of other client GameState*.cpp files) still do, so the
- * four names themselves are not yet deleted. See plans/phase2/P2.3-migrate-ui-consumers.md's
- * executor report for the accounting.
+ * Through P2.3, SharedGameResources.h also declared four compatibility-alias globals (Avatar/
+ * PlayerInventory/ActionBarState/PowerBonusState pointers, named pc/pinv/pab/pbs) that setLocal()
+ * kept pointed at whichever player was local(), so every pre-P2.1 consumer of the single-player
+ * globals kept compiling unchanged while P2.2 and P2.3 migrated them onto explicit bindings in
+ * reviewable batches. P2.3b (plans/phase2/P2.3b-delete-player-globals.md) finished that migration
+ * -- PlayerInventory/ActionBarState/PowerBonusState now carry their own owner/sibling back-pointers
+ * (set right here in create(), below) instead of reaching for a global, and the four alias globals
+ * are gone entirely: get()/inventoryFor()/actionbarFor()/powerbonusFor()/local() are the only way
+ * to reach a player's state now, for any player including local().
  */
 
 #ifndef PLAYER_MANAGER_H
@@ -62,9 +62,8 @@ public:
 	 * for an id already present is a no-op (returns the existing id; nothing is reallocated). */
 	PlayerID create(PlayerID id);
 
-	/** Frees all four objects for this id and removes them from the parallel arrays. If id is
-	 * the current local(), the pc/pinv/pab/pbs aliases are reset to NULL -- the same NULL-ing
-	 * GameStatePlay's destructor used to do inline. A remove() for an id not present is a no-op. */
+	/** Frees all four objects for this id and removes them from the parallel arrays. A remove()
+	 * for an id not present is a no-op. */
 	void remove(PlayerID id);
 
 	Avatar*          get(PlayerID id);
@@ -75,8 +74,8 @@ public:
 	/** The client's own player; NULL on a server with no local player, or before setLocal(). */
 	Avatar* local();
 
-	/** Points pc/pinv/pab/pbs at whichever player local_id now names. Must be called again
-	 * whenever local_id changes, not only at creation. */
+	/** Records which player local() now names. Must be called again whenever local_id changes,
+	 * not only at creation. */
 	void setLocal(PlayerID id);
 
 	size_t count() const;

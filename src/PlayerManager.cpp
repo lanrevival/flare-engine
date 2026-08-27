@@ -21,7 +21,6 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Avatar.h"
 #include "PlayerInventory.h"
 #include "PowerBonusState.h"
-#include "SharedGameResources.h"
 #include "StatBlock.h"
 #include "Utils.h"
 
@@ -104,15 +103,6 @@ void PlayerManager::remove(PlayerID id) {
 	inventories.erase(inventories.begin() + static_cast<std::vector<PlayerInventory*>::difference_type>(i));
 	actionbars.erase(actionbars.begin() + static_cast<std::vector<ActionBarState*>::difference_type>(i));
 	powerbonuses.erase(powerbonuses.begin() + static_cast<std::vector<PowerBonusState*>::difference_type>(i));
-
-	// Same NULL-ing GameStatePlay::~GameStatePlay() used to do inline, right after its own
-	// delete pc/pinv/pab/pbs block.
-	if (id == local_id) {
-		pc = NULL;
-		pinv = NULL;
-		pab = NULL;
-		pbs = NULL;
-	}
 }
 
 Avatar* PlayerManager::get(PlayerID id) {
@@ -141,10 +131,6 @@ Avatar* PlayerManager::local() {
 
 void PlayerManager::setLocal(PlayerID id) {
 	local_id = id;
-	pc = get(local_id);
-	pinv = inventoryFor(local_id);
-	pab = actionbarFor(local_id);
-	pbs = powerbonusFor(local_id);
 }
 
 size_t PlayerManager::count() const {
