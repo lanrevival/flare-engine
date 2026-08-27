@@ -40,6 +40,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 class Avatar;
 class ActionBarState;
+class FPoint;
 class PlayerInventory;
 class PowerBonusState;
 
@@ -74,6 +75,23 @@ public:
 	void setLocal(PlayerID id);
 
 	size_t count() const;
+
+	/** Nearest player (by any state) to pos, within max_range (0 = unlimited). NULL if no
+	 * players exist or none are within range. Ties (exactly equal distance) break on the lower
+	 * PlayerID, deterministically -- never on iteration/insertion order and never on float
+	 * comparison alone, since two enemies picking different targets from identical state is a
+	 * desync. players is kept sorted by id (see the field comment below), so a plain
+	 * strictly-less-than compare while walking front-to-back already implements "lower id wins
+	 * a tie" for free -- no separate tiebreak branch needed. */
+	Avatar* nearestTo(const FPoint& pos, float max_range = 0.f);
+
+	/** Same as nearestTo(), restricted to players with stats.alive true. NULL if no players
+	 * exist, none are alive, or none alive are within range -- never dereferences a dead or
+	 * absent player. */
+	Avatar* nearestAliveTo(const FPoint& pos, float max_range = 0.f);
+
+	/** True if at least one *alive* player is within range of pos. */
+	bool anyAliveWithin(const FPoint& pos, float range);
 
 	// Parallel, kept in lockstep by id: players[i]/inventories[i]/actionbars[i]/powerbonuses[i]
 	// always describe the same player. Sorted by id -- iteration order must stay stable, since

@@ -22,6 +22,8 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "PlayerInventory.h"
 #include "PowerBonusState.h"
 #include "SharedGameResources.h"
+#include "StatBlock.h"
+#include "Utils.h"
 
 PlayerManager::PlayerManager()
 	: players()
@@ -138,4 +140,54 @@ void PlayerManager::setLocal(PlayerID id) {
 
 size_t PlayerManager::count() const {
 	return players.size();
+}
+
+Avatar* PlayerManager::nearestTo(const FPoint& pos, float max_range) {
+	Avatar* nearest = NULL;
+	float nearest_dist = 0.f;
+
+	// players is kept sorted by id (see the field comment in PlayerManager.h), so walking it
+	// front-to-back and only replacing nearest on a *strictly smaller* distance means an exact
+	// tie keeps whichever candidate has the lower id -- deterministic, no separate tiebreak
+	// branch, and independent of any other iteration order.
+	for (size_t i = 0; i < players.size(); ++i) {
+		float dist = Utils::calcDist(pos, players[i]->stats.pos);
+		if (max_range > 0.f && dist > max_range)
+			continue;
+		if (nearest == NULL || dist < nearest_dist) {
+			nearest = players[i];
+			nearest_dist = dist;
+		}
+	}
+
+	return nearest;
+}
+
+Avatar* PlayerManager::nearestAliveTo(const FPoint& pos, float max_range) {
+	Avatar* nearest = NULL;
+	float nearest_dist = 0.f;
+
+	for (size_t i = 0; i < players.size(); ++i) {
+		if (!players[i]->stats.alive)
+			continue;
+		float dist = Utils::calcDist(pos, players[i]->stats.pos);
+		if (max_range > 0.f && dist > max_range)
+			continue;
+		if (nearest == NULL || dist < nearest_dist) {
+			nearest = players[i];
+			nearest_dist = dist;
+		}
+	}
+
+	return nearest;
+}
+
+bool PlayerManager::anyAliveWithin(const FPoint& pos, float range) {
+	for (size_t i = 0; i < players.size(); ++i) {
+		if (!players[i]->stats.alive)
+			continue;
+		if (Utils::calcDist(pos, players[i]->stats.pos) <= range)
+			return true;
+	}
+	return false;
 }
