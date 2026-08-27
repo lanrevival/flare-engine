@@ -31,9 +31,12 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "GameState.h"
 #include "Utils.h"
 
+class ActionBarState;
 class Avatar;
 class Entity;
 class MenuManager;
+class PlayerInventory;
+class PowerBonusState;
 class QuestLog;
 class WidgetLabel;
 
@@ -107,6 +110,16 @@ public:
 	void logic();
 	void render();
 	void resetGame();
+
+	/** Resolved once from playerm right after playerm->setLocal(0), in the constructor -- not a
+	 * global lookup at every use site. Every reference in this file is kind A (the player whose
+	 * screen this is): GameStatePlay is one client's own game loop, so the RESPEC/close_menus/
+	 * show_game_over flags it consumes are always this same player's own, even though they were
+	 * set by simulation code that only knows about "the triggering player". See P2.3. */
+	Avatar* player;
+	PlayerInventory* player_inventory;
+	ActionBarState* player_actionbar;
+	PowerBonusState* player_powerbonus;
 };
 
 #endif

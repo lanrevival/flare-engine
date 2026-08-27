@@ -26,10 +26,15 @@ FLARE.  If not, see http://www.gnu.org/licenses/
  * P2.1-DESIGN-playermanager-shape.md for why this is four parallel arrays here rather than four
  * fields folded onto Avatar itself.
  *
- * pc/pinv/pab/pbs (SharedGameResources.h) become compatibility aliases for whichever player is
- * local() -- setLocal() keeps them in sync. Every existing pc->/pinv->/pab->/pbs-> reference in
- * the tree keeps working unchanged; P2.2 and P2.3 migrate them off the aliases in reviewable
- * batches, and only then do the four global names get deleted.
+ * The four SharedGameResources.h globals (Avatar/PlayerInventory/ActionBarState/PowerBonusState
+ * pointers, named pc/pinv/pab/pbs) are compatibility aliases for whichever player is local() --
+ * setLocal() keeps them in sync. Every reference to one of the four in the tree kept working
+ * unchanged while P2.2 and P2.3 migrated consumers off them in reviewable batches, file by file,
+ * onto explicit local-player bindings instead. As of P2.3, the sim (P2.2) and the 16 UI/save files
+ * in its own scope (P2.3) no longer read the aliases -- but several files outside both plans'
+ * scope (main_server.cpp and a handful of other client GameState*.cpp files) still do, so the
+ * four names themselves are not yet deleted. See plans/phase2/P2.3-migrate-ui-consumers.md's
+ * executor report for the accounting.
  */
 
 #ifndef PLAYER_MANAGER_H

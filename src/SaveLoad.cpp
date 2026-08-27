@@ -75,6 +75,10 @@ SaveLoad::~SaveLoad() {
  * Before exiting the game, save to file
  */
 void SaveLoad::saveGame() {
+	saveGame(pc, pinv, pab, pbs);
+}
+
+void SaveLoad::saveGame(Avatar* avatar, PlayerInventory* inventory, ActionBarState* actionbar, PowerBonusState* powerbonus) {
 
 	if (game_slot <= 0) return;
 
@@ -82,8 +86,8 @@ void SaveLoad::saveGame() {
 	Utils::createSaveDir(game_slot);
 
 	// remove items with zero quantity from inventory
-	pinv->inventory[PlayerInventory::EQUIPMENT].clean();
-	pinv->inventory[PlayerInventory::CARRIED].clean();
+	inventory->inventory[PlayerInventory::EQUIPMENT].clean();
+	inventory->inventory[PlayerInventory::CARRIED].clean();
 
 	std::ofstream outfile;
 
@@ -98,56 +102,56 @@ void SaveLoad::saveGame() {
 		outfile << "## flare-engine save file ##" << "\n";
 
 		// hero name
-		outfile << "name=" << pc->stats.name << "\n";
+		outfile << "name=" << avatar->stats.name << "\n";
 
 		// permadeath
-		outfile << "permadeath=" << pc->stats.permadeath << "\n";
+		outfile << "permadeath=" << avatar->stats.permadeath << "\n";
 
 		// hero visual option
 		outfile << "option=";
 
-		if (!pc->stats.gfx_base_original.empty())
-			outfile << pc->stats.gfx_base_original;
+		if (!avatar->stats.gfx_base_original.empty())
+			outfile << avatar->stats.gfx_base_original;
 		else
-			outfile << pc->stats.gfx_base;
+			outfile << avatar->stats.gfx_base;
 
 		outfile << ",";
 
-		if (!pc->stats.gfx_head_original.empty())
-			outfile << pc->stats.gfx_head_original;
+		if (!avatar->stats.gfx_head_original.empty())
+			outfile << avatar->stats.gfx_head_original;
 		else
-			outfile << pc->stats.gfx_head;
+			outfile << avatar->stats.gfx_head;
 
-		outfile << "," << pc->stats.gfx_portrait << "\n";
+		outfile << "," << avatar->stats.gfx_portrait << "\n";
 
 		// hero class
-		outfile << "class=" << pc->stats.character_class << "," << pc->stats.character_subclass << "\n";
+		outfile << "class=" << avatar->stats.character_class << "," << avatar->stats.character_subclass << "\n";
 
 		// current experience
-		outfile << "xp=" << pc->stats.xp << "\n";
+		outfile << "xp=" << avatar->stats.xp << "\n";
 
 		// hp and mp
-		if (eset->misc.save_hpmp) outfile << "hpmp=" << pc->stats.hp << "," << pc->stats.mp << "\n";
+		if (eset->misc.save_hpmp) outfile << "hpmp=" << avatar->stats.hp << "," << avatar->stats.mp << "\n";
 
 		// stat spec
 		outfile << "build=";
 		for (size_t i = 0; i < eset->primary_stats.list.size(); ++i) {
-			outfile << pc->stats.primary[i];
+			outfile << avatar->stats.primary[i];
 			if (i < eset->primary_stats.list.size() - 1)
 				outfile << ",";
 		}
 		outfile << "\n";
 
 		// equipped gear
-		outfile << "equipped_quantity=" << pinv->inventory[PlayerInventory::EQUIPMENT].getQuantities() << "\n";
-		outfile << "equipped=" << pinv->inventory[PlayerInventory::EQUIPMENT].getItems() << "\n";
+		outfile << "equipped_quantity=" << inventory->inventory[PlayerInventory::EQUIPMENT].getQuantities() << "\n";
+		outfile << "equipped=" << inventory->inventory[PlayerInventory::EQUIPMENT].getItems() << "\n";
 
 		// active equipped set
-		outfile << "active_equipment_set=" << pinv->active_equipment_set << "\n";
+		outfile << "active_equipment_set=" << inventory->active_equipment_set << "\n";
 
 		// carried items
-		outfile << "carried_quantity=" << pinv->inventory[PlayerInventory::CARRIED].getQuantities() << "\n";
-		outfile << "carried=" << pinv->inventory[PlayerInventory::CARRIED].getItems() << "\n";
+		outfile << "carried_quantity=" << inventory->inventory[PlayerInventory::CARRIED].getQuantities() << "\n";
+		outfile << "carried=" << inventory->inventory[PlayerInventory::CARRIED].getItems() << "\n";
 
 		// spawn point
 		outfile << "spawn=" << wmap->respawn_map << "," << static_cast<int>(wmap->respawn_point.x) << "," << static_cast<int>(wmap->respawn_point.y) << "\n";
@@ -155,13 +159,13 @@ void SaveLoad::saveGame() {
 		// action bar
 		// NOTE we need to reset any bonus-modified powers in the action bar before writing
 		// we use menu->pow->setUnlockedPowers() after to restore the action bar state
-		pbs->clearActionBarBonusLevels();
+		powerbonus->clearActionBarBonusLevels();
 		outfile << "actionbar=";
 		for (unsigned i = 0; i < static_cast<unsigned>(MenuActionBar::SLOT_MAX); i++) {
-			if (i < pab->slots_count)
+			if (i < actionbar->slots_count)
 			{
-				if (pc->stats.transformed) outfile << pab->hotkeys_temp[i];
-				else outfile << pab->hotkeys[i];
+				if (avatar->stats.transformed) outfile << actionbar->hotkeys_temp[i];
+				else outfile << actionbar->hotkeys[i];
 			}
 			else
 			{
@@ -178,37 +182,37 @@ void SaveLoad::saveGame() {
 			menu->pow->setUnlockedPowers();
 
 		//shapeshifter value
-		if (pc->stats.transform_type == "untransform" || pc->stats.transform_duration != -1) outfile << "transformed=" << "\n";
-		else outfile << "transformed=" << pc->stats.transform_type << "," << pc->stats.manual_untransform << "\n";
+		if (avatar->stats.transform_type == "untransform" || avatar->stats.transform_duration != -1) outfile << "transformed=" << "\n";
+		else outfile << "transformed=" << avatar->stats.transform_type << "," << avatar->stats.manual_untransform << "\n";
 
 		// restore hero powers
-		if (pc->stats.transformed && pc->hero_stats) {
-			pc->stats.powers_list = pc->hero_stats->powers_list;
+		if (avatar->stats.transformed && avatar->hero_stats) {
+			avatar->stats.powers_list = avatar->hero_stats->powers_list;
 		}
 
 		// enabled powers
 		outfile << "powers=";
-		for (unsigned int i=0; i<pc->stats.powers_list.size(); i++) {
-			if (i < pc->stats.powers_list.size()-1) {
-				if (pc->stats.powers_list[i] > 0)
-					outfile << pc->stats.powers_list[i] << ",";
+		for (unsigned int i=0; i<avatar->stats.powers_list.size(); i++) {
+			if (i < avatar->stats.powers_list.size()-1) {
+				if (avatar->stats.powers_list[i] > 0)
+					outfile << avatar->stats.powers_list[i] << ",";
 			}
 			else {
-				if (pc->stats.powers_list[i] > 0)
-					outfile << pc->stats.powers_list[i];
+				if (avatar->stats.powers_list[i] > 0)
+					outfile << avatar->stats.powers_list[i];
 			}
 		}
 		outfile << "\n";
 
 		// restore transformed powers
-		if (pc->stats.transformed && pc->charmed_stats) {
-			pc->stats.powers_list = pc->charmed_stats->powers_list;
+		if (avatar->stats.transformed && avatar->charmed_stats) {
+			avatar->stats.powers_list = avatar->charmed_stats->powers_list;
 		}
 
 		// campaign data
 		outfile << "campaign=" << camp->getAll() << "\n";
 
-		outfile << "time_played=" << pc->time_played << "\n";
+		outfile << "time_played=" << avatar->time_played << "\n";
 
 		// save the engine version for troubleshooting purposes
 		outfile << "engine_version=" << VersionInfo::ENGINE.getString() << "\n";
@@ -227,7 +231,7 @@ void SaveLoad::saveGame() {
 			}
 		}
 
-		outfile << "questlog_dismissed=" << !pab->requires_attention[MenuActionBar::MENU_LOG] << "\n";
+		outfile << "questlog_dismissed=" << !actionbar->requires_attention[MenuActionBar::MENU_LOG] << "\n";
 
 		// menu->stash's tab selection is a widget concern with no sim state behind it; a headless
 		// server writes the field's default (0) rather than reading through a menu that doesn't
@@ -247,7 +251,7 @@ void SaveLoad::saveGame() {
 	if (menu) {
 		for (size_t i = 0; i < menu->stash->tabs.size(); ++i) {
 			// shared stashes are not saved for permadeath characters
-			if (pc->stats.permadeath && !menu->stash->tabs[i].is_private)
+			if (avatar->stats.permadeath && !menu->stash->tabs[i].is_private)
 				continue;
 
 			ss.str("");
@@ -279,7 +283,7 @@ void SaveLoad::saveGame() {
 	// save fog-of-war layers
 	saveFOW();
 
-	saveExtendedItems(SAVE_STORAGE_ITEMS);
+	saveExtendedItems(SAVE_STORAGE_ITEMS, inventory);
 	settings->prev_save_slot = game_slot-1;
 
 	// display a log message saying that we saved the game -- widget-only, no sim-side equivalent
@@ -291,6 +295,10 @@ void SaveLoad::saveGame() {
 }
 
 void SaveLoad::saveExtendedItems(bool save_storage_items) {
+	saveExtendedItems(save_storage_items, pinv);
+}
+
+void SaveLoad::saveExtendedItems(bool save_storage_items, PlayerInventory* inventory) {
 	// Save extended Items
 	std::stringstream ss;
 	ss << settings->path_user << "saves/" << eset->misc.save_prefix << "/extended_items.txt";
@@ -307,10 +315,10 @@ void SaveLoad::saveExtendedItems(bool save_storage_items) {
 
 			bool item_in_storage = false;
 			if (save_storage_items && menu) {
-				if (menu->inv && pinv->inventory[PlayerInventory::EQUIPMENT].contain(i, 1)) {
+				if (menu->inv && inventory->inventory[PlayerInventory::EQUIPMENT].contain(i, 1)) {
 					item_in_storage = true;
 				}
-				else if (menu->inv && pinv->inventory[PlayerInventory::CARRIED].contain(i, 1)) {
+				else if (menu->inv && inventory->inventory[PlayerInventory::CARRIED].contain(i, 1)) {
 					item_in_storage = true;
 				}
 				else if (menu->stash) {
@@ -415,6 +423,10 @@ void SaveLoad::saveExtendedItems(bool save_storage_items) {
  * When loading the game, load from file if possible
  */
 void SaveLoad::loadGame() {
+	loadGame(pc, pinv, pab, pbs);
+}
+
+void SaveLoad::loadGame(Avatar* avatar, PlayerInventory* inventory, ActionBarState* actionbar, PowerBonusState* powerbonus) {
 	if (game_slot <= 0) return;
 
 	// ensure that the save folder has all its sub-folders
@@ -434,23 +446,23 @@ void SaveLoad::loadGame() {
 
 	if (infile.open(ss.str(), !FileParser::MOD_FILE, FileParser::ERROR_NORMAL)) {
 		while (infile.next()) {
-			if (infile.key == "name") pc->stats.name = infile.val;
+			if (infile.key == "name") avatar->stats.name = infile.val;
 			else if (infile.key == "permadeath") {
-				pc->stats.permadeath = Parse::toBool(infile.val);
+				avatar->stats.permadeath = Parse::toBool(infile.val);
 			}
 			else if (infile.key == "option") {
-				pc->stats.gfx_base = Parse::popFirstString(infile.val);
-				pc->stats.gfx_head = Parse::popFirstString(infile.val);
-				pc->stats.gfx_portrait = Parse::popFirstString(infile.val);
+				avatar->stats.gfx_base = Parse::popFirstString(infile.val);
+				avatar->stats.gfx_head = Parse::popFirstString(infile.val);
+				avatar->stats.gfx_portrait = Parse::popFirstString(infile.val);
 
-				pc->stats.checkGFXPaths();
+				avatar->stats.checkGFXPaths();
 			}
 			else if (infile.key == "class") {
-				pc->stats.character_class = Parse::popFirstString(infile.val);
-				pc->stats.character_subclass = Parse::popFirstString(infile.val);
+				avatar->stats.character_class = Parse::popFirstString(infile.val);
+				avatar->stats.character_subclass = Parse::popFirstString(infile.val);
 			}
 			else if (infile.key == "xp") {
-				pc->stats.xp = Parse::toUnsignedLong(infile.val);
+				avatar->stats.xp = Parse::toUnsignedLong(infile.val);
 			}
 			else if (infile.key == "hpmp") {
 				saved_hp = Parse::popFirstFloat(infile.val);
@@ -458,10 +470,10 @@ void SaveLoad::loadGame() {
 			}
 			else if (infile.key == "build") {
 				for (size_t i = 0; i < eset->primary_stats.list.size(); ++i) {
-					pc->stats.primary[i] = Parse::popFirstInt(infile.val);
-					if (pc->stats.primary[i] < 0 || pc->stats.primary[i] > pc->stats.max_points_per_stat) {
+					avatar->stats.primary[i] = Parse::popFirstInt(infile.val);
+					if (avatar->stats.primary[i] < 0 || avatar->stats.primary[i] > avatar->stats.max_points_per_stat) {
 						Utils::logInfo("SaveLoad: Primary stat value for '%s' is out of bounds, setting to zero.", eset->primary_stats.list[i].id.c_str());
-						pc->stats.primary[i] = 0;
+						avatar->stats.primary[i] = 0;
 					}
 				}
 			}
@@ -469,30 +481,30 @@ void SaveLoad::loadGame() {
 				currency = Parse::toInt(infile.val);
 			}
 			else if (infile.key == "equipped") {
-				pinv->inventory[PlayerInventory::EQUIPMENT].setItems(infile.val);
-				pinv->inventory[PlayerInventory::EQUIPMENT].setForeign(false);
+				inventory->inventory[PlayerInventory::EQUIPMENT].setItems(infile.val);
+				inventory->inventory[PlayerInventory::EQUIPMENT].setForeign(false);
 			}
 			else if (infile.key == "equipped_quantity") {
-				pinv->inventory[PlayerInventory::EQUIPMENT].setQuantities(infile.val);
+				inventory->inventory[PlayerInventory::EQUIPMENT].setQuantities(infile.val);
 			}
 			else if (infile.key == "active_equipment_set") {
 				// menu->inv->applyEquipmentSet() does two things: the bounds-checked assignment
 				// below, which is the only sim-relevant part (P1.4c: a headless server has no
 				// menu to route it through), and updateEquipmentSetWidgets(), a widget refresh
 				// that's moot here since applyPlayerData() unconditionally calls
-				// pinv->applyEquipment() right after this parse loop either way.
+				// inventory->applyEquipment() right after this parse loop either way.
 				unsigned set = static_cast<unsigned>(Parse::toInt(infile.val));
 				if (menu)
 					menu->inv->applyEquipmentSet(set);
-				else if (set > 0 && set <= pinv->max_equipment_set)
-					pinv->active_equipment_set = set;
+				else if (set > 0 && set <= inventory->max_equipment_set)
+					inventory->active_equipment_set = set;
 			}
 			else if (infile.key == "carried") {
-				pinv->inventory[PlayerInventory::CARRIED].setItems(infile.val);
-				pinv->inventory[PlayerInventory::CARRIED].setForeign(false);
+				inventory->inventory[PlayerInventory::CARRIED].setItems(infile.val);
+				inventory->inventory[PlayerInventory::CARRIED].setForeign(false);
 			}
 			else if (infile.key == "carried_quantity") {
-				pinv->inventory[PlayerInventory::CARRIED].setQuantities(infile.val);
+				inventory->inventory[PlayerInventory::CARRIED].setQuantities(infile.val);
 			}
 			else if (infile.key == "spawn") {
 				wmap->teleport_mapname = Parse::popFirstString(infile.val);
@@ -515,13 +527,13 @@ void SaveLoad::loadGame() {
 				for (int i = 0; i < MenuActionBar::SLOT_MAX; i++) {
 					hotkeys[i] = powers->verifyID(Parse::popFirstInt(infile.val), &infile, PowerManager::ALLOW_ZERO_ID);
 				}
-				pab->set(hotkeys, !ActionBarState::SET_SKIP_EMPTY);
+				actionbar->set(hotkeys, !ActionBarState::SET_SKIP_EMPTY);
 			}
 			else if (infile.key == "transformed") {
-				pc->stats.transform_type = Parse::popFirstString(infile.val);
-				if (pc->stats.transform_type != "") {
-					pc->stats.transform_duration = -1;
-					pc->stats.manual_untransform = Parse::toBool(Parse::popFirstString(infile.val));
+				avatar->stats.transform_type = Parse::popFirstString(infile.val);
+				if (avatar->stats.transform_type != "") {
+					avatar->stats.transform_duration = -1;
+					avatar->stats.manual_untransform = Parse::toBool(Parse::popFirstString(infile.val));
 				}
 			}
 			else if (infile.key == "powers") {
@@ -529,11 +541,11 @@ void SaveLoad::loadGame() {
 				while ( (power = Parse::popFirstString(infile.val)) != "") {
 					PowerID power_id = powers->verifyID(Parse::toInt(power), &infile, !PowerManager::ALLOW_ZERO_ID);
 					if (power_id > 0)
-						pc->stats.powers_list.push_back(power_id);
+						avatar->stats.powers_list.push_back(power_id);
 				}
 			}
 			else if (infile.key == "campaign") camp->setAll(infile.val);
-			else if (infile.key == "time_played") pc->time_played = Parse::toUnsignedLong(infile.val);
+			else if (infile.key == "time_played") avatar->time_played = Parse::toUnsignedLong(infile.val);
 			else if (infile.key == "engine_version") save_version.setFromString(infile.val);
 			// Vendor buyback stock is a MenuVendor-owned UI cache with no sim-side equivalent
 			// (matches checkNPCInteraction()'s "drop entirely" -- P1.4c) -- skipped headless
@@ -552,7 +564,7 @@ void SaveLoad::loadGame() {
 					menu->vendor->buyback_stock[npc_filename].setQuantities(infile.val);
 				}
 			}
-			else if (infile.key == "questlog_dismissed") pc->questlog_dismissed = Parse::toBool(infile.val);
+			else if (infile.key == "questlog_dismissed") avatar->questlog_dismissed = Parse::toBool(infile.val);
 			else if (infile.key == "stash_tab") stash_tab = Parse::toInt(infile.val);
 		}
 
@@ -562,37 +574,37 @@ void SaveLoad::loadGame() {
 
 	// set starting values for primary stats based on class
 	EngineSettings::HeroClasses::HeroClass* pc_class;
-	pc_class = eset->hero_classes.getByName(pc->stats.character_class);
+	pc_class = eset->hero_classes.getByName(avatar->stats.character_class);
 	if (pc_class) {
 		for (size_t i = 0; i < eset->primary_stats.list.size(); ++i) {
-			pc->stats.primary_starting[i] = pc_class->primary[i] + 1;
+			avatar->stats.primary_starting[i] = pc_class->primary[i] + 1;
 		}
 	}
 
 	// add legacy currency to inventory
-	pinv->addCurrency(currency);
+	inventory->addCurrency(currency);
 
 	// apply stats, inventory, and powers
-	applyPlayerData();
+	applyPlayerData(avatar, inventory, actionbar, powerbonus);
 
 	// trigger passive effects here? Saved HP/MP values might depend on passively boosted HP/MP
-	// powers->activatePassives(pc->stats);
+	// powers->activatePassives(avatar->stats);
 	if (eset->misc.save_hpmp && saved_hp != 0) {
-		if (saved_hp < 0 || saved_hp > pc->stats.get(Stats::HP_MAX)) {
+		if (saved_hp < 0 || saved_hp > avatar->stats.get(Stats::HP_MAX)) {
 			Utils::logError("SaveLoad: HP value is out of bounds, setting to maximum");
-			pc->stats.hp = pc->stats.get(Stats::HP_MAX);
+			avatar->stats.hp = avatar->stats.get(Stats::HP_MAX);
 		}
-		else pc->stats.hp = saved_hp;
+		else avatar->stats.hp = saved_hp;
 
-		if (saved_mp < 0 || saved_mp > pc->stats.get(Stats::MP_MAX)) {
+		if (saved_mp < 0 || saved_mp > avatar->stats.get(Stats::MP_MAX)) {
 			Utils::logError("SaveLoad: MP value is out of bounds, setting to maximum");
-			pc->stats.mp = pc->stats.get(Stats::MP_MAX);
+			avatar->stats.mp = avatar->stats.get(Stats::MP_MAX);
 		}
-		else pc->stats.mp = saved_mp;
+		else avatar->stats.mp = saved_mp;
 	}
 	else {
-		pc->stats.hp = pc->stats.get(Stats::HP_MAX);
-		pc->stats.mp = pc->stats.get(Stats::MP_MAX);
+		avatar->stats.hp = avatar->stats.get(Stats::HP_MAX);
+		avatar->stats.mp = avatar->stats.get(Stats::MP_MAX);
 	}
 
 	if (save_version != VersionInfo::ENGINE)
@@ -604,24 +616,28 @@ void SaveLoad::loadGame() {
 
 	// Widget-only skill-tree unlock display -- see loadPowerTree()'s own comment. Called
 	// unconditionally on purpose; it guards itself.
-	loadPowerTree();
+	loadPowerTree(avatar);
 
 	// Stash tabs are MenuStash-owned UI state with no sim-side equivalent (matches
 	// checkStash()'s "drop entirely" -- P1.4c) -- skipped headless.
 	if (menu) {
 		// disable the shared stash for permadeath characters
-		menu->stash->enableSharedTab(pc->stats.permadeath);
+		menu->stash->enableSharedTab(avatar->stats.permadeath);
 
 		menu->stash->setTab(stash_tab);
 	}
 
-	pc->loadAnimations();
+	avatar->loadAnimations();
 }
 
 /**
  * Load a class definition, index
  */
 void SaveLoad::loadClass(int index) {
+	loadClass(index, pc, pinv, pab, pbs);
+}
+
+void SaveLoad::loadClass(int index, Avatar* avatar, PlayerInventory* inventory, ActionBarState* actionbar, PowerBonusState* powerbonus) {
 	if (game_slot <= 0) return;
 
 	if (index < 0 || static_cast<unsigned>(index) >= eset->hero_classes.list.size()) {
@@ -632,25 +648,25 @@ void SaveLoad::loadClass(int index) {
 	EngineSettings::HeroClasses::HeroClass& hero_class = eset->hero_classes.list[index];
 
 	// name
-	pc->stats.character_class = hero_class.name;
+	avatar->stats.character_class = hero_class.name;
 
 	// stat points
 	for (size_t i = 0; i < eset->primary_stats.list.size(); ++i) {
 		// Avatar::init() sets primary stats to 1, so we add to that here
-		pc->stats.primary[i] += hero_class.primary[i];
-		pc->stats.primary_starting[i] = pc->stats.primary[i];
+		avatar->stats.primary[i] += hero_class.primary[i];
+		avatar->stats.primary_starting[i] = avatar->stats.primary[i];
 	}
 
 	// inventory
-	pinv->addCurrency(hero_class.currency);
+	inventory->addCurrency(hero_class.currency);
 
 	ItemStack stack;
 
 	std::string equipment = hero_class.equipment;
 	while (!equipment.empty()) {
 		stack = Parse::toItemQuantityPair(Parse::popFirstString(equipment));
-		int equip_slot = pinv->getEquipSlotFromItem(stack.item, PlayerInventory::ONLY_EMPTY_SLOTS);
-		pinv->add(stack, PlayerInventory::EQUIPMENT, equip_slot, !PlayerInventory::ADD_PLAY_SOUND, !PlayerInventory::ADD_AUTO_EQUIP);
+		int equip_slot = inventory->getEquipSlotFromItem(stack.item, PlayerInventory::ONLY_EMPTY_SLOTS);
+		inventory->add(stack, PlayerInventory::EQUIPMENT, equip_slot, !PlayerInventory::ADD_PLAY_SOUND, !PlayerInventory::ADD_AUTO_EQUIP);
 	}
 
 	for (size_t i = 0; i < hero_class.equipment_sets.size(); ++i) {
@@ -658,8 +674,8 @@ void SaveLoad::loadClass(int index) {
 		std::string equipment_set = hero_class.equipment_sets[i].second;
 		while (!equipment_set.empty()) {
 			stack = Parse::toItemQuantityPair(Parse::popFirstString(equipment_set));
-			int equip_slot = pinv->getEquipSlotFromItem(stack.item, PlayerInventory::ONLY_EMPTY_SLOTS);
-			pinv->add(stack, PlayerInventory::EQUIPMENT, equip_slot, !PlayerInventory::ADD_PLAY_SOUND, !PlayerInventory::ADD_AUTO_EQUIP);
+			int equip_slot = inventory->getEquipSlotFromItem(stack.item, PlayerInventory::ONLY_EMPTY_SLOTS);
+			inventory->add(stack, PlayerInventory::EQUIPMENT, equip_slot, !PlayerInventory::ADD_PLAY_SOUND, !PlayerInventory::ADD_AUTO_EQUIP);
 		}
 
 	}
@@ -668,7 +684,7 @@ void SaveLoad::loadClass(int index) {
 	std::string carried = hero_class.carried;
 	while (!carried.empty()) {
 		stack = Parse::toItemQuantityPair(Parse::popFirstString(carried));
-		pinv->add(stack, PlayerInventory::CARRIED, ItemStorage::NO_SLOT, !PlayerInventory::ADD_PLAY_SOUND, !PlayerInventory::ADD_AUTO_EQUIP);
+		inventory->add(stack, PlayerInventory::CARRIED, ItemStorage::NO_SLOT, !PlayerInventory::ADD_PLAY_SOUND, !PlayerInventory::ADD_AUTO_EQUIP);
 	}
 
 	// powers & action bar
@@ -676,13 +692,13 @@ void SaveLoad::loadClass(int index) {
 		PowerID power_id = powers->verifyID(hero_class.powers[i], NULL, !PowerManager::ALLOW_ZERO_ID);
 		hero_class.powers[i] = power_id;
 		if (power_id > 0)
-			pc->stats.powers_list.push_back(power_id);
+			avatar->stats.powers_list.push_back(power_id);
 	}
 	for (size_t i = 0; i < hero_class.hotkeys.size(); ++i) {
 		hero_class.hotkeys[i] = powers->verifyID(hero_class.hotkeys[i], NULL, PowerManager::ALLOW_ZERO_ID);
 	}
 
-	pab->set(hero_class.hotkeys, !ActionBarState::SET_SKIP_EMPTY);
+	actionbar->set(hero_class.hotkeys, !ActionBarState::SET_SKIP_EMPTY);
 
 	// campaign statuses
 	for (size_t i = 0; i < hero_class.statuses.size(); ++i) {
@@ -691,25 +707,25 @@ void SaveLoad::loadClass(int index) {
 	}
 
 	// apply stats, inventory, and powers
-	applyPlayerData();
+	applyPlayerData(avatar, inventory, actionbar, powerbonus);
 
 	// reset character menu
 	menu->chr->refreshStats();
 
-	loadPowerTree();
+	loadPowerTree(avatar);
 }
 
 /**
  * This is used to load the stash when starting a new game
  */
-void SaveLoad::loadStash() {
+void SaveLoad::loadStash(Avatar* avatar) {
 	// Load stash
 	FileParser infile;
 	std::stringstream ss;
 
 	for (size_t i = 0; i < menu->stash->tabs.size(); ++i) {
 		// shared stashes are not loaded for permadeath characters
-		if (pc->stats.permadeath && !menu->stash->tabs[i].is_private)
+		if (avatar->stats.permadeath && !menu->stash->tabs[i].is_private)
 			continue;
 
 		ss.str("");
@@ -741,25 +757,31 @@ void SaveLoad::loadStash() {
 /**
  * Performs final calculations after loading a save or a new class
  */
-void SaveLoad::applyPlayerData() {
-	pinv->fillEquipmentSlots();
+void SaveLoad::applyPlayerData(Avatar* avatar, PlayerInventory* inventory, ActionBarState* actionbar, PowerBonusState* powerbonus) {
+	// actionbar/powerbonus aren't read directly in this function -- they're accepted anyway so
+	// this stays consistent with saveGame()/loadGame()'s full four-object signature, since both of
+	// this function's callers already have all four in hand from their own parameters.
+	(void)actionbar;
+	(void)powerbonus;
+
+	inventory->fillEquipmentSlots();
 
 	// remove items with zero quantity from inventory
-	pinv->inventory[PlayerInventory::EQUIPMENT].clean();
-	pinv->inventory[PlayerInventory::CARRIED].clean();
+	inventory->inventory[PlayerInventory::EQUIPMENT].clean();
+	inventory->inventory[PlayerInventory::CARRIED].clean();
 
 	// Load stash -- MenuStash-owned, no sim-side equivalent (P1.4c, matches checkStash()).
 	if (menu)
-		loadStash();
+		loadStash(avatar);
 
 	// initialize vars
-	pc->stats.recalc();
-	pc->stats.loadHeroSFX();
-	pinv->applyEquipment();
-	pc->stats.logic(); // run stat logic once to apply items bonuses
+	avatar->stats.recalc();
+	avatar->stats.loadHeroSFX();
+	inventory->applyEquipment();
+	avatar->stats.logic(); // run stat logic once to apply items bonuses
 
 	// just for aesthetics, turn the hero to face the camera
-	pc->stats.direction = 6;
+	avatar->stats.direction = 6;
 
 	// set up MenuTalker for this hero -- widget-only dialogue-portrait cache, no sim-side
 	// equivalent (P1.4c, matches checkNPCInteraction()'s "drop entirely" -- NPC dialogue is
@@ -773,7 +795,7 @@ void SaveLoad::applyPlayerData() {
 	// itself isn't why.)
 
 	// load sounds (gender specific)
-	pc->loadSounds();
+	avatar->loadSounds();
 
 	// apply power upgrades -- see loadPowerTree()'s own comment.
 	if (menu)
@@ -788,12 +810,12 @@ void SaveLoad::applyPlayerData() {
 // treats every power as already unlocked rather than needing this to have run. Guards itself
 // rather than every call site, since both callers (here and applyPlayerData()) call it
 // unconditionally today.
-void SaveLoad::loadPowerTree() {
+void SaveLoad::loadPowerTree(Avatar* avatar) {
 	if (!menu)
 		return;
 
 	EngineSettings::HeroClasses::HeroClass* pc_class;
-	pc_class = eset->hero_classes.getByName(pc->stats.character_class);
+	pc_class = eset->hero_classes.getByName(avatar->stats.character_class);
 	if (pc_class && !pc_class->power_tree.empty()) {
 		menu->pow->loadPowerTree(pc_class->power_tree);
 		return;
