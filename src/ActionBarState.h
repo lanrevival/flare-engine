@@ -84,9 +84,16 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Utils.h"
 
 class ActionData;
+class Avatar;
 
 class ActionBarState {
 public:
+	// P2.3b. Set once by PlayerManager::create(), alongside the parallel players/inventories/
+	// actionbars/powerbonuses arrays (P2.1) -- THIS action bar's own Avatar, not whichever player
+	// happened to be local() at the time. See PlayerInventory.h's matching comment and
+	// plans/phase2/P2.3b-delete-player-globals.md.
+	Avatar* owner;
+
 	// How many menu buttons requires_attention tracks (character/inventory/powers/log). A
 	// duplicate of MenuActionBar::MENU_COUNT's value, not a reference to it -- this class does not
 	// include MenuActionBar.h, the same reasoning PlayerInventory::EQUIPMENT/CARRIED already gives.

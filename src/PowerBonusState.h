@@ -56,8 +56,18 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "CommonIncludes.h"
 #include "Utils.h"
 
+class ActionBarState;
+
 class PowerBonusState {
 public:
+	// P2.3b. Set once by PlayerManager::create(), alongside owner/actionbar being set on the
+	// sibling PlayerInventory/ActionBarState for the SAME player (P2.1's parallel arrays). This is
+	// a genuine cross-reference, not a same-object self-call: clearActionBarBonusLevels() below
+	// repoints a slot on the player's OWN action bar, a different class this one has never been
+	// merged with. See plans/phase2/P2.3b-delete-player-globals.md, step 1's note on this exact
+	// call site.
+	ActionBarState* actionbar;
+
 	PowerBonusState();
 
 	/** Registers one power-upgrade-chain group, in the same order MenuPowers builds power_cell --
@@ -77,8 +87,9 @@ public:
 	int getBonusLevels(size_t group) const;
 
 	/** Repoints any action bar slot a bonus was pointing at back to its unbonused power, via
-	 * pab->addPower() directly (pab is already independent of any menu, unchanged from P1.3e).
-	 * Does NOT clear the bonus records themselves -- MenuPowers::setUnlockedPowers() calls this
+	 * actionbar->addPower() directly (actionbar is this same player's own ActionBarState, set
+	 * alongside this object by PlayerManager::create() -- P2.3b -- and already independent of any
+	 * menu, unchanged from P1.3e). Does NOT clear the bonus records themselves -- MenuPowers::setUnlockedPowers() calls this
 	 * alone, before recomputing which powers are unlocked, and the bonus records must survive
 	 * that (they're only recomputed from scratch by applyEquipment(), which calls
 	 * clearBonusLevels() below instead). Ported unchanged from MenuPowers::clearActionBarBonusLevels().

@@ -126,37 +126,46 @@ uint64_t WorldHash::compute(unsigned long tick) {
 	h = mixString(h, wmap ? wmap->getFilename() : std::string());
 
 	// --- player ---
+	// P2.3b: kind C, not kind A -- this used to hash only the single global pc/pinv, which is
+	// exactly the "player singleton" blind spot the comment below already warns against, one level
+	// deeper than the reference migration it was written for. playerm->players is kept sorted by
+	// id (PlayerManager.h), so this iteration order is stable and reproducible -- required, since
+	// every consumer of this digest depends on it. With exactly one player (every corpus fixture
+	// today) this is byte-identical to the old pc/pinv-guarded version: same tag positions, same
+	// values, same order.
 	h = mixI32(h, TAG_PLAYER);
-	if (pc) {
-		h = mixStatBlock(h, pc->stats);
-		h = mixU64(h, static_cast<uint64_t>(pc->stats.xp));
-		h = mixI32(h, pc->stats.currency);
+	for (size_t p = 0; p < playerm->players.size(); ++p) {
+		h = mixStatBlock(h, playerm->players[p]->stats);
+		h = mixU64(h, static_cast<uint64_t>(playerm->players[p]->stats.xp));
+		h = mixI32(h, playerm->players[p]->stats.currency);
 	}
 
 	// --- inventory ---
 	// Covered on purpose. Phase 2 rewrites hundreds of references to the player singleton; a
 	// digest that stopped at positions would pass all of it.
 	h = mixI32(h, TAG_INVENTORY);
-	// Guards on pinv, not menu -- everything hashed below reads pinv directly and has since
-	// P1.3d-4b. The guard used to ask about the menu instead (menu && menu->inv), which happened
-	// to hold whenever pinv did because nothing constructed one without the other -- until P1.4c,
-	// where a headless server builds pinv with no menu at all. That silently would have dropped
-	// this whole block, and with it the corpus's only coverage of equipment/inventory contents:
-	// found by reading this file while designing P1.4c's server loop, not by a failing digest,
-	// because a skipped block still hashes identically to another skipped block.
-	if (pinv) {
+	// Iterates playerm->inventories now, not a single pinv guard -- same P2.3b reasoning as
+	// TAG_PLAYER above. The guard used to ask about the menu instead (menu && menu->inv), which
+	// happened to hold whenever pinv did because nothing constructed one without the other --
+	// until P1.4c, where a headless server builds pinv with no menu at all. That silently would
+	// have dropped this whole block, and with it the corpus's only coverage of equipment/inventory
+	// contents: found by reading this file while designing P1.4c's server loop, not by a failing
+	// digest, because a skipped block still hashes identically to another skipped block.
+	for (size_t p = 0; p < playerm->inventories.size(); ++p) {
+		PlayerInventory* inventory = playerm->inventories[p];
+
 		// Which equipment set is active, not just what is in the slots. Measured gap: a probe
 		// that vanished items from the digest showed contents ARE covered (melee notices a loss
 		// in both storage areas), but this scalar was not hashed at all, so a swap between two
 		// equally-full sets was invisible.
-		h = mixI32(h, static_cast<int32_t>(pinv->active_equipment_set));
+		h = mixI32(h, static_cast<int32_t>(inventory->active_equipment_set));
 
 		for (int area = 0; area < MenuInventory::CARRIED + 1; ++area) {
-			int slots = pinv->inventory[area].getSlotNumber();
+			int slots = inventory->inventory[area].getSlotNumber();
 			h = mixI32(h, slots);
 			for (int i = 0; i < slots; ++i) {
-				h = mixU64(h, static_cast<uint64_t>(pinv->inventory[area][i].item));
-				h = mixI32(h, pinv->inventory[area][i].quantity);
+				h = mixU64(h, static_cast<uint64_t>(inventory->inventory[area][i].item));
+				h = mixI32(h, inventory->inventory[area][i].quantity);
 			}
 		}
 	}

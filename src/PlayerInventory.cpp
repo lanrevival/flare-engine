@@ -38,7 +38,10 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "UtilsParsing.h"
 
 PlayerInventory::PlayerInventory()
-	: active_equipment_set(0)
+	: owner(NULL)
+	, actionbar(NULL)
+	, powerbonus(NULL)
+	, active_equipment_set(0)
 	, max_equipment_set(0)
 	, currency(0)
 	// The same defaults MenuInventory's constructor used to carry. They are only ever seen if
@@ -174,7 +177,7 @@ int PlayerInventory::getEquippedSetCount(size_t set_id) const {
 int PlayerInventory::getEquipSlotFromItem(ItemID item, bool only_empty_slots) const {
 	// -2 and -1 are different answers and callers rely on it: -2 is "this character may not wear
 	// that", -1 is "may, but has no free slot of the right type".
-	if (!items->isValid(item) || !items->requirementsMet(&pc->stats, item))
+	if (!items->isValid(item) || !items->requirementsMet(&owner->stats, item))
 		return -2;
 
 	int equip_slot = -1;
@@ -239,14 +242,14 @@ void PlayerInventory::removeCurrency(int count) {
 }
 
 // F4 in plans/phase1/P1.3-VERIFICATION.md: inventory[CARRIED] was always the single owner of how
-// much currency exists; currency and pc->stats.currency are both caches recomputed together. Until
+// much currency exists; currency and owner->stats.currency are both caches recomputed together. Until
 // P1.3d-4b-3 the only place that ran this recompute was MenuInventory::logic(), once a frame -- so
 // it silently stopped updating the moment nothing constructs a MenuManager. Every mutator that can
 // change how much currency is carried calls this now, so the cache is never gated on a live UI. The
 // MenuInventory::logic() line still runs too, redundantly, which is harmless: same read, same write.
 void PlayerInventory::recomputeCurrency() {
 	currency = inventory[CARRIED].count(eset->misc.currency_id);
-	pc->stats.currency = currency;
+	owner->stats.currency = currency;
 }
 
 // Moved from MenuInventory::add() in P1.3d-4b-3. Two things deliberately did NOT come, both
@@ -254,7 +257,7 @@ void PlayerInventory::recomputeCurrency() {
 //   - the EQUIPMENT branch's updateEquipment(slot) call, a redraw dirty flag
 //   - the trailing drag_prev_src = -1, which ends a mouse drag that a sim-triggered add() never
 //     started
-// menu_act->addPower() became pab->addPower() directly -- this call is always id != 0 (power is
+// menu_act->addPower() became actionbar->addPower() directly -- this call is always id != 0 (power is
 // checked > 0 immediately above), which is provably always the pure-state half of that split (see
 // ActionBarState.h), so this is not a behaviour choice, just removing a layer that already forwarded
 // here.
@@ -323,7 +326,7 @@ bool PlayerInventory::add(ItemStack stack, int area, int slot, bool play_sound, 
 			else {
 				drop_stack.push(leftover);
 			}
-			pc->logMsg(msg->get("Inventory is full."), Avatar::MSG_NORMAL);
+			owner->logMsg(msg->get("Inventory is full."), Avatar::MSG_NORMAL);
 			success = false;
 		}
 	}
@@ -359,7 +362,7 @@ bool PlayerInventory::add(ItemStack stack, int area, int slot, bool play_sound, 
 
 	// if this item has a power, place it on the action bar if possible
 	if (success && items->getItemType(items->items[stack.item]->type).auto_actionbar && items->items[stack.item]->power > 0) {
-		pab->addPower(items->items[stack.item]->power, 0);
+		actionbar->addPower(items->items[stack.item]->power, 0);
 	}
 
 	recomputeCurrency();
@@ -403,7 +406,7 @@ void PlayerInventory::addCurrency(int count) {
 // MenuInventory keeps a thin applyEquipment() that calls this and then does that one line; every
 // caller that had a reason to want it (a live UI) still goes through that wrapper unchanged, since
 // nothing here required them to stop. Only genuinely sim-side callers were repointed to call this
-// directly. clearBonusLevels() was menu->pow->clearBonusLevels() before P1.3g; it is pbs->
+// directly. clearBonusLevels() was menu->pow->clearBonusLevels() before P1.3g; it is powerbonus->
 // unconditionally now, same as every other caller in the tree.
 void PlayerInventory::applyEquipment() {
 	if (items->items.empty())
@@ -421,7 +424,7 @@ void PlayerInventory::applyEquipment() {
 		active_set_quantities.clear();
 
 		for (size_t j = 0; j < eset->primary_stats.list.size(); ++j) {
-			pc->stats.primary_additional[j] = 0;
+			owner->stats.primary_additional[j] = 0;
 		}
 
 		for (int i = 0; i < MAX_EQUIPPED; i++) {
@@ -435,7 +438,7 @@ void PlayerInventory::applyEquipment() {
 				while (bonus_counter < item->bonus.size()) {
 					for (size_t j = 0; j < eset->primary_stats.list.size(); ++j) {
 						if (item->bonus[bonus_counter].type == BonusData::PRIMARY_STAT && item->bonus[bonus_counter].index == j)
-							pc->stats.primary_additional[j] += static_cast<int>(item->bonus[bonus_counter].value.get());
+							owner->stats.primary_additional[j] += static_cast<int>(item->bonus[bonus_counter].value.get());
 					}
 
 					bonus_counter++;
@@ -472,7 +475,7 @@ void PlayerInventory::applyEquipment() {
 
 				for (size_t j = 0; j < eset->primary_stats.list.size(); ++j) {
 					if (item_set->bonus[bonus_counter].type == BonusData::PRIMARY_STAT && item_set->bonus[bonus_counter].index == j)
-						pc->stats.primary_additional[j] += static_cast<int>(item_set->bonus[bonus_counter].value.get());
+						owner->stats.primary_additional[j] += static_cast<int>(item_set->bonus[bonus_counter].value.get());
 				}
 			}
 		}
@@ -482,7 +485,7 @@ void PlayerInventory::applyEquipment() {
 			ItemStack& stack = inventory[EQUIPMENT].storage[i];
 
 			if (items->isValid(stack.item)) {
-				if ((isEquipSlotActive(i) && !items->requirementsMet(&pc->stats, stack.item)) || (!stack.empty() && slot_type[i] != items->items[stack.item]->type)) {
+				if ((isEquipSlotActive(i) && !items->requirementsMet(&owner->stats, stack.item)) || (!stack.empty() && slot_type[i] != items->items[stack.item]->type)) {
 					add(stack, CARRIED, ItemStorage::NO_SLOT, ADD_PLAY_SOUND, !ADD_AUTO_EQUIP);
 					stack.clear();
 					checkRequired = true;
@@ -492,23 +495,23 @@ void PlayerInventory::applyEquipment() {
 	}
 
 	// defaults
-	for (unsigned i=0; i<pc->stats.powers_list_items.size(); ++i) {
-		PowerID id = pc->stats.powers_list_items[i];
-		// pc->stats.hp > 0 is hack to keep on_death revive passives working
-		if (powers->powers[id]->passive && pc->stats.hp > 0 && !powers->powers[id]->passive_effects_persist) {
-			pc->stats.effects.removeEffectPassive(id);
+	for (unsigned i=0; i<owner->stats.powers_list_items.size(); ++i) {
+		PowerID id = owner->stats.powers_list_items[i];
+		// owner->stats.hp > 0 is hack to keep on_death revive passives working
+		if (powers->powers[id]->passive && owner->stats.hp > 0 && !powers->powers[id]->passive_effects_persist) {
+			owner->stats.effects.removeEffectPassive(id);
 		}
 	}
-	pc->stats.powers_list_items.clear();
+	owner->stats.powers_list_items.clear();
 
 	// reset wielding vars
-	pc->stats.equip_flags.clear();
+	owner->stats.equip_flags.clear();
 
 	// remove all effects and bonuses added by items
-	pc->stats.effects.clearItemEffects();
+	owner->stats.effects.clearItemEffects();
 
 	// reset power level bonuses
-	pbs->clearBonusLevels();
+	powerbonus->clearBonusLevels();
 
 	applyItemStats();
 	applyItemSetBonuses(active_sets, active_set_quantities);
@@ -529,8 +532,8 @@ void PlayerInventory::applyEquipment() {
 	}
 
 	// disable equipment slots via passive powers
-	for (size_t i = 0; i < pc->stats.powers_passive.size(); ++i) {
-		PowerID id = pc->stats.powers_passive[i];
+	for (size_t i = 0; i < owner->stats.powers_passive.size(); ++i) {
+		PowerID id = owner->stats.powers_passive[i];
 		if (!powers->powers[id]->passive)
 			continue;
 
@@ -538,8 +541,8 @@ void PlayerInventory::applyEquipment() {
 			disableEquipmentSlot(powers->powers[id]->disable_equip_slots[j]);
 		}
 	}
-	for (size_t i = 0; i < pc->stats.powers_list_items.size(); ++i) {
-		PowerID id = pc->stats.powers_list_items[i];
+	for (size_t i = 0; i < owner->stats.powers_list_items.size(); ++i) {
+		PowerID id = owner->stats.powers_list_items[i];
 		if (!powers->powers[id]->passive)
 			continue;
 
@@ -549,10 +552,10 @@ void PlayerInventory::applyEquipment() {
 	}
 
 	// update stat display
-	pc->stats.refresh_stats = true;
+	owner->stats.refresh_stats = true;
 
-	if (pc->stats.cur_state == StatBlock::ENTITY_POWER) {
-		pc->stats.cur_state = StatBlock::ENTITY_STANCE;
+	if (owner->stats.cur_state == StatBlock::ENTITY_POWER) {
+		owner->stats.cur_state = StatBlock::ENTITY_STANCE;
 	}
 
 	recomputeCurrency();
@@ -589,9 +592,9 @@ void PlayerInventory::applyItemStats() {
 
 	// reset additional values
 	for (size_t i = 0; i < eset->damage_types.list.size(); ++i) {
-		pc->stats.item_base_dmg[i].min = pc->stats.item_base_dmg[i].max = 0;
+		owner->stats.item_base_dmg[i].min = owner->stats.item_base_dmg[i].max = 0;
 	}
-	pc->stats.item_base_abs.min = pc->stats.item_base_abs.max = 0;
+	owner->stats.item_base_abs.min = owner->stats.item_base_abs.max = 0;
 
 	// apply stats from all items
 	for (int i=0; i<MAX_EQUIPPED; i++) {
@@ -604,18 +607,18 @@ void PlayerInventory::applyItemStats() {
 
 			// apply base stats
 			for (size_t j = 0; j < eset->damage_types.list.size(); ++j) {
-				pc->stats.item_base_dmg[j].min += item->base_dmg[j].min.get();
-				pc->stats.item_base_dmg[j].max += item->base_dmg[j].max.get();
+				owner->stats.item_base_dmg[j].min += item->base_dmg[j].min.get();
+				owner->stats.item_base_dmg[j].max += item->base_dmg[j].max.get();
 			}
 
 			// set equip flags
 			for (unsigned j=0; j<item->equip_flags.size(); ++j) {
-				pc->stats.equip_flags.insert(item->equip_flags[j]);
+				owner->stats.equip_flags.insert(item->equip_flags[j]);
 			}
 
 			// apply absorb bonus
-			pc->stats.item_base_abs.min += item->base_abs.min.get();
-			pc->stats.item_base_abs.max += item->base_abs.max.get();
+			owner->stats.item_base_abs.min += item->base_abs.min.get();
+			owner->stats.item_base_abs.max += item->base_abs.max.get();
 
 			// apply various bonuses
 			unsigned bonus_counter = 0;
@@ -626,9 +629,9 @@ void PlayerInventory::applyItemStats() {
 
 			// add item powers
 			if (item->power > 0) {
-				pc->stats.powers_list_items.push_back(item->power);
-				if (pc->stats.effects.triggered_others)
-					powers->activateSinglePassive(&pc->stats, item->power);
+				owner->stats.powers_list_items.push_back(item->power);
+				if (owner->stats.effects.triggered_others)
+					powers->activateSinglePassive(&owner->stats, item->power);
 			}
 		}
 	}
@@ -676,7 +679,7 @@ void PlayerInventory::applyBonus(const BonusData* bdata) {
 		ed.id = eset->primary_stats.list[bdata->index].id;
 	}
 	else if (bdata->power_id > 0) {
-		pbs->addBonusLevels(bdata->power_id, static_cast<int>(bdata->value.get()));
+		powerbonus->addBonusLevels(bdata->power_id, static_cast<int>(bdata->value.get()));
 		return; // don't add item effect
 	}
 	else if (bdata->type == BonusData::RESOURCE_STAT) {
@@ -691,7 +694,7 @@ void PlayerInventory::applyBonus(const BonusData* bdata) {
 	ep.source_type = Power::SOURCE_TYPE_HERO;
 	ep.is_from_item = true;
 
-	pc->stats.effects.addEffect(&pc->stats, ed, ep);
+	owner->stats.effects.addEffect(&owner->stats, ed, ep);
 }
 
 // Moved from MenuInventory::disableEquipmentSlot() in P1.3d-4b-3. Confirmed by grep before moving:
@@ -767,10 +770,11 @@ void PlayerInventory::fillEquipmentSlots() {
 // (still above, in the same relative place this docstring now sits) already explained why the CALL
 // SITE moved to GameStatePlay's tick back in P1.3b, ahead of the code itself: "the CODE still lives
 // here because it needs the inventory, and the inventory is still menu-owned... this method moves
-// with the rest of the storage operations, its call site becoming pc->inventory.applyDeathPenalty()."
-// That call site is pinv->applyDeathPenalty() now; PlayerInventory ended up as the owner it predicted.
+// with the rest of the storage operations, its call site becoming owner->inventory.applyDeathPenalty()."
+// That call site is inventoryFor(id)->applyDeathPenalty() now; PlayerInventory ended up as the
+// owner it predicted.
 void PlayerInventory::applyDeathPenalty() {
-	if (pc->stats.death_penalty && eset->death_penalty.enabled) {
+	if (owner->stats.death_penalty && eset->death_penalty.enabled) {
 		std::string death_message = "";
 
 		// remove a % of currency
@@ -782,19 +786,19 @@ void PlayerInventory::applyDeathPenalty() {
 
 		// remove a % of either total xp or xp since the last level
 		if (eset->death_penalty.xp > 0) {
-			if (pc->stats.xp > 0)
-				pc->stats.xp -= static_cast<int>((static_cast<float>(pc->stats.xp) * eset->death_penalty.xp) / 100.f);
+			if (owner->stats.xp > 0)
+				owner->stats.xp -= static_cast<int>((static_cast<float>(owner->stats.xp) * eset->death_penalty.xp) / 100.f);
 			death_message += msg->getv("Lost %s%% of total XP.", Utils::floatToString(eset->death_penalty.xp, eset->number_format.death_penalty).c_str()) + ' ';
 		}
 		else if (eset->death_penalty.xp_current > 0) {
-			if (pc->stats.xp - eset->xp.getLevelXP(pc->stats.level) > 0)
-				pc->stats.xp -= static_cast<int>((static_cast<float>(pc->stats.xp - eset->xp.getLevelXP(pc->stats.level)) * eset->death_penalty.xp_current) / 100.f);
+			if (owner->stats.xp - eset->xp.getLevelXP(owner->stats.level) > 0)
+				owner->stats.xp -= static_cast<int>((static_cast<float>(owner->stats.xp - eset->xp.getLevelXP(owner->stats.level)) * eset->death_penalty.xp_current) / 100.f);
 			death_message += msg->getv("Lost %s%% of current level XP.", Utils::floatToString(eset->death_penalty.xp_current, eset->number_format.death_penalty).c_str()) + ' ';
 		}
 
 		// prevent down-leveling from removing too much xp
-		if (pc->stats.xp < eset->xp.getLevelXP(pc->stats.level))
-			pc->stats.xp = eset->xp.getLevelXP(pc->stats.level);
+		if (owner->stats.xp < eset->xp.getLevelXP(owner->stats.level))
+			owner->stats.xp = eset->xp.getLevelXP(owner->stats.level);
 
 		// remove a random carried item
 		if (eset->death_penalty.item) {
@@ -819,8 +823,8 @@ void PlayerInventory::applyDeathPenalty() {
 			}
 		}
 
-		pc->logMsg(death_message, Avatar::MSG_NORMAL);
+		owner->logMsg(death_message, Avatar::MSG_NORMAL);
 
-		pc->stats.death_penalty = false;
+		owner->stats.death_penalty = false;
 	}
 }

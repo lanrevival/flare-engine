@@ -104,8 +104,14 @@ void MenuActiveEffects::logic() {
 	}
 	int wrap_dir = (wrap_before ? -1 : 1);
 
-	for (size_t i = 0; i < pc->stats.effects.effect_list.size(); ++i) {
-		Effect &ed = pc->stats.effects.effect_list[i];
+	// P2.3b: MenuActiveEffects wasn't in P2.3's own file list (a real omission -- see
+	// plans/phase2/P2.3b-delete-player-globals.md), so it never got a bound player member the way
+	// P2.3's other menus did. Reading playerm->local() directly here, rather than adding a
+	// constructor parameter, avoids touching MenuManager.cpp's construction call (out of this
+	// plan's scope) -- kind A, the local player, same as every other menu.
+	Avatar* player = playerm->local();
+	for (size_t i = 0; i < player->stats.effects.effect_list.size(); ++i) {
+		Effect &ed = player->stats.effects.effect_list[i];
 
 		if (ed.icon == -1)
 			continue;

@@ -532,11 +532,16 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 		stats.level_up = true;
 		stats.level = eset->xp.getLevelFromXP(stats.xp);
 		logMsg(msg->getv("Congratulations, you have reached level %d!", stats.level), MSG_NORMAL);
-		if (pc->stats.stat_points_per_level > 0) {
+		// P2.3b: this used to read the stat_points_per_level/power_points_per_level fields off
+		// the global player's stats -- a copy of a per-avatar field being checked on THIS avatar's
+		// own level-up, one line above. This avatar's own stats (already a member, no lookup
+		// needed) is the right read regardless of which avatar this is (kind A: the specific
+		// player already in scope, via "this").
+		if (stats.stat_points_per_level > 0) {
 			logMsg(msg->get("You may increase one or more attributes through the Character Menu."), MSG_NORMAL);
 			newLevelNotification = true;
 		}
-		if (pc->stats.power_points_per_level > 0) {
+		if (stats.power_points_per_level > 0) {
 			logMsg(msg->get("You may unlock one or more abilities through the Powers Menu."), MSG_NORMAL);
 		}
 		stats.recalc();
@@ -1203,14 +1208,19 @@ std::string Avatar::getGfxFromType(const std::string& gfx_type) {
 	feet_index = -1;
 	std::string gfx;
 
-	if (pinv) {
-		ItemStorage& equipment = pinv->inventory[PlayerInventory::EQUIPMENT];
+	// P2.3b: this used to read the global pinv, which "worked" only because there was ever one
+	// real player. THIS avatar's own inventory, via playerm, is the specific-player-already-in-
+	// scope read (kind A) -- "this" avatar is id, so playerm->inventoryFor(id) is always the right
+	// inventory regardless of which avatar getGfxFromType() is called on.
+	PlayerInventory* inventory = playerm->inventoryFor(id);
+	if (inventory) {
+		ItemStorage& equipment = inventory->inventory[PlayerInventory::EQUIPMENT];
 
 		for (int i = 0; i < equipment.getSlotNumber(); i++) {
-			if (!pinv->isEquipSlotActive(i))
+			if (!inventory->isEquipSlotActive(i))
 				continue;
 
-			ItemType& equip_item_type = items->getItemType(pinv->slot_type[i]);
+			ItemType& equip_item_type = items->getItemType(inventory->slot_type[i]);
 
 			if (items->isValid(equipment[i].item) && gfx_type == equip_item_type.id) {
 				gfx = items->items[equipment[i].item]->gfx;

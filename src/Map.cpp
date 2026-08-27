@@ -367,11 +367,12 @@ void Map::activatePower(PowerID power_index, unsigned statblock_index, const FPo
 // Ported from MapRenderer::checkNearestEvent() -- P1.4c. Dropped: the tooltip/cursor half
 // (show_tooltip, createTooltip(), tip_pos), all presentation and gated on inpt->usingMouse()/
 // usingTouchscreen() in the original, neither of which the server needs. it->reachable_from's
-// check reads pc->stats.pos here where the original read mapr->cam.pos -- the ATTR's own
+// check reads player_pos here where the original read mapr->cam.pos -- the ATTR's own
 // documented meaning is "if the hero is inside this rectangle" (EventManager.cpp), so this is a
 // more faithful read of the field's intent than the client's camera-position proxy, not a new
-// approximation on top of one.
-void Map::checkNearestEventInteraction() {
+// approximation on top of one. player_pos is passed in by the caller (P2.3b -- kind A, the
+// specific player this interaction check is for, previously read off the global pc directly).
+void Map::checkNearestEventInteraction(const FPoint& player_pos) {
 	std::vector<Event>::iterator it;
 	std::vector<Event>::iterator nearest = events.end();
 	float best_distance = std::numeric_limits<float>::max();
@@ -389,8 +390,8 @@ void Map::checkNearestEventInteraction() {
 		// skip events on cooldown
 		if (!it->cooldown.isEnd() || !it->delay.isEnd()) continue;
 
-		float distance = Utils::calcDist(pc->stats.pos, it->center);
-		if (((it->reachable_from.w == 0 && it->reachable_from.h == 0) || Utils::isWithinRect(it->reachable_from, Point(pc->stats.pos)))
+		float distance = Utils::calcDist(player_pos, it->center);
+		if (((it->reachable_from.w == 0 && it->reachable_from.h == 0) || Utils::isWithinRect(it->reachable_from, Point(player_pos)))
 				&& distance < eset->misc.interact_range && distance < best_distance) {
 			best_distance = distance;
 			nearest = it;
@@ -1284,7 +1285,12 @@ int Map::addEventStatBlock(Event &evnt) {
 	if (ec_power_level) {
 		SpawnLevel sl;
 		sl.parseString(ec_power_level->s);
-		sl.applyToStatBlock(statb, &pc->stats);
+		// P2.3b: matches EntityManager.cpp's own applyToStatBlock() call site -- kind A, the local
+		// player, same precedent (this argument only matters when ratio_source isn't
+		// RATIO_SOURCE_HERO; applyToStatBlock() substitutes the party average itself otherwise --
+		// see its own D15 comment above).
+		Avatar* local = playerm->local();
+		sl.applyToStatBlock(statb, local ? &local->stats : NULL);
 	}
 
 	statb->perfect_accuracy = true; // never miss AND never overhit

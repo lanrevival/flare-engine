@@ -73,6 +73,15 @@ PlayerID PlayerManager::create(PlayerID id) {
 	ActionBarState* actionbar = new ActionBarState();
 	PowerBonusState* powerbonus = new PowerBonusState();
 
+	// P2.3b. Wire each object to the sibling(s) its own methods need, so PlayerInventory/
+	// ActionBarState/PowerBonusState never have to guess which player they belong to by reaching
+	// for a global -- see PlayerInventory.h/ActionBarState.h/PowerBonusState.h's matching comments.
+	inventory->owner = avatar;
+	inventory->actionbar = actionbar;
+	inventory->powerbonus = powerbonus;
+	actionbar->owner = avatar;
+	powerbonus->actionbar = actionbar;
+
 	players.insert(players.begin() + static_cast<std::vector<Avatar*>::difference_type>(insert_at), avatar);
 	inventories.insert(inventories.begin() + static_cast<std::vector<PlayerInventory*>::difference_type>(insert_at), inventory);
 	actionbars.insert(actionbars.begin() + static_cast<std::vector<ActionBarState*>::difference_type>(insert_at), actionbar);

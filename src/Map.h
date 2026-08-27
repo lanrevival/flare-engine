@@ -263,8 +263,9 @@ public:
 	// The proximity+ACCEPT-key half of MapRenderer::checkNearestEvent() -- P1.4c. Finds the
 	// nearest active, in-range, off-cooldown event with a hotspot and, on an unlocked ACCEPT
 	// press, executes it. The mouse-hover/tooltip half of that function stays presentation-only
-	// and does not move here -- see P1.4c's plan doc.
-	void checkNearestEventInteraction();
+	// and does not move here -- see P1.4c's plan doc. player_pos is the specific player this
+	// interaction check is for (P2.3b -- previously read the global pc directly).
+	void checkNearestEventInteraction(const FPoint& player_pos);
 
 	// some events are automatically triggered when the map is loaded
 	void executeOnLoadEvents();

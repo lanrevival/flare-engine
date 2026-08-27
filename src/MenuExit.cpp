@@ -38,7 +38,13 @@ MenuExit::MenuExit()
 	, exitClicked(false)
 	, reload_music(false)
 {
-	menu_config->setHero(pc);
+	// P2.3b: MenuExit wasn't in P2.3's own file list (a real omission -- see
+	// plans/phase2/P2.3b-delete-player-globals.md). Reading playerm->local() directly, rather than
+	// adding a constructor parameter, avoids touching MenuManager.cpp's construction call (out of
+	// this plan's scope) -- kind A, the local player, same as every other menu. playerm->setLocal()
+	// has already run by the time MenuManager constructs this (same ordering P2.3's MenuManager
+	// report documents for its own menus).
+	menu_config->setHero(playerm->local());
 	align();
 }
 
@@ -70,7 +76,7 @@ void MenuExit::logic() {
 		visible = false;
 		menu_config->clicked_pause_save = false;
 
-		mapr->respawn_point = pc->stats.pos;
+		mapr->respawn_point = playerm->local()->stats.pos;
 		save_load->saveGame();
 	}
 }

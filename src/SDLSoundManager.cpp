@@ -81,6 +81,11 @@ void SDLSoundManager::logic() {
 
 	std::vector<int> cleanup;
 
+	// P2.3b: the listener is wherever the local machine's own player is -- there is exactly one
+	// audio device (and one player-perspective) per client, so this is kind A, not a candidate for
+	// per-player iteration even once several players exist.
+	Avatar* local = playerm->local();
+
 	while(it != playback.end()) {
 
 		/* if sound is finished and should be unloaded add it to cleanup and continue with next */
@@ -98,8 +103,8 @@ void SDLSoundManager::logic() {
 
 		/* control mixing playback depending on distance */
 		Uint8 dist = 0;
-		if (pc && eset->misc.sound_falloff > 0) {
-			float v = Utils::calcDist(pc->stats.pos, it->second.location) / static_cast<float>(eset->misc.sound_falloff);
+		if (local && eset->misc.sound_falloff > 0) {
+			float v = Utils::calcDist(local->stats.pos, it->second.location) / static_cast<float>(eset->misc.sound_falloff);
 			if (it->second.loop) {
 				if (v < 1.0 && it->second.paused) {
 					Mix_Resume(it->first);
@@ -265,10 +270,12 @@ void SDLSoundManager::play(SoundID sid, const std::string& channel, const FPoint
 	if (c == -1)
 		Utils::logError("SoundManager: Failed to play sound, no more channels available.");
 
-	// precalculate mixing volume if sound has a location
+	// precalculate mixing volume if sound has a location. P2.3b: kind A, same "one listener per
+	// client" reasoning as logic() above.
+	Avatar* local = playerm->local();
 	Uint8 d = 0;
-	if (pc && eset->misc.sound_falloff > 0 && (p.location.x != 0 || p.location.y != 0)) {
-		float v = 255.0f * (Utils::calcDist(pc->stats.pos, p.location) / static_cast<float>(eset->misc.sound_falloff));
+	if (local && eset->misc.sound_falloff > 0 && (p.location.x != 0 || p.location.y != 0)) {
+		float v = 255.0f * (Utils::calcDist(local->stats.pos, p.location) / static_cast<float>(eset->misc.sound_falloff));
 		v = std::min<float>(std::max<float>(v, 0.0f), 255.0f);
 		d = Uint8(v);
 	}

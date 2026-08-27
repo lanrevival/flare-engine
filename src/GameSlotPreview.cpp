@@ -232,9 +232,13 @@ void GameSlotPreview::loadGraphicsFromInventory(MenuInventory* menu_inv) {
 	std::vector<std::string> preview_gfx = default_gfx;
 
 	if (items && menu_inv) {
-		size_t storage_size = static_cast<size_t>(pinv->inventory[PlayerInventory::EQUIPMENT].getSlotNumber());
+		// P2.3b: this used to read the global pinv, silently ignoring the menu_inv the caller
+		// passed in (and the null check on it, right above) -- kind A, the specific player
+		// already in scope via the parameter: menu_inv's own bound player_inventory (P2.3).
+		PlayerInventory* inventory = menu_inv->player_inventory;
+		size_t storage_size = static_cast<size_t>(inventory->inventory[PlayerInventory::EQUIPMENT].getSlotNumber());
 		for (size_t i = 0; i < storage_size; ++i) {
-			ItemID item_id = pinv->inventory[PlayerInventory::EQUIPMENT].storage[i].item;
+			ItemID item_id = inventory->inventory[PlayerInventory::EQUIPMENT].storage[i].item;
 
 			if (item_id == 0)
 				continue;
@@ -244,7 +248,7 @@ void GameSlotPreview::loadGraphicsFromInventory(MenuInventory* menu_inv) {
 				continue;
 			}
 
-			if (!pinv->isEquipSlotActive(i)) {
+			if (!inventory->isEquipSlotActive(i)) {
 				continue;
 			}
 

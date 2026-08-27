@@ -38,7 +38,8 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "StatBlock.h"
 
 ActionBarState::ActionBarState()
-	: slots_count(0)
+	: owner(NULL)
+	, slots_count(0)
 	, updated(false)
 	, twostep_slot(-1) {
 	// MENU_COUNT is a compile-time constant, unlike slots_count, so this can size itself here
@@ -144,9 +145,9 @@ void ActionBarState::set(std::vector<PowerID> power_id, bool skip_empty) {
 //     slot_enabled, right where it's needed.
 //   - the "not enough resources" sound effect (snd->play(sfx_unable_to_cast, ...)) is dropped --
 //     sfx_unable_to_cast is a MenuActionBar-owned SoundID with no sim-side equivalent, and the
-//     server's SoundManager is already a no-op. pc->logMsg(...), which pushes onto the sim-owned
+//     server's SoundManager is already a no-op. owner->logMsg(...), which pushes onto the sim-owned
 //     log_msg queue read by checkLog()'s ported fragment, is kept.
-//   - mapr->cam.pos, read in the mouse-aim target branch, becomes pc->stats.pos -- see this plan's
+//   - mapr->cam.pos, read in the mouse-aim target branch, becomes owner->stats.pos -- see this plan's
 //     "Camera-position substitution".
 void ActionBarState::checkHotkeyActions(std::vector<ActionData> &action_queue) {
 	bool enable_mm_attack = (!settings->mouse_move || inpt->pressing[Input::SHIFT] || inpt->usingTouchscreen());
@@ -159,15 +160,15 @@ void ActionBarState::checkHotkeyActions(std::vector<ActionData> &action_queue) {
 	unsigned mm_slot = settings->mouse_move_swap ? 11 : 10;
 	bool mouse_move_target = false;
 	if (settings->mouse_move) {
-		mouse_move_target = pc->mm_target_object == Avatar::MM_TARGET_ENTITY &&
-		                    powers->checkCombatRange(powers->checkReplaceByEffect(hotkeys_mod[mm_slot], &pc->stats), &pc->stats, pc->mm_target_object_pos) &&
-		                    wmap->collider.lineOfSight(pc->stats.pos.x, pc->stats.pos.y, pc->mm_target_object_pos.x, pc->mm_target_object_pos.y);
+		mouse_move_target = owner->mm_target_object == Avatar::MM_TARGET_ENTITY &&
+		                    powers->checkCombatRange(powers->checkReplaceByEffect(hotkeys_mod[mm_slot], &owner->stats), &owner->stats, owner->mm_target_object_pos) &&
+		                    wmap->collider.lineOfSight(owner->stats.pos.x, owner->stats.pos.y, owner->mm_target_object_pos.x, owner->mm_target_object_pos.y);
 
-		if (mouse_move_target && pc->stats.cur_state == StatBlock::ENTITY_MOVE) {
-			pc->stats.cur_state = StatBlock::ENTITY_STANCE;
+		if (mouse_move_target && owner->stats.cur_state == StatBlock::ENTITY_MOVE) {
+			owner->stats.cur_state = StatBlock::ENTITY_STANCE;
 		}
-		else if (!mouse_move_target && pc->mm_target_object == Avatar::MM_TARGET_ENTITY && pc->stats.cur_state == StatBlock::ENTITY_STANCE) {
-			pc->stats.cur_state = StatBlock::ENTITY_MOVE;
+		else if (!mouse_move_target && owner->mm_target_object == Avatar::MM_TARGET_ENTITY && owner->stats.cur_state == StatBlock::ENTITY_STANCE) {
+			owner->stats.cur_state = StatBlock::ENTITY_MOVE;
 		}
 	}
 
@@ -210,20 +211,20 @@ void ActionBarState::checkHotkeyActions(std::vector<ActionData> &action_queue) {
 			const Power* power = powers->powers[action.power];
 
 			// Substitute for slots[i]->enabled -- see this function's header comment.
-			bool slot_enabled = pc->stats.canUsePower(hotkeys_mod[i], !StatBlock::CAN_USE_PASSIVE)
-			                  && pc->power_cooldown_timers[hotkeys_mod[i]]->isEnd()
-			                  && pc->power_cast_timers[hotkeys_mod[i]]->isEnd()
+			bool slot_enabled = owner->stats.canUsePower(hotkeys_mod[i], !StatBlock::CAN_USE_PASSIVE)
+			                  && owner->power_cooldown_timers[hotkeys_mod[i]]->isEnd()
+			                  && owner->power_cast_timers[hotkeys_mod[i]]->isEnd()
 			                  && (twostep_slot == -1 || static_cast<unsigned>(twostep_slot) == i);
 
 			bool not_enough_resources = false;
 			if (slot_fail_cooldown[i].isEnd()) {
-				if (pc->stats.mp < power->requires_mp) {
-					pc->logMsg(msg->get("Not enough MP."), Avatar::MSG_NORMAL);
+				if (owner->stats.mp < power->requires_mp) {
+					owner->logMsg(msg->get("Not enough MP."), Avatar::MSG_NORMAL);
 					not_enough_resources = true;
 				}
 				for (size_t j = 0; j < eset->resource_stats.list.size(); ++j) {
-					if (pc->stats.resource_stats[j] < power->requires_resource_stat[j]) {
-						pc->logMsg(eset->resource_stats.list[j].text_log_low, Avatar::MSG_NORMAL);
+					if (owner->stats.resource_stats[j] < power->requires_resource_stat[j]) {
+						owner->logMsg(eset->resource_stats.list[j].text_log_low, Avatar::MSG_NORMAL);
 						not_enough_resources = true;
 					}
 				}
@@ -246,38 +247,38 @@ void ActionBarState::checkHotkeyActions(std::vector<ActionData> &action_queue) {
 
 			// set the target depending on how the power was triggered
 			if (have_aim && settings->mouse_aim && (settings->mouse_move || !inpt->usingTouchscreen())) {
-				action.target = pc->stats.pos;
+				action.target = owner->stats.pos;
 
 				if (power->target_nearest > 0) {
-					if (!power->requires_corpse && powers->checkNearestTargeting(power, &pc->stats, false)) {
-						action.target = pc->stats.target_nearest->pos;
+					if (!power->requires_corpse && powers->checkNearestTargeting(power, &owner->stats, false)) {
+						action.target = owner->stats.target_nearest->pos;
 					}
-					else if (power->requires_corpse && powers->checkNearestTargeting(power, &pc->stats, true)) {
-						action.target = pc->stats.target_nearest_corpse->pos;
+					else if (power->requires_corpse && powers->checkNearestTargeting(power, &owner->stats, true)) {
+						action.target = owner->stats.target_nearest_corpse->pos;
 					}
 				}
 				else if (mouse_move_target) {
-					action.target = pc->mm_target_object_pos;
+					action.target = owner->mm_target_object_pos;
 				}
 				else {
 					if (power->aim_assist)
-						action.target = Utils::screenToMap(inpt->mouse.x,  inpt->mouse.y + eset->misc.aim_assist, pc->stats.pos.x, pc->stats.pos.y);
+						action.target = Utils::screenToMap(inpt->mouse.x,  inpt->mouse.y + eset->misc.aim_assist, owner->stats.pos.x, owner->stats.pos.y);
 					else
-						action.target = Utils::screenToMap(inpt->mouse.x,  inpt->mouse.y, pc->stats.pos.x, pc->stats.pos.y);
+						action.target = Utils::screenToMap(inpt->mouse.x,  inpt->mouse.y, owner->stats.pos.x, owner->stats.pos.y);
 				}
 			}
 			else {
-				action.target = Utils::calcVector(pc->stats.pos, pc->stats.direction, pc->stats.melee_range);
+				action.target = Utils::calcVector(owner->stats.pos, owner->stats.direction, owner->stats.melee_range);
 			}
 
 			bool can_use_power = slot_enabled &&
-				(power->new_state == Power::STATE_INSTANT || (pc->stats.cooldown.isEnd() && pc->stats.cur_state != StatBlock::ENTITY_POWER && pc->stats.cur_state != StatBlock::ENTITY_HIT)) &&
-				powers->hasValidTarget(action.power, &pc->stats, action.target);
+				(power->new_state == Power::STATE_INSTANT || (owner->stats.cooldown.isEnd() && owner->stats.cur_state != StatBlock::ENTITY_POWER && owner->stats.cur_state != StatBlock::ENTITY_HIT)) &&
+				powers->hasValidTarget(action.power, &owner->stats, action.target);
 
 			// add it to the queue
 			if (can_use_power) {
 				if (i != mm_slot && !action.instant_item) {
-					pc->mm_target_object = Avatar::MM_TARGET_NONE;
+					owner->mm_target_object = Avatar::MM_TARGET_NONE;
 				}
 
 				slot_fail_cooldown[i].reset(Timer::BEGIN);

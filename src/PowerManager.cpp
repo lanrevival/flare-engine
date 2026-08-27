@@ -1913,8 +1913,15 @@ bool PowerManager::transform(PowerID power_index, StatBlock *src_stats, const FP
 	// locking the actionbar prevents power usage until after the hero is transformed
 	inpt->lockActionBar();
 
+	// P2.3b: src_stats is the caster (any entity, not necessarily a player), but this message
+	// always went to the single global player's log regardless -- kind A, bound explicitly to
+	// playerm->local(), preserving that pre-existing quirk unchanged rather than fixing it (this
+	// plan is behaviour-preserving; making the message follow the actual caster would need
+	// StatBlock to carry an owner back-pointer, out of scope here).
+	Avatar* local = playerm->local();
+
 	if (src_stats->transformed && power->spawn_type != "untransform") {
-		pc->logMsg(msg->get("You are already transformed, untransform first."), Avatar::MSG_NORMAL);
+		local->logMsg(msg->get("You are already transformed, untransform first."), Avatar::MSG_NORMAL);
 		return false;
 	}
 
@@ -1926,7 +1933,7 @@ bool PowerManager::transform(PowerID power_index, StatBlock *src_stats, const FP
 			src_stats->transform_type = "untransform"; // untransform() is called only if type !=""
 		}
 		else {
-			pc->logMsg(msg->get("Could not untransform at this position."), Avatar::MSG_NORMAL);
+			local->logMsg(msg->get("Could not untransform at this position."), Avatar::MSG_NORMAL);
 			inpt->unlockActionBar();
 			collider->block(src_stats->pos.x, src_stats->pos.y, false);
 			return false;
@@ -2156,9 +2163,15 @@ void PowerManager::activatePassives(StatBlock *src_stats) {
 
 	activatePassivePostPowers(src_stats);
 
-	// passive powers can lock equipment slots, so update equipment here
+	// passive powers can lock equipment slots, so update equipment here.
+	// P2.3b: src_stats->hero guarantees this IS a player, but StatBlock has no owner back-pointer
+	// to say WHICH one -- every caller of this function that can ever reach here with hero==true
+	// (Avatar::logic() on itself, GameStatePlay/main_server explicitly on the local player) is, in
+	// this plan's single-real-player-testable scope, always playerm->local() -- kind A, documented
+	// gap: true multi-avatar support needs StatBlock itself to carry that back-pointer (out of
+	// this plan's scope, StatBlock.h/.cpp are not in its file list).
 	if (activated_passive && src_stats->hero)
-		pinv->applyEquipment();
+		playerm->inventoryFor(playerm->local_id)->applyEquipment();
 }
 
 bool PowerManager::activatePassiveByTrigger(PowerID power_id, StatBlock *src_stats, bool& triggered_others) {
@@ -2331,10 +2344,14 @@ bool PowerManager::checkNearestTargeting(const Power* pow, const StatBlock *src_
 }
 
 bool PowerManager::checkRequiredItems(const Power* pow, const StatBlock *src_stats) {
+	// P2.3b: same documented gap as activatePassives() above -- src_stats is the caster, but this
+	// always checked the single global player's inventory regardless of who src_stats actually is.
+	// kind A, bound to playerm->local(), preserving that pre-existing behaviour unchanged.
+	PlayerInventory* local_inv = playerm->inventoryFor(playerm->local_id);
 	for (size_t i = 0; i < pow->required_items.size(); ++i) {
 		if (pow->required_items[i].id > 0) {
 			if (pow->required_items[i].equipped) {
-				if (!pinv->equipmentContain(pow->required_items[i].id, 1)) {
+				if (!local_inv->equipmentContain(pow->required_items[i].id, 1)) {
 					return false;
 				}
 			}
@@ -2347,7 +2364,7 @@ bool PowerManager::checkRequiredItems(const Power* pow, const StatBlock *src_sta
 				// We can set required quantity to 0 in order to not consume the item,
 				// but checking for presence of the item requires >0 quantity
 				int quantity = std::max(1, pow->required_items[i].quantity);
-				if (!pinv->inventory[PlayerInventory::CARRIED].contain(pow->required_items[i].id, quantity)) {
+				if (!local_inv->inventory[PlayerInventory::CARRIED].contain(pow->required_items[i].id, quantity)) {
 					return false;
 				}
 			}

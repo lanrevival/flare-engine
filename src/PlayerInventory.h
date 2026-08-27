@@ -48,8 +48,22 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "ItemStorage.h"
 #include "Utils.h"
 
+class ActionBarState;
+class Avatar;
+class PowerBonusState;
+
 class PlayerInventory {
 public:
+	// P2.3b. Set once by PlayerManager::create(), right alongside the parallel players/
+	// inventories/actionbars/powerbonuses arrays it allocates these four objects into (P2.1).
+	// Every method below that used to reach for the pc/pab/pbs globals now goes through these
+	// instead -- owner is THIS inventory's own Avatar, actionbar/powerbonus are the sibling
+	// ActionBarState/PowerBonusState for that same player, not whichever player happened to be
+	// local() at the time. See plans/phase2/P2.3b-delete-player-globals.md.
+	Avatar* owner;
+	ActionBarState* actionbar;
+	PowerBonusState* powerbonus;
+
 	// Indices into inventory[] below. MenuInventory::EQUIPMENT and ::CARRIED still exist and still
 	// have these values; they are kept because ~60 call sites outside this class spell them that
 	// way and P1.3d-4b is where those move.

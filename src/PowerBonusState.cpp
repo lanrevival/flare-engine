@@ -21,7 +21,8 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "SharedGameResources.h"
 
 PowerBonusState::PowerBonusState()
-	: ladder()
+	: actionbar(NULL)
+	, ladder()
 	, current_cell()
 	, bonus_levels() {
 }
@@ -75,7 +76,7 @@ void PowerBonusState::clearActionBarBonusLevels() {
 			bonus_index = ladder[i].size() - 1;
 		PowerID bonus_id = ladder[i][bonus_index];
 
-		pab->addPower(current_id, bonus_id);
+		actionbar->addPower(current_id, bonus_id);
 	}
 }
 
