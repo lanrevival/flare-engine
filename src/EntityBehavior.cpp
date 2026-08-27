@@ -67,6 +67,8 @@ EntityBehavior::EntityBehavior(Entity *_e)
 	, turn_timer()
 	, instant_power(false)
 	, replaced_power_id(0)
+	, nearest_player(NULL)
+	, nearest_alive_player(NULL)
 {
 	// wait when PATH_FOUND_FAIL_THRESHOLD is exceeded
 	path_found_fail_timer.setDuration(Settings::SIM_TICK_HZ * PATH_FOUND_FAIL_WAIT_SECONDS);
@@ -85,13 +87,19 @@ void EntityBehavior::logic() {
 		return;
 	}
 
+	// Resolved once per tick -- see the member comment in EntityBehavior.h. Everything below
+	// this point that used to read the single-player `pc` global reads one of these two instead.
+	nearest_player = playerm->nearestTo(e->stats.pos);
+	nearest_alive_player = playerm->nearestAliveTo(e->stats.pos);
+
 	if (!e->stats.hero_ally) {
-		// SINGLE PLAYER ASSUMPTION. This is distance to *the* avatar. Phase 2 introduces more
-		// than one, and the rule has to become "within encounter_dist of any player", iterated
-		// in a deterministic player order. That is easier than it looks: `encountered` latches
-		// true and is never cleared, so activation is monotone -- a joining player can only wake
-		// more enemies, never put any back to sleep.
-		if (Utils::calcDist(e->stats.pos, pc->stats.pos) <= eset->combat.encounter_dist)
+		// "within encounter_dist of any player" (not gated on alive -- the original single-player
+		// check wasn't either). This is equivalent to checking the *nearest* player's distance:
+		// if any player is within range, the nearest one is necessarily within range too, since
+		// nearest-overall distance is a lower bound on every other player's distance.
+		// `encountered` latches true and is never cleared, so activation is monotone -- a
+		// joining player can only wake more enemies, never put any back to sleep.
+		if (nearest_player && Utils::calcDist(e->stats.pos, nearest_player->stats.pos) <= eset->combat.encounter_dist)
 			e->stats.encountered = true;
 
 		if (!e->stats.encountered)
@@ -153,24 +161,30 @@ void EntityBehavior::findTarget() {
 		return;
 
 	StatBlock *target_stats = NULL;
-	float stealth_threat_range = (e->stats.threat_range * (100 - static_cast<float>(e->stats.hero_stealth))) / 100;
+	// Per-player stealth (P2.2): read directly off the player being evaluated rather than a
+	// cached copy of a single global hero's value. Matches the old GameStatePlay clamp
+	// (entitym->hero_stealth was capped at 100 before this migration).
+	float evaluated_player_stealth = nearest_alive_player ? std::min(nearest_alive_player->stats.get(Stats::STEALTH), 100.f) : 0.f;
+	float stealth_threat_range = (e->stats.threat_range * (100 - evaluated_player_stealth)) / 100;
 
 	// check distance and line of sight between enemy and hero
-	// by default, the enemy pursues the hero directly
-	if (pc->stats.alive) {
-		target_dist = Utils::calcDist(e->stats.pos, pc->stats.pos);
-		target_stats = &pc->stats;
+	// by default, the enemy pursues the nearest alive player (playerm->nearestAliveTo() --
+	// with one player this is identical to the old `pc`; with several, each entity now targets
+	// the player actually nearest to it instead of always id 0 -- the ghost-player fix)
+	if (nearest_alive_player) {
+		target_dist = Utils::calcDist(e->stats.pos, nearest_alive_player->stats.pos);
+		target_stats = &nearest_alive_player->stats;
 	}
 	else {
 		target_dist = 0;
 	}
 	hero_dist = target_dist;
 
-	// if the minion gets too far, transport it to the player pos
-	if (e->stats.hero_ally && e->stats.speed > 0 && (warp_to_hero || hero_dist > ALLY_TELEPORT_DISTANCE) && !e->stats.in_combat) {
+	// if the minion gets too far, transport it to the (nearest) player's pos
+	if (e->stats.hero_ally && e->stats.speed > 0 && (warp_to_hero || hero_dist > ALLY_TELEPORT_DISTANCE) && !e->stats.in_combat && nearest_player) {
 		wmap->collider.unblock(e->stats.pos.x, e->stats.pos.y);
-		e->stats.pos.x = pc->stats.pos.x;
-		e->stats.pos.y = pc->stats.pos.y;
+		e->stats.pos.x = nearest_player->stats.pos.x;
+		e->stats.pos.y = nearest_player->stats.pos.y;
 		wmap->collider.block(e->stats.pos.x, e->stats.pos.y, MapCollision::IS_ALLY);
 		hero_dist = 0;
 		warp_to_hero = false;
@@ -199,7 +213,7 @@ void EntityBehavior::findTarget() {
 	}
 
 	// check line-of-sight
-	if (target_stats && target_dist < e->stats.threat_range && pc->stats.alive)
+	if (target_stats && target_dist < e->stats.threat_range && nearest_alive_player)
 		los = wmap->collider.lineOfSight(e->stats.pos.x, e->stats.pos.y, target_stats->pos.x, target_stats->pos.y);
 	else
 		los = false;
@@ -213,10 +227,15 @@ void EntityBehavior::findTarget() {
 	}
 
 	// check entering combat (because the player got too close)
+	// nearest_alive_player_stats mirrors the old single-player Avatar pointer's &stats -- target_stats is only ever set to
+	// it while nearest_alive_player is non-NULL (see above), so the NULL guards here keep a dead
+	// or absent player from spuriously comparing equal to a target_stats that also happens to be
+	// NULL (no target).
+	StatBlock* nearest_alive_player_stats = nearest_alive_player ? &nearest_alive_player->stats : NULL;
 	bool close_to_target = false;
-	if (!e->stats.hero_ally && &pc->stats == target_stats)
+	if (!e->stats.hero_ally && nearest_alive_player_stats && nearest_alive_player_stats == target_stats)
 		close_to_target = target_dist < stealth_threat_range;
-	else if (target_stats && &pc->stats != target_stats)
+	else if (target_stats && nearest_alive_player_stats != target_stats)
 		close_to_target = target_dist < e->stats.threat_range;
 
 	if (e->stats.alive && !e->stats.in_combat && los && close_to_target && e->stats.combat_style != StatBlock::COMBAT_PASSIVE) {
@@ -260,11 +279,11 @@ void EntityBehavior::findTarget() {
 	}
 
 	// exit combat if either party is dead
-	if (!e->stats.alive || !pc->stats.alive || (target_stats && !target_stats->alive))
+	if (!e->stats.alive || !nearest_alive_player || (target_stats && !target_stats->alive))
 		e->stats.in_combat = false;
 
 	// exit combat if ally is targeting player
-	if (e->stats.hero_ally && target_stats == &pc->stats)
+	if (e->stats.hero_ally && nearest_alive_player_stats && target_stats == nearest_alive_player_stats)
 		e->stats.in_combat = false;
 
 	if (target_stats)
@@ -287,19 +306,19 @@ void EntityBehavior::findTarget() {
 	// if the player is blocked, all summons which the player is facing to move away for the specified frames
 	// need to set the flag player_blocked so that other allies know to get out of the way as well
 	// if hero is facing the summon
-	if (e->stats.hero_ally && eset->misc.enable_ally_collision_ai) {
+	if (e->stats.hero_ally && eset->misc.enable_ally_collision_ai && nearest_player) {
 		if (!entitym->player_blocked && hero_dist < ALLY_FLEE_DISTANCE
-				&& wmap->collider.isFacing(pc->stats.pos.x,pc->stats.pos.y,pc->stats.direction,e->stats.pos.x,e->stats.pos.y)) {
+				&& wmap->collider.isFacing(nearest_player->stats.pos.x,nearest_player->stats.pos.y,nearest_player->stats.direction,e->stats.pos.x,e->stats.pos.y)) {
 			entitym->player_blocked = true;
 			entitym->player_blocked_timer.reset(Timer::BEGIN);
 		}
 
-		bool player_closer_than_target = Utils::calcDist(e->stats.pos, pursue_pos) > Utils::calcDist(e->stats.pos, pc->stats.pos);
+		bool player_closer_than_target = Utils::calcDist(e->stats.pos, pursue_pos) > Utils::calcDist(e->stats.pos, nearest_player->stats.pos);
 
 		if (entitym->player_blocked && (!e->stats.in_combat || player_closer_than_target)
-				&& wmap->collider.isFacing(pc->stats.pos.x,pc->stats.pos.y,pc->stats.direction,e->stats.pos.x,e->stats.pos.y)) {
+				&& wmap->collider.isFacing(nearest_player->stats.pos.x,nearest_player->stats.pos.y,nearest_player->stats.direction,e->stats.pos.x,e->stats.pos.y)) {
 			fleeing = true;
-			pursue_pos = pc->stats.pos;
+			pursue_pos = nearest_player->stats.pos;
 		}
 	}
 
@@ -555,7 +574,7 @@ void EntityBehavior::checkMove() {
 					if (Utils::calcDist(e->stats.pos, pursue_pos) <= 1.f)
 						path.pop_back();
 				}
-				else if (e->stats.hero_ally && pursue_pos == pc->stats.pos) {
+				else if (e->stats.hero_ally && nearest_player && pursue_pos == nearest_player->stats.pos) {
 					warp_to_hero = true;
 				}
 			}
@@ -670,7 +689,7 @@ void EntityBehavior::checkMoveStateMove() {
 
 	// close enough to the hero or is at a safe distance
 	bool ally_targeting_hero = e->stats.hero_ally && !e->stats.in_combat && !fleeing && hero_dist < ALLY_FOLLOW_DISTANCE_STOP;
-	if (pc->stats.alive && ((target_dist < e->stats.melee_range && !fleeing) || (move_to_safe_dist && target_dist >= e->stats.flee_range) || stop_fleeing || ally_targeting_hero)) {
+	if (nearest_alive_player && ((target_dist < e->stats.melee_range && !fleeing) || (move_to_safe_dist && target_dist >= e->stats.flee_range) || stop_fleeing || ally_targeting_hero)) {
 		if (stop_fleeing) {
 			e->stats.flee_cooldown_timer.reset(Timer::BEGIN);
 		}
@@ -687,8 +706,8 @@ void EntityBehavior::checkMoveStateMove() {
 		e->stats.direction = e->faceNextBest(pursue_pos.x, pursue_pos.y);
 		if (!e->move()) {
 			// this prevents an ally trying to move perpendicular to a 1-tile-wide path if the player gets close to it in a certain position and gets blocked
-			if (e->stats.hero_ally && entitym->player_blocked && !e->stats.in_combat) {
-				e->stats.direction = pc->stats.direction;
+			if (e->stats.hero_ally && entitym->player_blocked && !e->stats.in_combat && nearest_player) {
+				e->stats.direction = nearest_player->stats.direction;
 				if (!e->move()) {
 					e->stats.cur_state = StatBlock::ENTITY_STANCE;
 					e->stats.direction = prev_direction;

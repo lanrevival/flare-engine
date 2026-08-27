@@ -33,6 +33,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "StatBlock.h"
 #include <queue>
 
+class Avatar;
 class Entity;
 
 class EntityBehavior {
@@ -81,6 +82,24 @@ protected:
 
 	bool instant_power;
 	PowerID replaced_power_id;
+
+	// Resolved once per logic() tick, before doUpkeep()/findTarget() run, and read by every
+	// subsequent step this tick (findTarget/checkPower/checkMove*) -- this is what the old
+	// single-player `pc` global (the Avatar pointer in SharedGameResources.h) fanned out to
+	// everywhere in this file. Two variants because the pre-P2.2 code used that pointer two
+	// different ways that must stay distinguishable:
+	//   nearest_player       -- closest player regardless of alive status. NULL only if
+	//                            PlayerManager has zero players, which does not happen while the
+	//                            sim is running. Stands in for the old unconditional position
+	//                            reads used for ally warp/follow/facing bookkeeping, which never
+	//                            checked aliveness either.
+	//   nearest_alive_player  -- closest ALIVE player. NULL whenever no player is alive,
+	//                            replacing the old alive-gated reads used for target selection
+	//                            and combat-exit conditions.
+	// With exactly one player both resolve to that player (or both NULL if it's dead), so
+	// AC-REPLAY holds; with several, targeting/ally logic becomes per-entity-correct.
+	Avatar* nearest_player;
+	Avatar* nearest_alive_player;
 
 public:
 	explicit EntityBehavior(Entity *_e);
