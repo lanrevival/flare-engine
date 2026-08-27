@@ -27,6 +27,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "CommonIncludes.h"
 #include "Utils.h"
 
+class Avatar;
 class MapCollision;
 class Sprite;
 class WidgetButton;
@@ -90,7 +91,7 @@ private:
 
 
 public:
-	MenuMiniMap();
+	explicit MenuMiniMap(Avatar* _player);
 	~MenuMiniMap();
 	void align();
 	void logic();
@@ -102,6 +103,8 @@ public:
 	void update(MapCollision *collider, Rect *bounds);
 
 	bool clicked_config;
+
+	Avatar* player;
 };
 
 

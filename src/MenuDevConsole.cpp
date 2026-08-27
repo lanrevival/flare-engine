@@ -52,7 +52,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include <limits>
 #include <math.h>
 
-MenuDevConsole::MenuDevConsole()
+MenuDevConsole::MenuDevConsole(Avatar* _player)
 	: Menu()
 	, first_open(false)
 	, input_scrollback_pos(0)
@@ -64,6 +64,7 @@ MenuDevConsole::MenuDevConsole()
 	, font_bold_name("font_bold")
 	, background_color(0, 0, 0, 200)
 	, resize_handle_color(255, 255, 255, 63)
+	, player(_player)
 {
 	// dorkster: dumb work-around for the fact that I made WidgetScrollBox report dimensions without the scrollbar
 	// So we create a temporary scrollbar to get the dimensions we'll need later.
@@ -294,7 +295,7 @@ void MenuDevConsole::logic() {
 			// print target distance from the player
 			if (distance_timer.isEnd()) {
 				std::stringstream ss;
-				ss << msg->get("Distance") << ": " << Utils::calcDist(target, pc->stats.pos);
+				ss << msg->get("Distance") << ": " << Utils::calcDist(target, player->stats.pos);
 				log_history->add(ss.str(), WidgetLog::MSG_NORMAL);
 			}
 		}
@@ -305,11 +306,11 @@ void MenuDevConsole::logic() {
 }
 
 void MenuDevConsole::getPlayerInfo() {
-	if (!(static_cast<int>(target.x) == static_cast<int>(pc->stats.pos.x) && static_cast<int>(target.y) == static_cast<int>(pc->stats.pos.y)))
+	if (!(static_cast<int>(target.x) == static_cast<int>(player->stats.pos.x) && static_cast<int>(target.y) == static_cast<int>(player->stats.pos.y)))
 		return;
 
 	std::stringstream ss;
-	ss << msg->get("Entity") << ": " << pc->stats.name << "  |  X=" << pc->stats.pos.x << ", Y=" << pc->stats.pos.y;
+	ss << msg->get("Entity") << ": " << player->stats.name << "  |  X=" << player->stats.pos.x << ", Y=" << player->stats.pos.y;
 	log_history->setNextColor(font->getColor(FontEngine::COLOR_MENU_BONUS));
 	log_history->add(ss.str(), WidgetLog::MSG_NORMAL);
 

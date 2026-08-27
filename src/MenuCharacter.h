@@ -27,6 +27,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "TooltipData.h"
 #include "WidgetLabel.h"
 
+class Avatar;
 class StatBlock;
 class WidgetButton;
 class WidgetLabel;
@@ -91,7 +92,7 @@ private:
 	int name_max_width;
 
 public:
-	explicit MenuCharacter();
+	explicit MenuCharacter(Avatar* _player);
 	~MenuCharacter();
 	void align();
 
@@ -103,6 +104,8 @@ public:
 	int getUnspent() {
 		return skill_points;
 	}
+
+	Avatar* player;
 };
 
 #endif

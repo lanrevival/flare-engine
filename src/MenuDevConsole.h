@@ -26,6 +26,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Menu.h"
 #include "Utils.h"
 
+class Avatar;
 class WidgetButton;
 class WidgetInput;
 class WidgetLog;
@@ -65,7 +66,7 @@ protected:
 	Color resize_handle_color;
 
 public:
-	MenuDevConsole();
+	explicit MenuDevConsole(Avatar* _player);
 	~MenuDevConsole();
 	void align();
 	void closeWindow();
@@ -77,6 +78,8 @@ public:
 
 	FPoint target;
 	Timer distance_timer;
+
+	Avatar* player;
 };
 
 #endif

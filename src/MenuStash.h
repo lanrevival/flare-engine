@@ -27,6 +27,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuItemStorage.h"
 #include "WidgetLabel.h"
 
+class Avatar;
 class NPC;
 class StatBlock;
 class WidgetButton;
@@ -67,7 +68,7 @@ public:
 	static const int NO_SLOT = -1;
 	static const bool ADD_PLAY_SOUND = true;
 
-	explicit MenuStash();
+	explicit MenuStash(Avatar* _player);
 	~MenuStash();
 	void align();
 
@@ -98,6 +99,8 @@ public:
 	std::queue<ItemStack> drop_stack;
 
 	bool lock_tab_control;
+
+	Avatar* player;
 };
 
 

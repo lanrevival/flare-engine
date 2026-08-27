@@ -22,6 +22,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
  * class MenuManager
  */
 
+#include "ActionBarState.h"
 #include "Avatar.h"
 #include "EngineSettings.h"
 #include "FontEngine.h"
@@ -54,6 +55,8 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "ModManager.h"
 #include "NPC.h"
 #include "PlayerInventory.h"
+#include "PlayerManager.h"
+#include "PowerBonusState.h"
 #include "PowerManager.h"
 #include "RenderDevice.h"
 #include "Settings.h"
@@ -108,24 +111,28 @@ MenuManager::MenuManager()
 	, touch_controls(NULL)
 	, subtitles(NULL)
 	, pause_requested(false)
-	, menus_open(false) {
+	, menus_open(false)
+	, player(playerm->local())
+	, player_inventory(playerm->inventoryFor(playerm->local_id))
+	, player_actionbar(playerm->actionbarFor(playerm->local_id))
+	, player_powerbonus(playerm->powerbonusFor(playerm->local_id)) {
 
-	hp = new MenuStatBar(MenuStatBar::TYPE_HP, 0);
-	mp = new MenuStatBar(MenuStatBar::TYPE_MP, 0);
-	xp = new MenuStatBar(MenuStatBar::TYPE_XP, 0);
+	hp = new MenuStatBar(MenuStatBar::TYPE_HP, 0, player);
+	mp = new MenuStatBar(MenuStatBar::TYPE_MP, 0, player);
+	xp = new MenuStatBar(MenuStatBar::TYPE_XP, 0, player);
 	effects = new MenuActiveEffects();
 	hudlog = new MenuHUDLog();
-	act = new MenuActionBar();
+	act = new MenuActionBar(player, player_inventory, player_actionbar);
 	enemy = new MenuEnemy();
-	vendor = new MenuVendor();
-	talker = new MenuTalker();
+	vendor = new MenuVendor(player);
+	talker = new MenuTalker(player);
 	exit = new MenuExit();
-	mini = new MenuMiniMap();
-	chr = new MenuCharacter();
-	inv = new MenuInventory();
-	pow = new MenuPowers();
+	mini = new MenuMiniMap(player);
+	chr = new MenuCharacter(player);
+	inv = new MenuInventory(player, player_inventory);
+	pow = new MenuPowers(player, player_powerbonus);
 	questlog = new MenuLog();
-	stash = new MenuStash();
+	stash = new MenuStash(player);
 	book = new MenuBook();
 	num_picker = new MenuNumPicker();
 	game_over = new MenuGameOver();
@@ -134,7 +141,7 @@ MenuManager::MenuManager()
 
 	resource_statbars.resize(eset->resource_stats.list.size());
 	for (size_t i = 0; i < resource_statbars.size(); ++i) {
-		resource_statbars[i] = new MenuStatBar(MenuStatBar::TYPE_RESOURCE_STAT, i);
+		resource_statbars[i] = new MenuStatBar(MenuStatBar::TYPE_RESOURCE_STAT, i, player);
 	}
 
 	menus.push_back(hp);
@@ -163,7 +170,7 @@ MenuManager::MenuManager()
 	menus.push_back(exit);
 
 	if (settings->dev_mode) {
-		devconsole = new MenuDevConsole();
+		devconsole = new MenuDevConsole(player);
 	}
 
 	touch_controls = new MenuTouchControls();
@@ -181,6 +188,48 @@ MenuManager::MenuManager()
 
 	// enabled menu buttons on actionbar
 	act->setupMenuButtons(chr, inv, pow, questlog);
+}
+
+// See the MenuManager.h comment for what this can and can't re-point. Not called from the
+// constructor -- the constructor resolves the same four values from playerm itself (they must
+// exist before act/inv/pow/etc. can be constructed at all) and passes them down as constructor
+// arguments instead, since MenuActionBar's binding has to be a constructor argument. This method
+// exists for a later caller (P2.5 reconnect), not for startup.
+void MenuManager::setPlayer(Avatar* _player, PlayerInventory* _player_inventory, ActionBarState* _player_actionbar, PowerBonusState* _player_powerbonus) {
+	player = _player;
+	player_inventory = _player_inventory;
+	player_actionbar = _player_actionbar;
+	player_powerbonus = _player_powerbonus;
+
+	chr->player = player;
+
+	// inv->inventory[] stays bound to whichever PlayerInventory it was constructed with --
+	// MenuInventory has no public re-bind method, the same limitation MenuActionBar has, just
+	// less severe (a stale player_inventory pointer is wrong; stale inventory[] widgets are wrong
+	// AND still readable). Not needed for P2.3's single startup call. See MenuInventory.h.
+	inv->player = player;
+	inv->player_inventory = player_inventory;
+
+	pow->player = player;
+	pow->player_powerbonus = player_powerbonus;
+
+	vendor->player = player;
+	talker->player = player;
+	mini->player = player;
+	stash->player = player;
+
+	hp->player = player;
+	mp->player = player;
+	xp->player = player;
+	for (size_t i = 0; i < resource_statbars.size(); ++i) {
+		resource_statbars[i]->player = player;
+	}
+
+	if (settings->dev_mode) {
+		devconsole->player = player;
+	}
+
+	// act (MenuActionBar) is deliberately not re-pointed here -- see the header comment.
 }
 
 void MenuManager::alignAll() {
@@ -330,11 +379,11 @@ void MenuManager::logic() {
 	}
 
 	// close talker/vendor menu if player is attacked
-	if (pc->stats.abort_npc_interact && eset->misc.combat_aborts_npc_interact) {
+	if (player->stats.abort_npc_interact && eset->misc.combat_aborts_npc_interact) {
 		talker->setNPC(NULL);
 		vendor->setNPC(NULL);
 	}
-	pc->stats.abort_npc_interact = false;
+	player->stats.abort_npc_interact = false;
 
 	if (act->tablist.getCurrent() != -1) {
 		// books/npcs can be activated by powers in the actionbar, so we need to defocus the bar if one of those is opened
@@ -544,7 +593,7 @@ void MenuManager::logic() {
 					drop_stack.push(drag_stack);
 				}
 				else {
-					pc->logMsg(msg->get("This item can not be dropped."), Avatar::MSG_NORMAL);
+					player->logMsg(msg->get("This item can not be dropped."), Avatar::MSG_NORMAL);
 					items->playSound(drag_stack.item);
 
 					inv->itemReturn(drag_stack);
@@ -617,7 +666,7 @@ void MenuManager::logic() {
 	(settings->dev_mode && devconsole->visible && Utils::isWithinRect(devconsole->window_area, inpt->mouse)));
 
 	// Stop attacking if the cursor is inside an interactable menu
-	if ((pc->using_main1 || pc->using_main2) && is_within_menus) {
+	if ((player->using_main1 || player->using_main2) && is_within_menus) {
 		inpt->pressing[Input::MAIN1] = false;
 		inpt->pressing[Input::MAIN2] = false;
 	}
@@ -653,12 +702,12 @@ void MenuManager::logic() {
 
 	touch_controls->logic();
 
-	if (chr->checkUpgrade() || pc->stats.level_up) {
+	if (chr->checkUpgrade() || player->stats.level_up) {
 		// apply equipment and max hp/mp
 		inv->applyEquipment();
-		pc->stats.hp = pc->stats.get(Stats::HP_MAX);
-		pc->stats.mp = pc->stats.get(Stats::MP_MAX);
-		pc->stats.level_up = false;
+		player->stats.hp = player->stats.get(Stats::HP_MAX);
+		player->stats.mp = player->stats.get(Stats::MP_MAX);
+		player->stats.level_up = false;
 	}
 
 	// only allow the vendor window to be open if the inventory is open
@@ -687,7 +736,7 @@ void MenuManager::logic() {
 		key_lock = true;
 
 	// stop dragging with cancel key
-	if (!key_lock && inpt->pressing[Input::CANCEL] && !inpt->lock[Input::CANCEL] && !pc->stats.corpse) {
+	if (!key_lock && inpt->pressing[Input::CANCEL] && !inpt->lock[Input::CANCEL] && !player->stats.corpse) {
 		if (keyboard_dragging || mouse_dragging) {
 			inpt->lock[Input::CANCEL] = true;
 			resetDrag();
@@ -808,7 +857,7 @@ void MenuManager::logic() {
 			}
 
 			// powers menu toggle
-			if (pow->enabled && (((inpt->pressing[Input::POWERS] && !key_lock && !mouse_dragging && !keyboard_dragging) || clicking_powers) && !pc->stats.transformed)) {
+			if (pow->enabled && (((inpt->pressing[Input::POWERS] && !key_lock && !mouse_dragging && !keyboard_dragging) || clicking_powers) && !player->stats.transformed)) {
 				key_lock = true;
 				if (pow->visible) {
 					snd->play(pow->sfx_close, snd->DEFAULT_CHANNEL, snd->NO_POS, !snd->LOOP);
@@ -918,7 +967,7 @@ void MenuManager::logic() {
 
 	touch_controls->visible = !menus_open && !exit->visible && inpt->usingTouchscreen();
 
-	if (pc->stats.alive && !inpt->usingMouse()) {
+	if (player->stats.alive && !inpt->usingMouse()) {
 		if (menus_open) {
 			if (inpt->pressing[Input::MAIN1]) inpt->lock[Input::MAIN1] = true;
 			if (inpt->pressing[Input::MAIN2]) inpt->lock[Input::MAIN2] = true;
@@ -926,7 +975,7 @@ void MenuManager::logic() {
 
 		dragAndDropWithKeyboard();
 	}
-	else if (pc->stats.alive) {
+	else if (player->stats.alive) {
 		// handle right-click
 		if (!mouse_dragging && inpt->pressing[Input::MAIN2]) {
 			// exit menu
@@ -1145,7 +1194,7 @@ void MenuManager::logic() {
 				}
 			}
 			// action bar
-			if (!exit->visible && (act->isWithinSlots(inpt->mouse) || act->isWithinMenus(inpt->mouse)) && !pc->using_main1 && !pc->using_main2) {
+			if (!exit->visible && (act->isWithinSlots(inpt->mouse) || act->isWithinMenus(inpt->mouse)) && !player->using_main1 && !player->using_main2) {
 				inpt->lock[Input::MAIN1] = true;
 
 				// ctrl-click action bar to clear that slot
@@ -1252,7 +1301,7 @@ void MenuManager::logic() {
 						drop_stack.push(drag_stack);
 					}
 					else {
-						pc->logMsg(msg->get("This item can not be dropped."), Avatar::MSG_NORMAL);
+						player->logMsg(msg->get("This item can not be dropped."), Avatar::MSG_NORMAL);
 						items->playSound(drag_stack.item);
 
 						inv->itemReturn(drag_stack);
@@ -1840,8 +1889,8 @@ void MenuManager::pushMatchingItemsOf(const Point& hov_pos) {
 		std::vector<ItemID> matching_ids;
 
 		for (size_t i = 0; i < inv->equipped_area.size(); i++) {
-			if (pinv->isEquipSlotActive(i) && !pinv->inventory[PlayerInventory::EQUIPMENT].storage[i].empty() && pinv->slot_type[i] == items->items[hov_stack.item]->type) {
-				matching_ids.push_back(pinv->inventory[PlayerInventory::EQUIPMENT].storage[i].item);
+			if (player_inventory->isEquipSlotActive(i) && !player_inventory->inventory[PlayerInventory::EQUIPMENT].storage[i].empty() && player_inventory->slot_type[i] == items->items[hov_stack.item]->type) {
+				matching_ids.push_back(player_inventory->inventory[PlayerInventory::EQUIPMENT].storage[i].item);
 			}
 		}
 
@@ -1860,10 +1909,10 @@ void MenuManager::pushMatchingItemsOf(const Point& hov_pos) {
 				if (tip_index >= eset->tooltips.visible_max)
 					break; // can't show any more tooltips
 
-				if (pinv->isEquipSlotActive(i) && !pinv->inventory[PlayerInventory::EQUIPMENT].storage[i].empty() && pinv->slot_type[i] == items->items[hov_stack.item]->type) {
+				if (player_inventory->isEquipSlotActive(i) && !player_inventory->inventory[PlayerInventory::EQUIPMENT].storage[i].empty() && player_inventory->slot_type[i] == items->items[hov_stack.item]->type) {
 					Point match_pos(inv->equipped_area[i].x, inv->equipped_area[i].y);
 
-					TooltipData match = inv->inventory[MenuInventory::EQUIPMENT].checkTooltip(match_pos, &pc->stats, ItemManager::PLAYER_INV, !ItemManager::TOOLTIP_INPUT_HINT);
+					TooltipData match = inv->inventory[MenuInventory::EQUIPMENT].checkTooltip(match_pos, &player->stats, ItemManager::PLAYER_INV, !ItemManager::TOOLTIP_INPUT_HINT);
 					match.addColoredText(msg->get("Equipped"), font->getColor(FontEngine::COLOR_ITEM_FLAVOR));
 
 					tooltipm->push(match, hov_pos, TooltipData::STYLE_FLOAT, tip_index);

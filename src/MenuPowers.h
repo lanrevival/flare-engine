@@ -30,7 +30,9 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Menu.h"
 #include "Utils.h"
 
+class Avatar;
 class MenuActionBar;
+class PowerBonusState;
 class StatBlock;
 class TooltipData;
 class WidgetButton;
@@ -176,7 +178,7 @@ public:
 		TOOLTIP_LONG_ALL = 2
 	};
 
-	MenuPowers();
+	MenuPowers(Avatar* _player, PowerBonusState* _player_powerbonus);
 	~MenuPowers();
 	void align();
 
@@ -210,5 +212,8 @@ public:
 	void setNextTabList(TabList *tl);
 	TabList* getCurrentTabList();
 	void defocusTabLists();
+
+	Avatar* player;
+	PowerBonusState* player_powerbonus;
 };
 #endif

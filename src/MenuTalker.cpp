@@ -53,7 +53,7 @@ MenuTalker::Action::Action()
 MenuTalker::Action::~Action()
 {}
 
-MenuTalker::MenuTalker()
+MenuTalker::MenuTalker(Avatar* _player)
 	: Menu()
 	, portrait(NULL)
 	, dialog_node(-1)
@@ -71,6 +71,7 @@ MenuTalker::MenuTalker()
 	, advanceButton(new WidgetButton(WidgetButton::DIR_RIGHT_FILE))
 	, closeButton(new WidgetButton(WidgetButton::CLOSE_FILE))
 	, npc_from_map(true)
+	, player(_player)
 {
 	// Load config settings
 	FileParser infile;
@@ -525,7 +526,7 @@ void MenuTalker::executeAction(size_t index) {
 		// begin talking
 		chooseDialogNode(node_id);
 		if (npc && npc_from_map) {
-			pc->allow_movement = npc->checkMovement(node_id);
+			player->allow_movement = npc->checkMovement(node_id);
 		}
 	}
 }

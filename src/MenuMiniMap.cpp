@@ -53,7 +53,7 @@ PixelEntity::PixelEntity(int _x, int _y, Color* _color) {
 	color = _color;
 }
 
-MenuMiniMap::MenuMiniMap()
+MenuMiniMap::MenuMiniMap(Avatar* _player)
 	: color_wall(128,128,128)
 	, color_obst(64,64,64)
 	, color_hero(255,255,255)
@@ -73,7 +73,7 @@ MenuMiniMap::MenuMiniMap()
 	, base_zoom(1)
 	, lock_zoom_change(false)
 	, clicked_config(false)
-
+	, player(_player)
 {
 	// Load config settings
 	FileParser infile;
@@ -232,8 +232,8 @@ void MenuMiniMap::logic() {
 	}
 
 	if (button_config) {
-		button_config->enabled = !pc->stats.corpse;
-		if (!(pc->using_main1 || pc->using_main2) && button_config->checkClick()) {
+		button_config->enabled = !player->stats.corpse;
+		if (!(player->using_main1 || player->using_main2) && button_config->checkClick()) {
 			clicked_config = true;
 		}
 	}
@@ -373,7 +373,7 @@ void MenuMiniMap::updateOrtho(MapCollision *collider, Sprite** tile_surface, int
 		target_img->beginPixelBatch();
 	}
 	else {
-		Point hero(pc->stats.pos);
+		Point hero(player->stats.pos);
 
 		Rect clip;
 		clip.x = (zoom * hero.x) - pos.w/2;
@@ -443,7 +443,7 @@ void MenuMiniMap::updateIso(MapCollision *collider, Sprite** tile_surface, int z
 		target_img->beginPixelBatch();
 	}
 	else {
-		Point hero(pc->stats.pos);
+		Point hero(player->stats.pos);
 		Point hero_offset;
 		hero_offset.x = hero.x - hero.y + std::max(map_size.x, map_size.y);
 		hero_offset.y = hero.x + hero.y;
@@ -556,7 +556,7 @@ void MenuMiniMap::clearEntities() {
 
 
 void MenuMiniMap::fillEntities() {
-	Point hero = Point(pc->stats.pos);
+	Point hero = Point(player->stats.pos);
 
 	if (hero.x >= 0 && hero.y >= 0 && hero.x < map_size.x && hero.y < map_size.y) {
 		entities.push_back(new PixelEntity(hero.x, hero.y, &color_hero));
@@ -569,12 +569,12 @@ void MenuMiniMap::fillEntities() {
 
 		if (mapr->events[i].getComponent(EventComponent::NPC_HOTSPOT) && eventm->isActive(mapr->events[i])) {
 			if (mapr->fogofwar) {
-				float delta = Utils::calcDist(pc->stats.pos, mapr->events[i].center);
+				float delta = Utils::calcDist(player->stats.pos, mapr->events[i].center);
 				if (delta > static_cast<float>(fow->mask_radius)) {
 					continue;
 				}
 			}
-			if (Utils::calcDist(pc->stats.pos, FPoint(mapr->events[i].location.x, mapr->events[i].location.y)) <= visible_radius) {
+			if (Utils::calcDist(player->stats.pos, FPoint(mapr->events[i].location.x, mapr->events[i].location.y)) <= visible_radius) {
 				entities.push_back(new PixelEntity(mapr->events[i].location.x, mapr->events[i].location.y, &color_npc));
 			}
 		}
@@ -586,7 +586,7 @@ void MenuMiniMap::fillEntities() {
 					if (mapr->fogofwar)
 						if (mapr->layers[fow->dark_layer_id][event_pos.x][event_pos.y] == FogOfWar::TILE_HIDDEN) continue;
 
-					if (Utils::calcDist(pc->stats.pos, FPoint(j, k)) <= visible_radius) {
+					if (Utils::calcDist(player->stats.pos, FPoint(j, k)) <= visible_radius) {
 						entities.push_back(new PixelEntity(j, k, &color_teleport));
 					}
 				}
@@ -598,24 +598,24 @@ void MenuMiniMap::fillEntities() {
 		Entity *e = entitym->entities[i];
 		if (e->stats.hp > 0) {
 			if (mapr->fogofwar) {
-				float delta = Utils::calcDist(pc->stats.pos, e->stats.pos);
+				float delta = Utils::calcDist(player->stats.pos, e->stats.pos);
 				if (delta > static_cast<float>(fow->mask_radius)) {
 					continue;
 				}
 			}
 			if (e->stats.hero_ally) {
-				if (Utils::calcDist(pc->stats.pos, FPoint(e->stats.pos.x, e->stats.pos.y)) <= visible_radius) {
+				if (Utils::calcDist(player->stats.pos, FPoint(e->stats.pos.x, e->stats.pos.y)) <= visible_radius) {
 					entities.push_back(new PixelEntity(static_cast<int>(e->stats.pos.x), static_cast<int>(e->stats.pos.y), &color_ally));
 				}
 			}
 			else if (e->stats.in_combat) {
-				if (Utils::calcDist(pc->stats.pos, FPoint(e->stats.pos.x, e->stats.pos.y)) <= visible_radius) {
+				if (Utils::calcDist(player->stats.pos, FPoint(e->stats.pos.x, e->stats.pos.y)) <= visible_radius) {
 					entities.push_back(new PixelEntity(static_cast<int>(e->stats.pos.x), static_cast<int>(e->stats.pos.y), &color_enemy));
 				}
 			}
 		}
 		else if (e->stats.corpse_has_collision) {
-			if (Utils::calcDist(pc->stats.pos, FPoint(e->stats.pos.x, e->stats.pos.y)) <= visible_radius) {
+			if (Utils::calcDist(player->stats.pos, FPoint(e->stats.pos.x, e->stats.pos.y)) <= visible_radius) {
 				entities.push_back(new PixelEntity(static_cast<int>(e->stats.pos.x), static_cast<int>(e->stats.pos.y), &color_obst));
 			}
 		}

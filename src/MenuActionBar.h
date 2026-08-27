@@ -31,11 +31,14 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Menu.h"
 #include "Utils.h"
 
+class ActionBarState;
 class ActionData;
+class Avatar;
 class MenuCharacter;
 class MenuInventory;
 class MenuPowers;
 class MenuLog;
+class PlayerInventory;
 class Power;
 class StatBlock;
 class WidgetLabel;
@@ -82,7 +85,10 @@ public:
 	static const bool REORDER = true;
 	static const bool CLEAR_SKIP_ITEMS = true;
 
-	MenuActionBar();
+	/** actionbar's fields are bound into the reference members below at construction (P1.3e-a's
+	 * alias-forwarding shape) -- so unlike player, actionbar cannot be re-pointed later via a
+	 * setPlayer()-style setter; a new local actionbar means a new MenuActionBar. See P2.3. */
+	MenuActionBar(Avatar* _player, PlayerInventory* _player_inventory, ActionBarState* _actionbar);
 	~MenuActionBar();
 	void align();
 	void loadGraphics();
@@ -136,6 +142,10 @@ public:
 	WidgetSlot* touch_slot;
 
 	bool enable_gamepad_nav;
+
+	Avatar* player;
+	PlayerInventory* player_inventory;
+	ActionBarState* actionbar;
 };
 
 #endif

@@ -42,7 +42,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "WidgetButton.h"
 #include "WidgetListBox.h"
 
-MenuCharacter::MenuCharacter()
+MenuCharacter::MenuCharacter(Avatar* _player)
 	: closeButton(new WidgetButton(WidgetButton::CLOSE_FILE))
 	, labelCharacter(new WidgetLabel())
 	, labelUnspent(new WidgetLabel())
@@ -51,6 +51,7 @@ MenuCharacter::MenuCharacter()
 	, statlist_scrollbar_offset(0)
 	, show_resists(true)
 	, name_max_width(0)
+	, player(_player)
 {
 	labelCharacter->setText(msg->get("Character"));
 	labelCharacter->setColor(font->getColor(FontEngine::COLOR_MENU_NORMAL));
@@ -243,9 +244,9 @@ MenuCharacter::MenuCharacter()
 	base_bonus.resize(eset->primary_stats.list.size());
 
 	for (size_t i = 0; i < eset->primary_stats.list.size(); ++i) {
-		base_stats[i] = &pc->stats.primary[i];
-		base_stats_add[i] = &pc->stats.primary_additional[i];
-		base_bonus[i] = &pc->stats.per_primary[i];
+		base_stats[i] = &player->stats.primary[i];
+		base_stats_add[i] = &player->stats.primary_additional[i];
+		base_bonus[i] = &player->stats.per_primary[i];
 	}
 }
 
@@ -285,30 +286,30 @@ void MenuCharacter::align() {
  */
 void MenuCharacter::refreshStats() {
 
-	pc->stats.refresh_stats = false;
+	player->stats.refresh_stats = false;
 
 	std::stringstream ss;
 
 	// update stat text
 	std::string trimmed_name;
 	if (name_max_width > 0)
-		trimmed_name = font->trimTextToWidth(pc->stats.name, name_max_width, FontEngine::USE_ELLIPSIS, 0);
+		trimmed_name = font->trimTextToWidth(player->stats.name, name_max_width, FontEngine::USE_ELLIPSIS, 0);
 	else
-		trimmed_name = pc->stats.name;
+		trimmed_name = player->stats.name;
 
 	cstat[CSTAT_NAME].value->setText(trimmed_name);
 
 	ss.str("");
-	ss << pc->stats.level;
+	ss << player->stats.level;
 	cstat[CSTAT_LEVEL].value->setText(ss.str());
 	cstat[CSTAT_LEVEL].value->setJustify(FontEngine::JUSTIFY_CENTER);
 
 	for (size_t i = 0; i < eset->primary_stats.list.size(); ++i) {
 		ss.str("");
-		ss << pc->stats.get_primary(i);
+		ss << player->stats.get_primary(i);
 		cstat[i+2].value->setText(ss.str());
 		cstat[i+2].value->setJustify(FontEngine::JUSTIFY_CENTER);
-		cstat[i+2].value->setColor(bonusColor(pc->stats.primary_additional[i]));
+		cstat[i+2].value->setColor(bonusColor(player->stats.primary_additional[i]));
 	}
 
 	if (skill_points >= 1) {
@@ -339,7 +340,7 @@ void MenuCharacter::refreshStats() {
 		if (i == Stats::ABS_MAX) continue;
 
 		ss.str("");
-		ss << " " << Stats::NAME[i] << ": " << Utils::floatToString(pc->stats.get(static_cast<Stats::STAT>(i)), 2);
+		ss << " " << Stats::NAME[i] << ": " << Utils::floatToString(player->stats.get(static_cast<Stats::STAT>(i)), 2);
 		if (Stats::PERCENT[i]) ss << "%";
 		statList->set(stat_index, ss.str(), statTooltip(i));
 		stat_index++;
@@ -350,7 +351,7 @@ void MenuCharacter::refreshStats() {
 		for (size_t k = 0; k < EngineSettings::ResourceStats::STAT_STEAL; ++k) {
 			if (show_stat[resource_offset_index + (j * EngineSettings::ResourceStats::STAT_COUNT) + k]) {
 				ss.str("");
-				ss << " " << eset->resource_stats.list[j].text[k] << ": " << Utils::floatToString(pc->stats.getResourceStat(j, k), eset->number_format.character_menu);
+				ss << " " << eset->resource_stats.list[j].text[k] << ": " << Utils::floatToString(player->stats.getResourceStat(j, k), eset->number_format.character_menu);
 				statList->set(stat_index, ss.str(), resourceStatTooltip(j, k));
 				stat_index++;
 			}
@@ -366,8 +367,8 @@ void MenuCharacter::refreshStats() {
 	// insert damage stats
 	for (size_t j = 0; j < eset->damage_types.list.size(); ++j) {
 		if (show_stat[Stats::COUNT + eset->damage_types.indexToMin(j)] || show_stat[Stats::COUNT + eset->damage_types.indexToMax(j)]) {
-			float min_dmg = pc->stats.getDamageMin(j);
-			float max_dmg = pc->stats.getDamageMax(j);
+			float min_dmg = player->stats.getDamageMin(j);
+			float max_dmg = player->stats.getDamageMax(j);
 
 			ss.str("");
 			ss << " ";
@@ -390,7 +391,7 @@ void MenuCharacter::refreshStats() {
 		if (!show_stat[i]) continue;
 
 		ss.str("");
-		ss << " " << Stats::NAME[i] << ": " << Utils::floatToString(pc->stats.get(static_cast<Stats::STAT>(i)), 2);
+		ss << " " << Stats::NAME[i] << ": " << Utils::floatToString(player->stats.get(static_cast<Stats::STAT>(i)), 2);
 		if (Stats::PERCENT[i]) ss << "%";
 		statList->set(stat_index, ss.str(), statTooltip(i));
 		stat_index++;
@@ -400,7 +401,7 @@ void MenuCharacter::refreshStats() {
 	for (size_t j = 0; j < eset->resource_stats.list.size(); ++j) {
 		if (show_stat[resource_offset_index + (j * EngineSettings::ResourceStats::STAT_COUNT) + EngineSettings::ResourceStats::STAT_STEAL]) {
 			ss.str("");
-			ss << " " << eset->resource_stats.list[j].text[EngineSettings::ResourceStats::STAT_STEAL] << ": " << Utils::floatToString(pc->stats.getResourceStat(j, EngineSettings::ResourceStats::STAT_STEAL), eset->number_format.character_menu) << "%";
+			ss << " " << eset->resource_stats.list[j].text[EngineSettings::ResourceStats::STAT_STEAL] << ": " << Utils::floatToString(player->stats.getResourceStat(j, EngineSettings::ResourceStats::STAT_STEAL), eset->number_format.character_menu) << "%";
 			statList->set(stat_index, ss.str(), resourceStatTooltip(j, EngineSettings::ResourceStats::STAT_STEAL));
 			stat_index++;
 		}
@@ -413,7 +414,7 @@ void MenuCharacter::refreshStats() {
 	stat_index++;
 
 	ss.str("");
-	ss << " " << msg->get("Absorb") << ": " << Utils::createMinMaxString(pc->stats.get(Stats::ABS_MIN), pc->stats.get(Stats::ABS_MAX), eset->number_format.character_menu);
+	ss << " " << msg->get("Absorb") << ": " << Utils::createMinMaxString(player->stats.get(Stats::ABS_MIN), player->stats.get(Stats::ABS_MAX), eset->number_format.character_menu);
 	statList->set(stat_index, ss.str(), statTooltip(Stats::ABS_MIN));
 	stat_index++;
 
@@ -427,7 +428,7 @@ void MenuCharacter::refreshStats() {
 		if (i == Stats::ABS_MIN || i == Stats::ABS_MAX) continue;
 
 		ss.str("");
-		ss << " " << Stats::NAME[i] << ": " << Utils::floatToString(pc->stats.get(static_cast<Stats::STAT>(i)), 2);
+		ss << " " << Stats::NAME[i] << ": " << Utils::floatToString(player->stats.get(static_cast<Stats::STAT>(i)), 2);
 		if (Stats::PERCENT[i]) ss << "%";
 		statList->set(stat_index, ss.str(), statTooltip(i));
 		stat_index++;
@@ -437,7 +438,7 @@ void MenuCharacter::refreshStats() {
 		for (size_t i = 0; i < eset->damage_types.list.size(); ++i) {
 			if (show_stat[Stats::COUNT + eset->damage_types.indexToResist(i)]) {
 				ss.str("");
-				ss << " " << eset->damage_types.list[i].name_resist << ": " << Utils::floatToString(pc->stats.getDamageResist(i), eset->number_format.character_menu) << "%";
+				ss << " " << eset->damage_types.list[i].name_resist << ": " << Utils::floatToString(player->stats.getDamageResist(i), eset->number_format.character_menu) << "%";
 				statList->set(stat_index, ss.str(), resistTooltip(i));
 				stat_index++;
 			}
@@ -448,7 +449,7 @@ void MenuCharacter::refreshStats() {
 	for (size_t j = 0; j < eset->resource_stats.list.size(); ++j) {
 		if (show_stat[resource_offset_index + (j * EngineSettings::ResourceStats::STAT_COUNT) + EngineSettings::ResourceStats::STAT_RESIST_STEAL]) {
 			ss.str("");
-			ss << " " << eset->resource_stats.list[j].text[EngineSettings::ResourceStats::STAT_RESIST_STEAL] << ": " << Utils::floatToString(pc->stats.getResourceStat(j, EngineSettings::ResourceStats::STAT_RESIST_STEAL), eset->number_format.character_menu) << "%";
+			ss << " " << eset->resource_stats.list[j].text[EngineSettings::ResourceStats::STAT_RESIST_STEAL] << ": " << Utils::floatToString(player->stats.getResourceStat(j, EngineSettings::ResourceStats::STAT_RESIST_STEAL), eset->number_format.character_menu) << "%";
 			statList->set(stat_index, ss.str(), resourceStatTooltip(j, EngineSettings::ResourceStats::STAT_RESIST_STEAL));
 			stat_index++;
 		}
@@ -468,7 +469,7 @@ void MenuCharacter::refreshStats() {
 		if (!show_stat[i]) continue;
 
 		ss.str("");
-		ss << " " << Stats::NAME[i] << ": " << Utils::floatToString(pc->stats.get(static_cast<Stats::STAT>(i)), 2);
+		ss << " " << Stats::NAME[i] << ": " << Utils::floatToString(player->stats.get(static_cast<Stats::STAT>(i)), 2);
 		if (Stats::PERCENT[i]) ss << "%";
 		statList->set(stat_index, ss.str(), statTooltip(i));
 		stat_index++;
@@ -476,27 +477,27 @@ void MenuCharacter::refreshStats() {
 
     if (show_stat[speed_offset_index]) {
 		ss.str("");
-		ss << " " << msg->get("Movement Speed") << ": " << pc->stats.effects.speed << "%";
+		ss << " " << msg->get("Movement Speed") << ": " << player->stats.effects.speed << "%";
 		statList->set(stat_index, ss.str(), "");
 		stat_index++;
 	}
 
 	if (show_stat[speed_offset_index + 1]) {
 		ss.str("");
-		ss << " " << msg->get("Attack Speed") << ": " << pc->stats.effects.getAttackSpeed("") << "%";
+		ss << " " << msg->get("Attack Speed") << ": " << player->stats.effects.getAttackSpeed("") << "%";
 		statList->set(stat_index, ss.str(), "");
 		stat_index++;
 	}
 
 	// update tool tips
 	cstat[CSTAT_NAME].tip.clear();
-	cstat[CSTAT_NAME].tip.addText(pc->stats.name);
-	cstat[CSTAT_NAME].tip.addText(pc->stats.getLongClass());
+	cstat[CSTAT_NAME].tip.addText(player->stats.name);
+	cstat[CSTAT_NAME].tip.addText(player->stats.getLongClass());
 
 	cstat[CSTAT_LEVEL].tip.clear();
-	cstat[CSTAT_LEVEL].tip.addText(msg->getv("XP: %lu", pc->stats.xp));
-	if (pc->stats.level < eset->xp.getMaxLevel()) {
-		cstat[CSTAT_LEVEL].tip.addText(msg->getv("Next: %lu", eset->xp.getLevelXP(pc->stats.level + 1)));
+	cstat[CSTAT_LEVEL].tip.addText(msg->getv("XP: %lu", player->stats.xp));
+	if (player->stats.level < eset->xp.getMaxLevel()) {
+		cstat[CSTAT_LEVEL].tip.addText(msg->getv("Next: %lu", eset->xp.getLevelXP(player->stats.level + 1)));
 	}
 
 	for (size_t j = 2; j < cstat.size(); ++j) {
@@ -605,8 +606,8 @@ Color MenuCharacter::bonusColor(int stat) {
 
 void MenuCharacter::tooltipCreateBonusText(size_t min_index, size_t max_index, std::string* min_text, std::string* max_text) {
 	// per-level bonus
-	float min_per_level = pc->stats.per_level[min_index];
-	float max_per_level = pc->stats.per_level[max_index];
+	float min_per_level = player->stats.per_level[min_index];
+	float max_per_level = player->stats.per_level[max_index];
 
 	if (min_per_level > 0) {
 		*min_text += msg->getv("Each level grants %s.", Utils::floatToString(min_per_level, eset->number_format.character_menu).c_str());
@@ -618,8 +619,8 @@ void MenuCharacter::tooltipCreateBonusText(size_t min_index, size_t max_index, s
 
 	// per-primary bonuses
 	for (size_t i = 0; i < eset->primary_stats.list.size(); ++i) {
-		float min_per_primary = pc->stats.per_primary[i][min_index];
-		float max_per_primary = pc->stats.per_primary[i][max_index];
+		float min_per_primary = player->stats.per_primary[i][min_index];
+		float max_per_primary = player->stats.per_primary[i][max_index];
 
 		if (min_per_primary > 0) {
 			if (!min_text->empty())
@@ -765,9 +766,9 @@ void MenuCharacter::logic() {
 
 	bool have_skill_points = checkSkillPoints();
 
-	if (pc->stats.hp > 0 && have_skill_points) {
+	if (player->stats.hp > 0 && have_skill_points) {
 		for (size_t i = 0; i < eset->primary_stats.list.size(); ++i) {
-			if (pc->stats.primary[i] < pc->stats.max_points_per_stat && !cstat[i+2].label->isHidden()) {
+			if (player->stats.primary[i] < player->stats.max_points_per_stat && !cstat[i+2].label->isHidden()) {
 				upgradeButton[i]->enabled = true;
 				upgradeButton[i]->tooltip = getUpgradeButtonTooltip(i);
 				tablist.add(upgradeButton[i]);
@@ -799,7 +800,7 @@ void MenuCharacter::logic() {
 
 	statList->checkClick();
 
-	if (pc->stats.refresh_stats) refreshStats();
+	if (player->stats.refresh_stats) refreshStats();
 }
 
 
@@ -857,11 +858,11 @@ void MenuCharacter::renderTooltips(const Point& position) {
  */
 bool MenuCharacter::checkUpgrade() {
 	// check to see if there are skill points available
-	if (pc->stats.hp > 0 && checkSkillPoints()) {
+	if (player->stats.hp > 0 && checkSkillPoints()) {
 		for (size_t i = 0; i < eset->primary_stats.list.size(); ++i) {
 			if (primary_up[i]) {
-				pc->stats.primary[i]++;
-				pc->stats.recalc(); // equipment applied by MenuManager
+				player->stats.primary[i]++;
+				player->stats.recalc(); // equipment applied by MenuManager
 				primary_up[i] = false;
 				return true;
 			}
@@ -874,12 +875,12 @@ bool MenuCharacter::checkUpgrade() {
 bool MenuCharacter::checkSkillPoints() {
 	int spent = 0;
 	for (size_t i = 0; i < eset->primary_stats.list.size(); ++i) {
-		spent += pc->stats.primary[i] - pc->stats.primary_starting[i];
+		spent += player->stats.primary[i] - player->stats.primary_starting[i];
 	}
 
-	skill_points = ((pc->stats.level - 1) * pc->stats.stat_points_per_level) - spent;
+	skill_points = ((player->stats.level - 1) * player->stats.stat_points_per_level) - spent;
 
-	return (spent < ((pc->stats.level - 1) * pc->stats.stat_points_per_level) && spent < pc->stats.max_spendable_stat_points);
+	return (spent < ((player->stats.level - 1) * player->stats.stat_points_per_level) && spent < player->stats.max_spendable_stat_points);
 }
 
 void MenuCharacter::parseShowStat(FileParser& infile) {
@@ -947,7 +948,7 @@ std::string MenuCharacter::getUpgradeButtonTooltip(size_t primary_index) {
 							tooltip += "\n";
 							have_bonus = true;
 						}
-						tooltip += "\n+" + Utils::floatToString(pc->stats.per_primary[primary_index][resource_index], eset->number_format.character_menu);
+						tooltip += "\n+" + Utils::floatToString(player->stats.per_primary[primary_index][resource_index], eset->number_format.character_menu);
 						tooltip += " " + eset->resource_stats.list[k].text[l];
 					}
 				}
@@ -965,7 +966,7 @@ std::string MenuCharacter::getUpgradeButtonTooltip(size_t primary_index) {
 						tooltip += "\n";
 						have_bonus = true;
 					}
-					tooltip += "\n+" + Utils::floatToString(pc->stats.per_primary[primary_index][damage_min_index], eset->number_format.character_menu);
+					tooltip += "\n+" + Utils::floatToString(player->stats.per_primary[primary_index][damage_min_index], eset->number_format.character_menu);
 					tooltip += " " + eset->damage_types.list[k].name_min;
 				}
 
@@ -977,7 +978,7 @@ std::string MenuCharacter::getUpgradeButtonTooltip(size_t primary_index) {
 						tooltip += "\n";
 						have_bonus = true;
 					}
-					tooltip += "\n+" + Utils::floatToString(pc->stats.per_primary[primary_index][damage_max_index], eset->number_format.character_menu);
+					tooltip += "\n+" + Utils::floatToString(player->stats.per_primary[primary_index][damage_max_index], eset->number_format.character_menu);
 					tooltip += " " + eset->damage_types.list[k].name_max;
 				}
 			}
@@ -989,7 +990,7 @@ std::string MenuCharacter::getUpgradeButtonTooltip(size_t primary_index) {
 				tooltip += "\n";
 				have_bonus = true;
 			}
-			tooltip += "\n+" + Utils::floatToString(pc->stats.per_primary[primary_index][i], eset->number_format.character_menu);
+			tooltip += "\n+" + Utils::floatToString(player->stats.per_primary[primary_index][i], eset->number_format.character_menu);
 			tooltip += " " + Stats::NAME[i];
 		}
 	}
@@ -1004,7 +1005,7 @@ std::string MenuCharacter::getUpgradeButtonTooltip(size_t primary_index) {
 					tooltip += "\n";
 					have_bonus = true;
 				}
-				tooltip += "\n+" + Utils::floatToString(pc->stats.per_primary[primary_index][resource_index], eset->number_format.character_menu);
+				tooltip += "\n+" + Utils::floatToString(player->stats.per_primary[primary_index][resource_index], eset->number_format.character_menu);
 				tooltip += " " + eset->resource_stats.list[i].text[k];
 			}
 		}
@@ -1019,7 +1020,7 @@ std::string MenuCharacter::getUpgradeButtonTooltip(size_t primary_index) {
 				tooltip += "\n";
 				have_bonus = true;
 			}
-			tooltip += "\n+" + Utils::floatToString(pc->stats.per_primary[primary_index][resist_index], eset->number_format.character_menu);
+			tooltip += "\n+" + Utils::floatToString(player->stats.per_primary[primary_index][resist_index], eset->number_format.character_menu);
 			tooltip += " " + eset->damage_types.list[i].name_resist;
 		}
 	}

@@ -28,6 +28,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuItemStorage.h"
 #include "WidgetLabel.h"
 
+class Avatar;
 class ItemStorage;
 class NPC;
 class StatBlock;
@@ -55,7 +56,7 @@ private:
 public:
 	static const int TAB_COUNT = 3;
 
-	explicit MenuVendor();
+	explicit MenuVendor(Avatar* _player);
 	~MenuVendor();
 	void align();
 
@@ -89,6 +90,8 @@ public:
 	TabList tablist_tabs[TAB_COUNT];
 
 	bool sell_enabled;
+
+	Avatar* player;
 };
 
 

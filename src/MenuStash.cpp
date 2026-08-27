@@ -54,7 +54,7 @@ MenuStashTab::MenuStashTab(const std::string& _id, const std::string& _name, con
 MenuStashTab::~MenuStashTab() {
 }
 
-MenuStash::MenuStash()
+MenuStash::MenuStash(Avatar* _player)
 	: Menu()
 	, button_close(new WidgetButton(WidgetButton::CLOSE_FILE))
 	, button_sort(NULL)
@@ -63,6 +63,7 @@ MenuStash::MenuStash()
 	, sort_enabled(false)
 	, tabs()
 	, lock_tab_control(false)
+	, player(_player)
 {
 	int slots_cols = 8; // default if menus/stash.txt::stash_cols not set
 	int slots_rows = 8; // default if menus/stash.txt::slots_rows not set
@@ -377,17 +378,17 @@ bool MenuStash::add(ItemStack stack, int slot, bool play_sound) {
 	}
 
 	if (items->items[stack.item]->no_stash == Item::NO_STASH_ALL) {
-		pc->logMsg(msg->get("This item can not be stored in the stash."), Avatar::MSG_NORMAL);
+		player->logMsg(msg->get("This item can not be stored in the stash."), Avatar::MSG_NORMAL);
 		drop_stack.push(stack);
 		return false;
 	}
 	else if (tabs[activetab].is_private && items->items[stack.item]->no_stash == Item::NO_STASH_PRIVATE) {
-		pc->logMsg(msg->get("This item can not be stored in the private stash."), Avatar::MSG_NORMAL);
+		player->logMsg(msg->get("This item can not be stored in the private stash."), Avatar::MSG_NORMAL);
 		drop_stack.push(stack);
 		return false;
 	}
 	else if (!tabs[activetab].is_private && items->items[stack.item]->no_stash == Item::NO_STASH_SHARED) {
-		pc->logMsg(msg->get("This item can not be stored in the shared stash."), Avatar::MSG_NORMAL);
+		player->logMsg(msg->get("This item can not be stored in the shared stash."), Avatar::MSG_NORMAL);
 		drop_stack.push(stack);
 		return false;
 	}
@@ -397,7 +398,7 @@ bool MenuStash::add(ItemStack stack, int slot, bool play_sound) {
 		if (leftover.quantity != stack.quantity) {
 			tabs[activetab].updated = true;
 		}
-		pc->logMsg(msg->get("Stash is full."), Avatar::MSG_NORMAL);
+		player->logMsg(msg->get("Stash is full."), Avatar::MSG_NORMAL);
 		drop_stack.push(leftover);
 		return false;
 	}
@@ -431,7 +432,7 @@ void MenuStash::renderTooltips(const Point& position) {
 	if (!visible || !Utils::isWithinRect(window_area, position))
 		return;
 
-	TooltipData tip_data = tabs[activetab].stock.checkTooltip(position, &pc->stats, ItemManager::PLAYER_INV, ItemManager::TOOLTIP_INPUT_HINT);
+	TooltipData tip_data = tabs[activetab].stock.checkTooltip(position, &player->stats, ItemManager::PLAYER_INV, ItemManager::TOOLTIP_INPUT_HINT);
 	tooltipm->push(tip_data, position, TooltipData::STYLE_FLOAT);
 }
 
@@ -455,7 +456,7 @@ void MenuStash::validate(std::queue<ItemStack>& global_drop_stack) {
 				no_stash = items->items[stack.item]->no_stash;
 
 			if (no_stash == Item::NO_STASH_ALL || (tabs[tab].is_private && no_stash == Item::NO_STASH_PRIVATE) || (!tabs[tab].is_private && no_stash == Item::NO_STASH_SHARED)) {
-				pc->logMsg(msg->getv("Can not store item in stash: %s", items->getItemName(stack.item).c_str()), Avatar::MSG_NORMAL);
+				player->logMsg(msg->getv("Can not store item in stash: %s", items->getItemName(stack.item).c_str()), Avatar::MSG_NORMAL);
 				global_drop_stack.push(stack);
 				tabs[tab].stock[i].clear();
 				tabs[tab].updated = true;

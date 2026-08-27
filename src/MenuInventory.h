@@ -32,7 +32,9 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Utils.h"
 #include "WidgetLabel.h"
 
+class Avatar;
 class GameSlotPreview;
+class PlayerInventory;
 class StatBlock;
 class WidgetButton;
 
@@ -93,7 +95,11 @@ public:
 	static const bool ADD_AUTO_EQUIP = true;
 	static const bool IS_DRAGGING = true;
 
-	explicit MenuInventory();
+	/** inventory[] is bound (MenuItemStorage::bind(), not a C++ reference) to player_inventory's
+	 * own storage in the constructor -- unlike MenuActionBar's reference members, this binding
+	 * uses a real pointer underneath and could in principle be re-bound later, but P2.3 only wires
+	 * up construction time; see MenuManager::setPlayer(). */
+	explicit MenuInventory(Avatar* _player, PlayerInventory* _player_inventory);
 	~MenuInventory();
 	void align();
 
@@ -127,7 +133,8 @@ public:
 	 * what moved and why each of these three didn't move whole. Every existing caller of these
 	 * three -- this class's own drop()/activate()/buy()/itemReturn(), MenuManager, MenuPowers --
 	 * keeps calling them exactly as before; only CampaignManager/PowerManager/EventManager/
-	 * GameStatePlay/SaveLoad were repointed to pinv-> directly.
+	 * GameStatePlay/SaveLoad were repointed to PlayerInventory's own object directly (P1.3d-4b-3;
+	 * P2.3 later gave that object an explicit name at every call site instead of a global).
 	 */
 	bool add(ItemStack stack, int area, int slot, bool play_sound, bool auto_equip);
 	bool remove(ItemID item, int quantity);
@@ -172,6 +179,9 @@ public:
 	std::string show_book;
 
 	std::queue<ItemStack> drop_stack;
+
+	Avatar* player;
+	PlayerInventory* player_inventory;
 };
 
 #endif

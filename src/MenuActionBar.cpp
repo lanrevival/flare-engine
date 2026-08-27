@@ -58,25 +58,28 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 #include <climits>
 
-MenuActionBar::MenuActionBar()
+MenuActionBar::MenuActionBar(Avatar* _player, PlayerInventory* _player_inventory, ActionBarState* _actionbar)
 	: sprite_emptyslot(NULL)
 	, sfx_unable_to_cast(0)
 	, tooltip_length(MenuPowers::TOOLTIP_LONG_MENU)
 	, powers_overlap_slots(false)
 	, tablist_cursor(-1)
-	, slots_count(pab->slots_count)
-	, hotkeys(pab->hotkeys)
-	, hotkeys_temp(pab->hotkeys_temp)
-	, hotkeys_mod(pab->hotkeys_mod)
-	, locked(pab->locked)
-	, prevent_changing(pab->prevent_changing)
-	, slot_fail_cooldown(pab->slot_fail_cooldown)
-	, requires_attention(pab->requires_attention)
+	, slots_count(_actionbar->slots_count)
+	, hotkeys(_actionbar->hotkeys)
+	, hotkeys_temp(_actionbar->hotkeys_temp)
+	, hotkeys_mod(_actionbar->hotkeys_mod)
+	, locked(_actionbar->locked)
+	, prevent_changing(_actionbar->prevent_changing)
+	, slot_fail_cooldown(_actionbar->slot_fail_cooldown)
+	, requires_attention(_actionbar->requires_attention)
 	, drag_prev_slot(-1)
-	, updated(pab->updated)
-	, twostep_slot(pab->twostep_slot)
+	, updated(_actionbar->updated)
+	, twostep_slot(_actionbar->twostep_slot)
 	, touch_slot(NULL)
-	, enable_gamepad_nav(true) {
+	, enable_gamepad_nav(true)
+	, player(_player)
+	, player_inventory(_player_inventory)
+	, actionbar(_actionbar) {
 
 	menu_labels.resize(MENU_COUNT);
 
@@ -200,7 +203,7 @@ MenuActionBar::MenuActionBar()
 
 	// Sizes slots_count, hotkeys, hotkeys_temp, hotkeys_mod, locked and slot_fail_cooldown -- see
 	// ActionBarState::initSlots(). Only these are pab's; the rest below are presentation.
-	pab->initSlots(static_cast<unsigned>(slots.size()));
+	actionbar->initSlots(static_cast<unsigned>(slots.size()));
 
 	slot_item_count.resize(slots_count);
 	slot_activated.resize(slots_count);
@@ -277,7 +280,7 @@ void MenuActionBar::align() {
 void MenuActionBar::clearSlot(size_t slot) {
 	// hotkeys/hotkeys_temp/hotkeys_mod/locked/slot_fail_cooldown live on pab now; this is the
 	// widget-only remainder -- see ActionBarState::clearSlot() for the part that moved.
-	pab->clearSlot(slot);
+	actionbar->clearSlot(slot);
 
 	slot_item_count[slot] = -1;
 	slot_activated[slot] = false;
@@ -375,7 +378,7 @@ void MenuActionBar::logic() {
 	}
 
 	// hero has no powers
-	if (pc->power_cast_timers.empty())
+	if (player->power_cast_timers.empty())
 		return;
 
 	for (unsigned i = 0; i < slots_count; i++) {
@@ -390,20 +393,20 @@ void MenuActionBar::logic() {
 			else {
 				for (size_t j = 0; j < power->required_items.size(); ++j) {
 					if (power->required_items[j].equipped) {
-						if (!pinv->equipmentContain(power->required_items[j].id, 1))
+						if (!player_inventory->equipmentContain(power->required_items[j].id, 1))
 							setItemCount(i, 0, IS_EQUIPPED);
 						else
 							setItemCount(i, 1, IS_EQUIPPED);
 					}
 					else {
 						if (power->required_items[j].quantity == 0) {
-							if (!pinv->inventory[PlayerInventory::CARRIED].contain(power->required_items[j].id, 1))
+							if (!player_inventory->inventory[PlayerInventory::CARRIED].contain(power->required_items[j].id, 1))
 								setItemCount(i, 0, IS_EQUIPPED);
 							else
 								setItemCount(i, 1, IS_EQUIPPED);
 						}
 						else {
-							setItemCount(i, pinv->inventory[PlayerInventory::CARRIED].count(power->required_items[j].id), !IS_EQUIPPED);
+							setItemCount(i, player_inventory->inventory[PlayerInventory::CARRIED].count(power->required_items[j].id), !IS_EQUIPPED);
 						}
 					}
 
@@ -413,9 +416,9 @@ void MenuActionBar::logic() {
 			}
 
 			//see if the slot should be greyed out
-			bool can_use_power = pc->stats.canUsePower(hotkeys_mod[i], !StatBlock::CAN_USE_PASSIVE);
-			slots[i]->enabled = pc->power_cooldown_timers[hotkeys_mod[i]]->isEnd()
-							  && pc->power_cast_timers[hotkeys_mod[i]]->isEnd()
+			bool can_use_power = player->stats.canUsePower(hotkeys_mod[i], !StatBlock::CAN_USE_PASSIVE);
+			slots[i]->enabled = player->power_cooldown_timers[hotkeys_mod[i]]->isEnd()
+							  && player->power_cast_timers[hotkeys_mod[i]]->isEnd()
 							  && can_use_power
 							  && (twostep_slot == -1 || static_cast<unsigned>(twostep_slot) == i);
 
@@ -424,11 +427,11 @@ void MenuActionBar::logic() {
 			if (!can_use_power) {
 				slots[i]->cooldown = 1;
 			}
-			else if (!pc->power_cast_timers[hotkeys_mod[i]]->isEnd() && pc->power_cast_timers[hotkeys_mod[i]]->getDuration() > 0) {
-				slots[i]->cooldown = static_cast<float>(pc->power_cast_timers[hotkeys_mod[i]]->getCurrent()) / static_cast<float>(pc->power_cast_timers[hotkeys_mod[i]]->getDuration());
+			else if (!player->power_cast_timers[hotkeys_mod[i]]->isEnd() && player->power_cast_timers[hotkeys_mod[i]]->getDuration() > 0) {
+				slots[i]->cooldown = static_cast<float>(player->power_cast_timers[hotkeys_mod[i]]->getCurrent()) / static_cast<float>(player->power_cast_timers[hotkeys_mod[i]]->getDuration());
 			}
-			else if (!pc->power_cooldown_timers[hotkeys_mod[i]]->isEnd() && pc->power_cooldown_timers[hotkeys_mod[i]]->getDuration() > 0) {
-				slots[i]->cooldown = static_cast<float>(pc->power_cooldown_timers[hotkeys_mod[i]]->getCurrent()) / static_cast<float>(pc->power_cooldown_timers[hotkeys_mod[i]]->getDuration());
+			else if (!player->power_cooldown_timers[hotkeys_mod[i]]->isEnd() && player->power_cooldown_timers[hotkeys_mod[i]]->getDuration() > 0) {
+				slots[i]->cooldown = static_cast<float>(player->power_cooldown_timers[hotkeys_mod[i]]->getCurrent()) / static_cast<float>(player->power_cooldown_timers[hotkeys_mod[i]]->getDuration());
 			}
 			else {
 				slots[i]->cooldown = 1;
@@ -479,7 +482,7 @@ void MenuActionBar::render() {
  * On mouseover, show tooltip for buttons
  */
 void MenuActionBar::renderTooltips(const Point& position) {
-	if (inpt->usingMouse() && (pc->using_main1 || pc->using_main2))
+	if (inpt->usingMouse() && (player->using_main1 || player->using_main2))
 		return;
 
 	TooltipData tip_data;
@@ -580,15 +583,15 @@ void MenuActionBar::checkAction(std::vector<ActionData> &action_queue) {
 	unsigned mm_slot = settings->mouse_move_swap ? 11 : 10;
 	bool mouse_move_target = false;
 	if (settings->mouse_move) {
-		mouse_move_target = pc->mm_target_object == Avatar::MM_TARGET_ENTITY &&
-		                    powers->checkCombatRange(powers->checkReplaceByEffect(hotkeys_mod[mm_slot], &pc->stats), &pc->stats, pc->mm_target_object_pos) &&
-		                    mapr->collider.lineOfSight(pc->stats.pos.x, pc->stats.pos.y, pc->mm_target_object_pos.x, pc->mm_target_object_pos.y);
+		mouse_move_target = player->mm_target_object == Avatar::MM_TARGET_ENTITY &&
+		                    powers->checkCombatRange(powers->checkReplaceByEffect(hotkeys_mod[mm_slot], &player->stats), &player->stats, player->mm_target_object_pos) &&
+		                    mapr->collider.lineOfSight(player->stats.pos.x, player->stats.pos.y, player->mm_target_object_pos.x, player->mm_target_object_pos.y);
 
-		if (mouse_move_target && pc->stats.cur_state == StatBlock::ENTITY_MOVE) {
-			pc->stats.cur_state = StatBlock::ENTITY_STANCE;
+		if (mouse_move_target && player->stats.cur_state == StatBlock::ENTITY_MOVE) {
+			player->stats.cur_state = StatBlock::ENTITY_STANCE;
 		}
-		else if (!mouse_move_target && pc->mm_target_object == Avatar::MM_TARGET_ENTITY && pc->stats.cur_state == StatBlock::ENTITY_STANCE) {
-			pc->stats.cur_state = StatBlock::ENTITY_MOVE;
+		else if (!mouse_move_target && player->mm_target_object == Avatar::MM_TARGET_ENTITY && player->stats.cur_state == StatBlock::ENTITY_STANCE) {
+			player->stats.cur_state = StatBlock::ENTITY_MOVE;
 		}
 	}
 
@@ -615,7 +618,7 @@ void MenuActionBar::checkAction(std::vector<ActionData> &action_queue) {
 		}
 
 		// mouse/touch click
-		else if ((inpt->mode == InputState::MODE_TOUCHSCREEN && touch_slot == slots[i]) || (inpt->mode != InputState::MODE_TOUCHSCREEN && inpt->usingMouse() && !pc->using_main1 && !pc->using_main2 && slots[i]->checkClick() == WidgetSlot::ACTIVATE)) {
+		else if ((inpt->mode == InputState::MODE_TOUCHSCREEN && touch_slot == slots[i]) || (inpt->mode != InputState::MODE_TOUCHSCREEN && inpt->usingMouse() && !player->using_main1 && !player->using_main2 && slots[i]->checkClick() == WidgetSlot::ACTIVATE)) {
 			touch_slot = NULL;
 			have_aim = false;
 			slot_activated[i] = true;
@@ -673,13 +676,13 @@ void MenuActionBar::checkAction(std::vector<ActionData> &action_queue) {
 
 			bool not_enough_resources = false;
 			if (slot_fail_cooldown[i].isEnd()) {
-				if (pc->stats.mp < power->requires_mp) {
-					pc->logMsg(msg->get("Not enough MP."), Avatar::MSG_NORMAL);
+				if (player->stats.mp < power->requires_mp) {
+					player->logMsg(msg->get("Not enough MP."), Avatar::MSG_NORMAL);
 					not_enough_resources = true;
 				}
 				for (size_t j = 0; j < eset->resource_stats.list.size(); ++j) {
-					if (pc->stats.resource_stats[j] < power->requires_resource_stat[j]) {
-						pc->logMsg(eset->resource_stats.list[j].text_log_low, Avatar::MSG_NORMAL);
+					if (player->stats.resource_stats[j] < power->requires_resource_stat[j]) {
+						player->logMsg(eset->resource_stats.list[j].text_log_low, Avatar::MSG_NORMAL);
 						not_enough_resources = true;
 					}
 				}
@@ -703,18 +706,18 @@ void MenuActionBar::checkAction(std::vector<ActionData> &action_queue) {
 
 			// set the target depending on how the power was triggered
 			if (have_aim && settings->mouse_aim && (settings->mouse_move || !inpt->usingTouchscreen())) {
-				action.target = pc->stats.pos;
+				action.target = player->stats.pos;
 
 				if (power->target_nearest > 0) {
-					if (!power->requires_corpse && powers->checkNearestTargeting(power, &pc->stats, false)) {
-						action.target = pc->stats.target_nearest->pos;
+					if (!power->requires_corpse && powers->checkNearestTargeting(power, &player->stats, false)) {
+						action.target = player->stats.target_nearest->pos;
 					}
-					else if (power->requires_corpse && powers->checkNearestTargeting(power, &pc->stats, true)) {
-						action.target = pc->stats.target_nearest_corpse->pos;
+					else if (power->requires_corpse && powers->checkNearestTargeting(power, &player->stats, true)) {
+						action.target = player->stats.target_nearest_corpse->pos;
 					}
 				}
 				else if (mouse_move_target) {
-					action.target = pc->mm_target_object_pos;
+					action.target = player->mm_target_object_pos;
 				}
 				else {
 					if (power->aim_assist)
@@ -724,17 +727,17 @@ void MenuActionBar::checkAction(std::vector<ActionData> &action_queue) {
 				}
 			}
 			else {
-				action.target = Utils::calcVector(pc->stats.pos, pc->stats.direction, pc->stats.melee_range);
+				action.target = Utils::calcVector(player->stats.pos, player->stats.direction, player->stats.melee_range);
 			}
 
 			bool can_use_power = slots[i]->enabled &&
-				(power->new_state == Power::STATE_INSTANT || (pc->stats.cooldown.isEnd() && pc->stats.cur_state != StatBlock::ENTITY_POWER && pc->stats.cur_state != StatBlock::ENTITY_HIT)) &&
-				powers->hasValidTarget(action.power, &pc->stats, action.target);
+				(power->new_state == Power::STATE_INSTANT || (player->stats.cooldown.isEnd() && player->stats.cur_state != StatBlock::ENTITY_POWER && player->stats.cur_state != StatBlock::ENTITY_HIT)) &&
+				powers->hasValidTarget(action.power, &player->stats, action.target);
 
 			// add it to the queue
 			if (can_use_power) {
 				if (i != mm_slot && !action.instant_item) {
-					pc->mm_target_object = Avatar::MM_TARGET_NONE;
+					player->mm_target_object = Avatar::MM_TARGET_NONE;
 				}
 
 				slot_fail_cooldown[i].reset(Timer::BEGIN);
@@ -780,7 +783,7 @@ PowerID MenuActionBar::checkDrag(const Point& mouse) {
  * if clicking a menu, act as if the player pressed that menu's hotkey
  */
 void MenuActionBar::checkMenu(bool &menu_c, bool &menu_i, bool &menu_p, bool &menu_l) {
-	if (inpt->usingMouse() && (pc->using_main1 || pc->using_main2))
+	if (inpt->usingMouse() && (player->using_main1 || player->using_main2))
 		return;
 
 	if (menus[MENU_CHARACTER]->enabled && menus[MENU_CHARACTER]->checkClick()) {
@@ -867,7 +870,7 @@ void MenuActionBar::addPower(const PowerID id, const PowerID target_id) {
 		return;
 	}
 
-	pab->addPower(id, target_id);
+	actionbar->addPower(id, target_id);
 }
 
 Point MenuActionBar::getSlotPos(size_t slot) {

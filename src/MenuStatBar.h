@@ -30,6 +30,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Utils.h"
 #include "WidgetLabel.h"
 
+class Avatar;
 class WidgetLabel;
 
 class MenuStatBar : public Menu {
@@ -75,11 +76,13 @@ public:
 		TYPE_RESOURCE_STAT = 3
 	};
 
-	explicit MenuStatBar(short _type, size_t _resource_stat_index);
+	explicit MenuStatBar(short _type, size_t _resource_stat_index, Avatar* _player);
 	~MenuStatBar();
 	void loadGraphics();
 	void update();
 	void render();
+
+	Avatar* player;
 };
 
 #endif

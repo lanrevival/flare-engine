@@ -28,6 +28,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Utils.h"
 #include "Widget.h"
 
+class Avatar;
 class CampaignManager;
 class NPC;
 class StatBlock;
@@ -89,7 +90,7 @@ private:
 	Color trade_color_pressed;
 
 public:
-	explicit MenuTalker();
+	explicit MenuTalker(Avatar* _player);
 	~MenuTalker();
 	void align();
 
@@ -106,6 +107,8 @@ public:
 	WidgetButton *closeButton;
 
 	bool npc_from_map;
+
+	Avatar* player;
 };
 
 #endif

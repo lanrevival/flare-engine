@@ -46,7 +46,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "UtilsParsing.h"
 #include "UtilsFileSystem.h"
 
-MenuStatBar::MenuStatBar(short _type, size_t _resource_stat_index)
+MenuStatBar::MenuStatBar(short _type, size_t _resource_stat_index, Avatar* _player)
 	: bar(NULL)
 	, label(new WidgetLabel())
 	, enabled(true)
@@ -59,6 +59,7 @@ MenuStatBar::MenuStatBar(short _type, size_t _resource_stat_index)
 	, resource_stat_index(_resource_stat_index)
 	, bar_fill_offset()
 	, bar_fill_size(-1, -1)
+	, player(_player)
 {
 	std::string type_filename;
 	if (type == TYPE_HP)
@@ -172,11 +173,11 @@ void MenuStatBar::update() {
 	if (type == TYPE_XP) {
 		stat_cur_prev.Unsigned = stat_cur.Unsigned; // save previous value
 		stat_min.Unsigned = 0;
-		stat_cur.Unsigned = pc->stats.xp - eset->xp.getLevelXP(pc->stats.level);
-		stat_max.Unsigned = eset->xp.getLevelXP(pc->stats.level + 1) - eset->xp.getLevelXP(pc->stats.level);
+		stat_cur.Unsigned = player->stats.xp - eset->xp.getLevelXP(player->stats.level);
+		stat_max.Unsigned = eset->xp.getLevelXP(player->stats.level + 1) - eset->xp.getLevelXP(player->stats.level);
 
-		if (pc->stats.level == eset->xp.getMaxLevel()) {
-			custom_string = msg->getv("XP: %lu", pc->stats.xp);
+		if (player->stats.level == eset->xp.getMaxLevel()) {
+			custom_string = msg->getv("XP: %lu", player->stats.xp);
 		}
 		else {
 			custom_string = msg->getv("XP: %lu/%lu", stat_cur.Unsigned, stat_max.Unsigned);
@@ -185,20 +186,20 @@ void MenuStatBar::update() {
 	else if (type == TYPE_HP) {
 		stat_cur_prev.Float = stat_cur.Float; // save previous value
 		stat_min.Float = 0;
-		stat_cur.Float = pc->stats.hp;
-		stat_max.Float = pc->stats.get(Stats::HP_MAX);
+		stat_cur.Float = player->stats.hp;
+		stat_max.Float = player->stats.get(Stats::HP_MAX);
 	}
 	else if (type == TYPE_MP) {
 		stat_cur_prev.Float = stat_cur.Float; // save previous value
 		stat_min.Float = 0;
-		stat_cur.Float = pc->stats.mp;
-		stat_max.Float = pc->stats.get(Stats::MP_MAX);
+		stat_cur.Float = player->stats.mp;
+		stat_max.Float = player->stats.get(Stats::MP_MAX);
 	}
 	else if (type == TYPE_RESOURCE_STAT) {
 		stat_cur_prev.Float = stat_cur.Float; // save previous value
 		stat_min.Float = 0;
-		stat_cur.Float = pc->stats.resource_stats[resource_stat_index];
-		stat_max.Float = pc->stats.getResourceStat(resource_stat_index, EngineSettings::ResourceStats::STAT_BASE);
+		stat_cur.Float = player->stats.resource_stats[resource_stat_index];
+		stat_max.Float = player->stats.getResourceStat(resource_stat_index, EngineSettings::ResourceStats::STAT_BASE);
 	}
 }
 

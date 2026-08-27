@@ -80,19 +80,19 @@ MenuPowersCellGroup::MenuPowersCellGroup()
 }
 
 // Ported from MenuPowersCellGroup -- see that class's header comment in MenuPowers.h. Reads
-// pbs->current_cell[group] where the original read the now-deleted current_cell field.
+// player_powerbonus->current_cell[group] where the original read the now-deleted current_cell field.
 MenuPowersCell* MenuPowers::getCurrent(size_t group) {
-	return &power_cell[group].cells[pbs->current_cell[group]];
+	return &power_cell[group].cells[player_powerbonus->current_cell[group]];
 }
 
-// Ported from MenuPowersCellGroup -- see MenuPowers.h. Reads pbs->current_cell[group] and
-// pbs->getBonusLevels(group) where the original read the now-deleted current_cell/bonus_levels
+// Ported from MenuPowersCellGroup -- see MenuPowers.h. Reads player_powerbonus->current_cell[group] and
+// player_powerbonus->getBonusLevels(group) where the original read the now-deleted current_cell/bonus_levels
 // fields.
 MenuPowersCell* MenuPowers::getBonusCurrent(size_t group, MenuPowersCell* pcell) {
-	if (pbs->bonus_levels[group].empty())
+	if (player_powerbonus->bonus_levels[group].empty())
 		return pcell;
 
-	size_t current = pbs->current_cell[group];
+	size_t current = player_powerbonus->current_cell[group];
 
 	std::vector<MenuPowersCell>& cells = power_cell[group].cells;
 	for (size_t i = 0; i < cells.size(); ++i) {
@@ -102,7 +102,7 @@ MenuPowersCell* MenuPowers::getBonusCurrent(size_t group, MenuPowersCell* pcell)
 		}
 	}
 
-	int current_bonus_levels = pbs->getBonusLevels(group);
+	int current_bonus_levels = player_powerbonus->getBonusLevels(group);
 	size_t bonus_cell = current + static_cast<size_t>(current_bonus_levels);
 
 	if (bonus_cell >= cells.size())
@@ -111,7 +111,7 @@ MenuPowersCell* MenuPowers::getBonusCurrent(size_t group, MenuPowersCell* pcell)
 	return &cells[bonus_cell];
 }
 
-MenuPowers::MenuPowers()
+MenuPowers::MenuPowers(Avatar* _player, PowerBonusState* _player_powerbonus)
 	: skip_section(false)
 	, points_left(0)
 	, default_background("")
@@ -124,6 +124,8 @@ MenuPowers::MenuPowers()
 	, tooltip_text_shield(msg->get("Magical Shield"))
 	, tooltip_text_heal(msg->get("Healing"))
 	, newPowerNotification(false)
+	, player(_player)
+	, player_powerbonus(_player_powerbonus)
 {
 
 	closeButton = new WidgetButton(WidgetButton::CLOSE_FILE);
@@ -303,7 +305,7 @@ void MenuPowers::loadPowerTree(const std::string &filename) {
 		for (size_t j = 0; j < power_cell[i].cells.size(); ++j) {
 			cell_ids.push_back(power_cell[i].cells[j].id);
 		}
-		pbs->addGroup(cell_ids);
+		player_powerbonus->addGroup(cell_ids);
 	}
 
 	// load any specified graphics into the tree_surf vector
@@ -384,7 +386,7 @@ void MenuPowers::loadPowerTree(const std::string &filename) {
 
 	// set the default tab from character class setting
 	EngineSettings::HeroClasses::HeroClass* pc_class;
-	pc_class = eset->hero_classes.getByName(pc->stats.character_class);
+	pc_class = eset->hero_classes.getByName(player->stats.character_class);
 	if (pc_class) {
 		default_power_tab = pc_class->default_power_tab;
 	}
@@ -619,11 +621,11 @@ bool MenuPowers::checkRequirements(MenuPowersCell* pcell) {
 	if (!pcell)
 		return false;
 
-	if (pc->stats.level < pcell->requires_level)
+	if (player->stats.level < pcell->requires_level)
 		return false;
 
 	for (size_t i = 0; i < eset->primary_stats.list.size(); ++i) {
-		if (pc->stats.get_primary(i) < pcell->requires_primary[i])
+		if (player->stats.get_primary(i) < pcell->requires_primary[i])
 			return false;
 	}
 
@@ -642,8 +644,8 @@ bool MenuPowers::checkRequirements(MenuPowersCell* pcell) {
 
 	// NOTE if the player is dies, canUsePower() fails and causes passive powers to be locked
 	// so we can guard against this be checking player HP > 0
-	if (powers->isValid(pcell->id) && powers->powers[pcell->id]->passive && pc->stats.hp > 0) {
-		if (!pc->stats.canUsePower(pcell->id, StatBlock::CAN_USE_PASSIVE))
+	if (powers->isValid(pcell->id) && powers->powers[pcell->id]->passive && player->stats.hp > 0) {
+		if (!player->stats.canUsePower(pcell->id, StatBlock::CAN_USE_PASSIVE))
 			return false;
 	}
 
@@ -674,7 +676,7 @@ bool MenuPowers::checkUnlocked(MenuPowersCell* pcell) {
 	// check if the unlocked flag is set and check the player's power list
 	if (pcell->is_unlocked)
 		return true;
-	if (std::find(pc->stats.powers_list.begin(), pc->stats.powers_list.end(), pcell->id) != pc->stats.powers_list.end())
+	if (std::find(player->stats.powers_list.begin(), player->stats.powers_list.end(), pcell->id) != player->stats.powers_list.end())
 		return true;
 
 	// Check the rest of the requirements
@@ -722,21 +724,21 @@ void MenuPowers::lockCell(MenuPowersCell* pcell) {
 
 	// remove passive effects
 	if (powers->powers[pcell->id]->passive && pcell->passive_on) {
-		std::vector<PowerID>::iterator passive_it = std::find(pc->stats.powers_passive.begin(), pc->stats.powers_passive.end(), pcell->id);
-		if (passive_it != pc->stats.powers_passive.end())
-			pc->stats.powers_passive.erase(passive_it);
+		std::vector<PowerID>::iterator passive_it = std::find(player->stats.powers_passive.begin(), player->stats.powers_passive.end(), pcell->id);
+		if (passive_it != player->stats.powers_passive.end())
+			player->stats.powers_passive.erase(passive_it);
 
 		if (!powers->powers[pcell->id]->passive_effects_persist) {
-			pc->stats.effects.removeEffectPassive(pcell->id);
+			player->stats.effects.removeEffectPassive(pcell->id);
 		}
 		pcell->passive_on = false;
-		pc->stats.refresh_stats = true;
+		player->stats.refresh_stats = true;
 	}
 
 	// remove from player's power list
-	std::vector<PowerID>::iterator it = std::find(pc->stats.powers_list.begin(), pc->stats.powers_list.end(), pcell->id);
-	if (it != pc->stats.powers_list.end())
-		pc->stats.powers_list.erase(it);
+	std::vector<PowerID>::iterator it = std::find(player->stats.powers_list.begin(), player->stats.powers_list.end(), pcell->id);
+	if (it != player->stats.powers_list.end())
+		player->stats.powers_list.erase(it);
 
 	// remove from action bar
 	menu->act->addPower(0, pcell->id);
@@ -751,7 +753,7 @@ bool MenuPowers::isBonusCell(MenuPowersCell* pcell) {
 	if (!pcell)
 		return false;
 
-	if (pbs->getBonusLevels(pcell->group) <= 0)
+	if (player_powerbonus->getBonusLevels(pcell->group) <= 0)
 		return false;
 
 	return pcell == getBonusCurrent(pcell->group, getCurrent(pcell->group));
@@ -797,8 +799,8 @@ void MenuPowers::upgradePower(MenuPowersCell* pcell, bool ignore_tab) {
 
 	if (!tab_control || ignore_tab || tab_control->getActiveTab() == power_cell[pcell->group].tab) {
 		pcell->next->is_unlocked = true;
-		pc->stats.powers_list.push_back(pcell->next->id);
-		pc->stats.check_title = true;
+		player->stats.powers_list.push_back(pcell->next->id);
+		player->stats.check_title = true;
 	}
 	setUnlockedPowers();
 }
@@ -807,20 +809,20 @@ void MenuPowers::setUnlockedPowers() {
 	bool did_cell_lock = false;
 
 	// restore bonus-modified action bar powers before performing upgrades. Deliberately NOT
-	// pbs->clearBonusLevels() -- that also wipes the bonus records themselves, which must survive
+	// player_powerbonus->clearBonusLevels() -- that also wipes the bonus records themselves, which must survive
 	// an upgrade; only applyEquipment() (which recomputes them from scratch afterwards) does that.
-	pbs->clearActionBarBonusLevels();
+	player_powerbonus->clearActionBarBonusLevels();
 
 	for (size_t i = 0; i<power_cell.size(); ++i) {
 		for (size_t j = 0; j < power_cell[i].cells.size(); ++j) {
 			if (std::find(recently_locked_cells.begin(), recently_locked_cells.end(), &power_cell[i].cells[j]) == recently_locked_cells.end()) {
-				if (std::find(pc->stats.powers_list.begin(), pc->stats.powers_list.end(), power_cell[i].cells[j].id) != pc->stats.powers_list.end()) {
+				if (std::find(player->stats.powers_list.begin(), player->stats.powers_list.end(), power_cell[i].cells[j].id) != player->stats.powers_list.end()) {
 					power_cell[i].cells[j].is_unlocked = true;
 				}
 				else {
 					if (checkUnlocked(&power_cell[i].cells[j])) {
 						// power is unlocked, but not in the player's powers_list
-						pc->stats.powers_list.push_back(power_cell[i].cells[j].id);
+						player->stats.powers_list.push_back(power_cell[i].cells[j].id);
 						power_cell[i].cells[j].is_unlocked = true;
 					}
 				}
@@ -831,8 +833,8 @@ void MenuPowers::setUnlockedPowers() {
 					lockCell(&power_cell[i].cells[j]);
 					did_cell_lock = true;
 
-					if (pbs->current_cell[i] > 1)
-						pbs->current_cell[i] = j;
+					if (player_powerbonus->current_cell[i] > 1)
+						player_powerbonus->current_cell[i] = j;
 
 					// We're going to recursively call setUnlockedPowers() at this point.
 					// We save a list of powers locked here so that we don't unlock them again in this cycle,
@@ -841,10 +843,10 @@ void MenuPowers::setUnlockedPowers() {
 				}
 				else {
 					// if power was present in ActionBar, update it there
-					if (pbs->current_cell[i] != j)
+					if (player_powerbonus->current_cell[i] != j)
 						menu->act->addPower(power_cell[i].cells[j].id, getCurrent(i)->id);
 
-					pbs->current_cell[i] = j;
+					player_powerbonus->current_cell[i] = j;
 					if (slots[i])
 						slots[i]->setIcon(powers->powers[power_cell[i].cells[j].id]->icon, WidgetSlot::NO_OVERLAY);
 				}
@@ -872,15 +874,15 @@ void MenuPowers::setUnlockedPowers() {
 
 				if (pcell != bonus_pcell || (pcell->passive_on && powers->powers[pcell->id]->passive && (!checkRequirements(current_pcell) || (!pcell->is_unlocked && !isBonusCell(pcell))))) {
 					// passive power is activated, but does not meet requirements, so remove it
-					std::vector<PowerID>::iterator passive_it = std::find(pc->stats.powers_passive.begin(), pc->stats.powers_passive.end(), pcell->id);
-					if (passive_it != pc->stats.powers_passive.end()) {
-						pc->stats.powers_passive.erase(passive_it);
+					std::vector<PowerID>::iterator passive_it = std::find(player->stats.powers_passive.begin(), player->stats.powers_passive.end(), pcell->id);
+					if (passive_it != player->stats.powers_passive.end()) {
+						player->stats.powers_passive.erase(passive_it);
 
 						if (!powers->powers[pcell->id]->passive_effects_persist) {
-							pc->stats.effects.removeEffectPassive(pcell->id);
+							player->stats.effects.removeEffectPassive(pcell->id);
 						}
 						pcell->passive_on = false;
-						pc->stats.refresh_stats = true;
+						player->stats.refresh_stats = true;
 
 						// passive powers can lock equipment slots, so update equipment here
 						menu->inv->applyEquipment();
@@ -888,14 +890,14 @@ void MenuPowers::setUnlockedPowers() {
 				}
 				else if (pcell == bonus_pcell && !pcell->passive_on && powers->powers[pcell->id]->passive && checkRequirements(current_pcell)) {
 					// passive power has not been activated, so activate it here
-					std::vector<PowerID>::iterator passive_it = std::find(pc->stats.powers_passive.begin(), pc->stats.powers_passive.end(), pcell->id);
-					if (passive_it == pc->stats.powers_passive.end()) {
-						pc->stats.powers_passive.push_back(pcell->id);
+					std::vector<PowerID>::iterator passive_it = std::find(player->stats.powers_passive.begin(), player->stats.powers_passive.end(), pcell->id);
+					if (passive_it == player->stats.powers_passive.end()) {
+						player->stats.powers_passive.push_back(pcell->id);
 
 						pcell->passive_on = true;
 						// for passives without special triggers, we need to trigger them here
-						if (pc->stats.effects.triggered_others)
-							powers->activateSinglePassive(&pc->stats, pcell->id);
+						if (player->stats.effects.triggered_others)
+							powers->activateSinglePassive(&player->stats, pcell->id);
 
 						// passive powers can lock equipment slots, so update equipment here
 						menu->inv->applyEquipment();
@@ -903,7 +905,7 @@ void MenuPowers::setUnlockedPowers() {
 				}
 
 				if (!powers->powers[pcell->id]->spawn_type.empty()) {
-					pc->stats.updateSummonPowerIDs(pcell->id, bonus_pcell->id);
+					player->stats.updateSummonPowerIDs(pcell->id, bonus_pcell->id);
 				}
 			}
 
@@ -917,7 +919,7 @@ void MenuPowers::setUnlockedPowers() {
 				MenuPowersCell* pcell = &power_cell[i].cells[j];
 
 				if (!powers->powers[pcell->id]->spawn_type.empty()) {
-					pc->stats.updateSummonPowerIDs(pcell->id, 0);
+					player->stats.updateSummonPowerIDs(pcell->id, 0);
 				}
 			}
 		}
@@ -927,8 +929,8 @@ void MenuPowers::setUnlockedPowers() {
 int MenuPowers::getPointsUsed() {
 	int used = 0;
 
-	for (size_t i = 0; i < pc->stats.powers_list.size(); ++i) {
-		MenuPowersCell* pcell = getCellByPowerIndex(pc->stats.powers_list[i]);
+	for (size_t i = 0; i < player->stats.powers_list.size(); ++i) {
+		MenuPowersCell* pcell = getCellByPowerIndex(player->stats.powers_list[i]);
 		if (pcell && pcell->requires_point)
 			used++;
 	}
@@ -982,7 +984,7 @@ void MenuPowers::createTooltip(TooltipData* tip_data, MenuPowersCell* pcell, Pow
 		ss << pwr->name;
 		if (pcell && pcell->upgrade_level > 0) {
 			ss << " (" << msg->getv("Level %d", pcell->upgrade_level);
-			int bonus_levels = pbs->getBonusLevels(pcell->group);
+			int bonus_levels = player_powerbonus->getBonusLevels(pcell->group);
 			if (bonus_levels > 0)
 				ss << ", +" << bonus_levels;
 			ss << ")";
@@ -1178,11 +1180,11 @@ void MenuPowers::createTooltip(TooltipData* tip_data, MenuPowersCell* pcell, Pow
 				continue;
 
 			if (pwr->mod_damage_mode == Power::STAT_MODIFIER_MODE_MULTIPLY) {
-				float magnitude = eset->combat.resourceRound(pc->stats.getDamageMax(pwr->base_damage) * pwr->mod_damage_value_min / 100);
+				float magnitude = eset->combat.resourceRound(player->stats.getDamageMax(pwr->base_damage) * pwr->mod_damage_value_min / 100);
 				ss << Utils::floatToString(magnitude, eset->number_format.power_tooltips);
 			}
 			else if (pwr->mod_damage_mode == Power::STAT_MODIFIER_MODE_ADD) {
-				float magnitude = eset->combat.resourceRound(pc->stats.getDamageMax(pwr->base_damage) + pwr->mod_damage_value_min);
+				float magnitude = eset->combat.resourceRound(player->stats.getDamageMax(pwr->base_damage) + pwr->mod_damage_value_min);
 				ss << Utils::floatToString(magnitude, eset->number_format.power_tooltips);
 			}
 			else if (pwr->mod_damage_mode == Power::STAT_MODIFIER_MODE_ABSOLUTE) {
@@ -1192,7 +1194,7 @@ void MenuPowers::createTooltip(TooltipData* tip_data, MenuPowersCell* pcell, Pow
 					ss << Utils::floatToString(eset->combat.resourceRound(pwr->mod_damage_value_min), eset->number_format.power_tooltips) << "-" << Utils::floatToString(eset->combat.resourceRound(pwr->mod_damage_value_max), eset->number_format.power_tooltips);
 			}
 			else {
-				ss << Utils::floatToString(eset->combat.resourceRound(pc->stats.getDamageMax(pwr->base_damage)), eset->number_format.power_tooltips);
+				ss << Utils::floatToString(eset->combat.resourceRound(player->stats.getDamageMax(pwr->base_damage)), eset->number_format.power_tooltips);
 			}
 
 			ss << " " << tooltip_text_shield;
@@ -1201,8 +1203,8 @@ void MenuPowers::createTooltip(TooltipData* tip_data, MenuPowersCell* pcell, Pow
 			if (pwr->base_damage == eset->damage_types.list.size())
 				continue;
 
-			float mag_min = pc->stats.getDamageMin(pwr->base_damage);
-			float mag_max = pc->stats.getDamageMax(pwr->base_damage);
+			float mag_min = player->stats.getDamageMin(pwr->base_damage);
+			float mag_max = player->stats.getDamageMax(pwr->base_damage);
 
 			if (pwr->mod_damage_mode == Power::STAT_MODIFIER_MODE_MULTIPLY) {
 				mag_min = mag_min * pwr->mod_damage_value_min / 100;
@@ -1330,7 +1332,7 @@ void MenuPowers::createTooltip(TooltipData* tip_data, MenuPowersCell* pcell, Pow
 		int spawn_limit = static_cast<int>(pwr->spawn_limit_count);
 		if (pwr->spawn_limit_mode == Power::SPAWN_LIMIT_MODE_STAT) {
 			if (pwr->spawn_limit_stat < eset->primary_stats.list.size()) {
-				spawn_limit = static_cast<int>(pwr->spawn_limit_count * (static_cast<float>(pc->stats.get_primary(pwr->spawn_limit_stat)) / pwr->spawn_limit_ratio));
+				spawn_limit = static_cast<int>(pwr->spawn_limit_count * (static_cast<float>(player->stats.get_primary(pwr->spawn_limit_stat)) / pwr->spawn_limit_ratio));
 			}
 		}
 		tip_data->addColoredText(msg->getv("Spawn limit: %d", spawn_limit), font->getColor(FontEngine::COLOR_MENU_BONUS));
@@ -1347,7 +1349,7 @@ void MenuPowers::createTooltip(TooltipData* tip_data, MenuPowersCell* pcell, Pow
 		// add requirement
 		for (size_t i = 0; i < eset->primary_stats.list.size(); ++i) {
 			if (pcell->requires_primary[i] > 0) {
-				if (pc->stats.get_primary(i) < pcell->requires_primary[i])
+				if (player->stats.get_primary(i) < pcell->requires_primary[i])
 					tip_data->addColoredText(msg->getv("Requires %s %d", eset->primary_stats.list[i].name.c_str(), pcell->requires_primary[i]), font->getColor(FontEngine::COLOR_MENU_PENALTY));
 				else
 					tip_data->addText(msg->getv("Requires %s %d", eset->primary_stats.list[i].name.c_str(), pcell->requires_primary[i]));
@@ -1355,10 +1357,10 @@ void MenuPowers::createTooltip(TooltipData* tip_data, MenuPowersCell* pcell, Pow
 		}
 
 		// Draw required Level Tooltip
-		if ((pcell->requires_level > 0) && pc->stats.level < pcell->requires_level) {
+		if ((pcell->requires_level > 0) && player->stats.level < pcell->requires_level) {
 			tip_data->addColoredText(msg->getv("Requires Level %d", pcell->requires_level), font->getColor(FontEngine::COLOR_MENU_PENALTY));
 		}
-		else if ((pcell->requires_level > 0) && pc->stats.level >= pcell->requires_level) {
+		else if ((pcell->requires_level > 0) && player->stats.level >= pcell->requires_level) {
 			tip_data->addText(msg->getv("Requires Level %d", pcell->requires_level));
 		}
 
@@ -1385,7 +1387,7 @@ void MenuPowers::createTooltip(TooltipData* tip_data, MenuPowersCell* pcell, Pow
 		}
 
 		// Draw unlock power Tooltip
-		if (pcell->requires_point && !(std::find(pc->stats.powers_list.begin(), pc->stats.powers_list.end(), pcell->id) != pc->stats.powers_list.end())) {
+		if (pcell->requires_point && !(std::find(player->stats.powers_list.begin(), player->stats.powers_list.end(), pcell->id) != player->stats.powers_list.end())) {
 			MenuPowersCell* unlock_cell = getCellByPowerIndex(pcell->id);
 			if (show_unlock_prompt && pcell->upgrade_level <= 1 && points_left > 0 && inpt->usingMouse() && checkUnlock(unlock_cell)) {
 				tip_data->addColoredText(msg->get("Click to Unlock (uses 1 Skill Point)"), font->getColor(FontEngine::COLOR_MENU_BONUS));
@@ -1495,7 +1497,7 @@ void MenuPowers::logic() {
 
 	setUnlockedPowers();
 
-	points_left = (pc->stats.level * pc->stats.power_points_per_level) - getPointsUsed();
+	points_left = (player->stats.level * player->stats.power_points_per_level) - getPointsUsed();
 	if (points_left > 0) {
 		newPowerNotification = true;
 	}
@@ -1518,18 +1520,18 @@ void MenuPowers::logic() {
 				upgradePower(pcell, UPGRADE_POWER_ALL_TABS);
 				pcell = getCurrent(i);
 				if (power_cell[i].upgrade_button != NULL)
-					power_cell[i].upgrade_button->enabled = (pc->stats.hp > 0 && isCellVisible(pcell) && checkUpgrade(pcell));
+					power_cell[i].upgrade_button->enabled = (player->stats.hp > 0 && isCellVisible(pcell) && checkUpgrade(pcell));
 			}
 			else {
 				// power point required or no upgrade available; stop trying to upgrade
 				if (power_cell[i].upgrade_button != NULL)
-					power_cell[i].upgrade_button->enabled = (pc->stats.hp > 0 && isCellVisible(pcell));
+					power_cell[i].upgrade_button->enabled = (player->stats.hp > 0 && isCellVisible(pcell));
 				break;
 			}
 		}
 
 		// handle clicking of upgrade button
-		if (visible && pc->stats.hp > 0 && power_cell[i].upgrade_button != NULL) {
+		if (visible && player->stats.hp > 0 && power_cell[i].upgrade_button != NULL) {
 			if ((!tab_control || power_cell[i].tab == tab_control->getActiveTab()) && power_cell[i].upgrade_button->checkClick()) {
 				upgradePower(getCurrent(i), !UPGRADE_POWER_ALL_TABS);
 			}
@@ -1756,8 +1758,8 @@ void MenuPowers::clickUnlock(PowerID power_index) {
 
 	if (!checkUnlocked(pcell)) {
 		// unlock base power
-		pc->stats.powers_list.push_back(power_index);
-		pc->stats.check_title = true;
+		player->stats.powers_list.push_back(power_index);
+		player->stats.check_title = true;
 		setUnlockedPowers();
 		menu->act->addPower(power_index, 0);
 	}
@@ -1769,7 +1771,7 @@ void MenuPowers::clickUnlock(PowerID power_index) {
 
 void MenuPowers::resetToBasePowers() {
 	for (size_t i = 0; i < power_cell.size(); ++i) {
-		pbs->current_cell[i] = 0;
+		player_powerbonus->current_cell[i] = 0;
 		for (size_t j = 0; j < power_cell[i].cells.size(); ++j) {
 			power_cell[i].cells[j].is_unlocked = false;
 			power_cell[i].cells[j].passive_on = false;
@@ -1793,11 +1795,11 @@ bool MenuPowers::meetsUsageStats(PowerID power_index) {
 	// ignore bonuses to power level
 	MenuPowersCell* base_pcell = getCurrent(pcell->group);
 
-	if (pc->stats.level < base_pcell->requires_level)
+	if (player->stats.level < base_pcell->requires_level)
 		return false;
 
 	for (size_t i = 0; i < eset->primary_stats.list.size(); ++i) {
-		if (pc->stats.get_primary(i) < base_pcell->requires_primary[i])
+		if (player->stats.get_primary(i) < base_pcell->requires_primary[i])
 			return false;
 	}
 
@@ -1806,8 +1808,8 @@ bool MenuPowers::meetsUsageStats(PowerID power_index) {
 
 // clearActionBarBonusLevels()/clearBonusLevels()/addBonusLevels() moved to PowerBonusState in
 // P1.3g -- see PowerBonusState.h and plans/phase1/P1.3g-power-bonus-state.md. Callers here now say
-// pbs->clearActionBarBonusLevels() / pbs->clearBonusLevels(); the external callers in
-// MenuInventory.cpp say pbs->clearBonusLevels() / pbs->addBonusLevels().
+// player_powerbonus->clearActionBarBonusLevels() / player_powerbonus->clearBonusLevels(); the external callers in
+// MenuInventory.cpp say player_powerbonus->clearBonusLevels() / player_powerbonus->addBonusLevels().
 
 std::string MenuPowers::getItemBonusPowerReqString(PowerID power_index) {
 	MenuPowersCell* pcell = getCellByPowerIndex(power_index);

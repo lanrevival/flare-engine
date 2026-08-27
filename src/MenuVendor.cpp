@@ -44,7 +44,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "WidgetTabControl.h"
 #include "WidgetTooltip.h"
 
-MenuVendor::MenuVendor()
+MenuVendor::MenuVendor(Avatar* _player)
 	: Menu()
 	, closeButton(new WidgetButton(WidgetButton::CLOSE_FILE))
 	, tabControl(new WidgetTabControl())
@@ -57,6 +57,7 @@ MenuVendor::MenuVendor()
 	, npc(NULL)
 	, buyback_stock()
 	, sell_enabled(true)
+	, player(_player)
 {
 	tabControl->setupTab(ItemManager::VENDOR_BUY, msg->get("Inventory"), &tablist_tabs[ItemManager::VENDOR_BUY]);
 	tabControl->setupTab(ItemManager::VENDOR_SELL, msg->get("Buyback"), &tablist_tabs[ItemManager::VENDOR_SELL]);
@@ -295,7 +296,7 @@ void MenuVendor::renderTooltips(const Point& position) {
 	if (!visible || !Utils::isWithinRect(window_area, position))
 		return;
 
-	TooltipData tip_data = stock[activetab].checkTooltip(position, &pc->stats, activetab, ItemManager::TOOLTIP_INPUT_HINT);
+	TooltipData tip_data = stock[activetab].checkTooltip(position, &player->stats, activetab, ItemManager::TOOLTIP_INPUT_HINT);
 	tooltipm->push(tip_data, position, TooltipData::STYLE_FLOAT);
 }
 

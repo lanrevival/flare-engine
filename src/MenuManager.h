@@ -28,6 +28,8 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "CommonIncludes.h"
 #include "ItemManager.h"
 
+class ActionBarState;
+class Avatar;
 class Menu;
 class MenuActionBar;
 class MenuActiveEffects;
@@ -50,6 +52,8 @@ class MenuStatBar;
 class MenuTalker;
 class MenuTouchControls;
 class MenuVendor;
+class PlayerInventory;
+class PowerBonusState;
 class StatBlock;
 class Subtitles;
 class WidgetSlot;
@@ -148,9 +152,20 @@ private:
 	void actionPickerStartDrag();
 
 public:
+	/** Reads playerm->local()/inventoryFor()/actionbarFor()/powerbonusFor() exactly once, right
+	 * here at construction (playerm->setLocal(0) has already run by the time GameStatePlay
+	 * constructs this) -- not a global lookup at every use site. See P2.3. */
 	explicit MenuManager();
 	MenuManager(const MenuManager &copy); // not implemented
 	~MenuManager();
+
+	/** Re-points MenuManager's own bindings and every menu that can be re-pointed after
+	 * construction (a plain pointer member, not a reference). MenuActionBar cannot be re-pointed
+	 * this way -- its hotkeys/locked/etc. are C++ references bound once, at construction, to
+	 * whatever ActionBarState* it was built with (P1.3e-a's shape) -- so a new local action bar
+	 * needs a new MenuActionBar, not a call to this. Exposed for reconnect (P2.5); only called
+	 * once, at startup, for now. */
+	void setPlayer(Avatar* _player, PlayerInventory* _player_inventory, ActionBarState* _player_actionbar, PowerBonusState* _player_powerbonus);
 	void alignAll();
 	void logic();
 	void render();
@@ -214,6 +229,11 @@ public:
 	}
 	bool isNPCMenuVisible();
 	void showExitMenu();
+
+	Avatar* player;
+	PlayerInventory* player_inventory;
+	ActionBarState* player_actionbar;
+	PowerBonusState* player_powerbonus;
 };
 
 #endif
