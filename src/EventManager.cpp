@@ -1196,7 +1196,7 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay, Avatar* trig
 			unsigned rand_count = sim_rng->range(random_table_count.x, random_table_count.y);
 			std::vector<ItemStack> rand_itemstacks;
 			for (unsigned j = 0; j < rand_count; ++j) {
-				loot->checkLoot(random_table, NULL, &rand_itemstacks);
+				loot->checkLoot(random_table, NULL, &rand_itemstacks, target);
 			}
 			for (size_t j = 0; j < rand_itemstacks.size(); ++j) {
 				if (rand_itemstacks[j].item == eset->misc.currency_id)

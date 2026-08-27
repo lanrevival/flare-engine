@@ -34,6 +34,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Utils.h"
 
 class Animation;
+class Avatar;
 class EnemyManager;
 class StatBlock;
 
@@ -49,7 +50,16 @@ private:
 	void checkMapForLoot();
 	void loadLootTables();
 	void getLootTable(const std::string &filename, std::vector<EventComponent> *ec_list);
-	void checkLootComponent(EventComponent* ec, FPoint *pos, std::vector<ItemStack> *itemstack_vec);
+	// `looter` is who ITEM_FIND/CURRENCY_FIND/level-scaling apply against, and the drop-position
+	// fallback if no valid tile is found nearby. NULL (the default -- see checkLoot() below)
+	// resolves to playerm->local(). checkEnemiesForLoot()/checkMapForLoot() (an enemy dying, a
+	// map loot component firing) have no attacker/triggering-player identity to pass -- nothing
+	// in this codebase tracks "who killed this enemy" yet -- so they keep passing NULL, same
+	// single-player behavior as before. That's a real, known gap for multiplayer loot
+	// attribution, and it's deliberately out of scope here: loot *distribution* rules are P5.2
+	// (D11, free-for-all). EventManager's REWARD_LOOT is the one caller that does have a real
+	// triggering player and passes it.
+	void checkLootComponent(EventComponent* ec, FPoint *pos, std::vector<ItemStack> *itemstack_vec, Avatar* looter = NULL);
 
 	SoundID sfx_loot;
 	std::string sfx_loot_channel;
@@ -103,7 +113,7 @@ public:
 	// called by enemy, who definitly wants to drop loot.
 	void addEnemyLoot(StatBlock *e);
 	void addLoot(ItemStack stack, const FPoint& pos, bool dropped_by_hero);
-	void checkLoot(std::vector<EventComponent> &loot_table, FPoint *pos, std::vector<ItemStack> *itemstack_vec);
+	void checkLoot(std::vector<EventComponent> &loot_table, FPoint *pos, std::vector<ItemStack> *itemstack_vec, Avatar* looter = NULL);
 	ItemStack checkPickup(const Point& mouse, const FPoint& cam, const FPoint& hero_pos);
 	ItemStack checkAutoPickup(const FPoint& hero_pos);
 	ItemStack checkNearestPickup(const FPoint& hero_pos);

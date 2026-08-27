@@ -42,6 +42,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Menu.h"
 #include "MessageEngine.h"
 #include "ModManager.h"
+#include "PlayerManager.h"
 #include "RenderDevice.h"
 #include "Rng.h"
 #include "Settings.h"
@@ -109,12 +110,16 @@ void LootManager::logic() {
 		if (settings->loot_tooltips > Settings::LOOT_TIPS_HIDE_ALL)
 			settings->loot_tooltips = Settings::LOOT_TIPS_DEFAULT;
 
-		if (settings->loot_tooltips == Settings::LOOT_TIPS_HIDE_ALL)
-			pc->logMsg(msg->get("Loot tooltip visibility") + ": " + msg->get("Hidden"), Avatar::MSG_UNIQUE);
-		else if (settings->loot_tooltips == Settings::LOOT_TIPS_DEFAULT)
-			pc->logMsg(msg->get("Loot tooltip visibility") + ": " + msg->get("Default"), Avatar::MSG_UNIQUE);
-		else if (settings->loot_tooltips == Settings::LOOT_TIPS_SHOW_ALL)
-			pc->logMsg(msg->get("Loot tooltip visibility") + ": " + msg->get("Show All"), Avatar::MSG_UNIQUE);
+		// Tooltip visibility is a local display setting toggled by local input (Input::LOOT_TOOLTIP_MODE)
+		// -- inherently "this client's own player", not any/nearest/all, so playerm->local() is the
+		// right resolution here, not a helper.
+		Avatar* local = playerm->local();
+		if (local && settings->loot_tooltips == Settings::LOOT_TIPS_HIDE_ALL)
+			local->logMsg(msg->get("Loot tooltip visibility") + ": " + msg->get("Hidden"), Avatar::MSG_UNIQUE);
+		else if (local && settings->loot_tooltips == Settings::LOOT_TIPS_DEFAULT)
+			local->logMsg(msg->get("Loot tooltip visibility") + ": " + msg->get("Default"), Avatar::MSG_UNIQUE);
+		else if (local && settings->loot_tooltips == Settings::LOOT_TIPS_SHOW_ALL)
+			local->logMsg(msg->get("Loot tooltip visibility") + ": " + msg->get("Show All"), Avatar::MSG_UNIQUE);
 	}
 
 	std::vector<Loot>::iterator it;
@@ -153,6 +158,11 @@ void LootManager::logic() {
 void LootManager::renderTooltips(const FPoint& cam) {
 	if (!settings->show_hud) return;
 
+	// Tooltip visibility/hover is inherently this client's own view of the world -- always
+	// playerm->local(), not any/nearest helper. No local player, nothing to render.
+	Avatar* local = playerm->local();
+	if (!local) return;
+
 	Point dest;
 	bool tooltip_below = true;
 	Rect screen_rect(0, 0, settings->view_w, settings->view_h);
@@ -163,7 +173,7 @@ void LootManager::renderTooltips(const FPoint& cam) {
 
 		if (it->on_ground) {
 			if (wmap->fogofwar > FogOfWar::TYPE_MINIMAP) {
-				float delta = Utils::calcDist(pc->stats.pos, it->pos);
+				float delta = Utils::calcDist(local->stats.pos, it->pos);
 				if (delta > fow->mask_radius-1.0) {
 					break;
 				}
@@ -192,7 +202,7 @@ void LootManager::renderTooltips(const FPoint& cam) {
 			bool default_visibility = true;
 
 			if (settings->loot_tooltips == Settings::LOOT_TIPS_DEFAULT && eset->loot.hide_radius > 0) {
-				if (Utils::calcDist(pc->stats.pos, it->pos) < eset->loot.hide_radius) {
+				if (Utils::calcDist(local->stats.pos, it->pos) < eset->loot.hide_radius) {
 					default_visibility = false;
 				}
 				else {
@@ -321,11 +331,16 @@ void LootManager::addEnemyLoot(StatBlock *e) {
 	enemiesDroppingLoot.push_back(e);
 }
 
-void LootManager::checkLoot(std::vector<EventComponent> &loot_table, FPoint *pos, std::vector<ItemStack> *itemstack_vec) {
+void LootManager::checkLoot(std::vector<EventComponent> &loot_table, FPoint *pos, std::vector<ItemStack> *itemstack_vec, Avatar* looter) {
 	FPoint p;
 	EventComponent *ec;
 	ItemStack new_loot;
 	std::vector<EventComponent*> possible_ids;
+
+	// See the header comment on checkLootComponent(). NULL (checkEnemiesForLoot()/
+	// checkMapForLoot()'s case -- no killer/triggering-player identity exists to pass) resolves
+	// to playerm->local(), identical to the pre-P2.2 single-player behavior.
+	Avatar* target = looter ? looter : playerm->local();
 
 	float chance = sim_rng->rangeF(0,100);
 
@@ -338,14 +353,14 @@ void LootManager::checkLoot(std::vector<EventComponent> &loot_table, FPoint *pos
 
 		if (ec->data[LOOT_EC_CHANCE].Float == 0) {
 			if (ec->status == 0 || (ec->status > 0 && camp->checkStatus(ec->status))) {
-				checkLootComponent(ec, pos, itemstack_vec);
+				checkLootComponent(ec, pos, itemstack_vec, target);
 			}
 			loot_table.erase(loot_table.begin()+i-1);
 		}
 	}
 
 	// now pick up to 1 random item to drop
-	float threshold = static_cast<float>(pc->stats.get(Stats::ITEM_FIND) + 100);
+	float threshold = target ? static_cast<float>(target->stats.get(Stats::ITEM_FIND) + 100) : 100.f;
 	for (unsigned i = 0; i < loot_table.size(); i++) {
 		ec = &loot_table[i];
 
@@ -354,13 +369,13 @@ void LootManager::checkLoot(std::vector<EventComponent> &loot_table, FPoint *pos
 
 		float real_chance = ec->data[LOOT_EC_CHANCE].Float;
 
-		if (ec->id != 0) {
-			real_chance = real_chance * (pc->stats.get(Stats::ITEM_FIND) + 100.f) / 100.f;
+		if (ec->id != 0 && target) {
+			real_chance = real_chance * (target->stats.get(Stats::ITEM_FIND) + 100.f) / 100.f;
 		}
 
 		bool level_check = true;
-		if (ec->data[LOOT_EC_REQUIRES_LEVEL_MIN].Int > 0 && ec->data[LOOT_EC_REQUIRES_LEVEL_MAX].Int > 0) {
-			level_check = pc->stats.level >= ec->data[LOOT_EC_REQUIRES_LEVEL_MIN].Int && pc->stats.level <= ec->data[LOOT_EC_REQUIRES_LEVEL_MAX].Int;
+		if (target && ec->data[LOOT_EC_REQUIRES_LEVEL_MIN].Int > 0 && ec->data[LOOT_EC_REQUIRES_LEVEL_MAX].Int > 0) {
+			level_check = target->stats.level >= ec->data[LOOT_EC_REQUIRES_LEVEL_MIN].Int && target->stats.level <= ec->data[LOOT_EC_REQUIRES_LEVEL_MAX].Int;
 		}
 
 		if (real_chance >= chance && level_check && (ec->status == 0 || (ec->status > 0 && camp->checkStatus(ec->status)))) {
@@ -442,19 +457,23 @@ void LootManager::addLoot(ItemStack stack, const FPoint& pos, bool dropped_by_he
 ItemStack LootManager::checkPickup(const Point& mouse, const FPoint& cam, const FPoint& hero_pos) {
 	ItemStack loot_stack;
 
+	// Mouse-move targeting is local input driving local input state (Avatar::mm_target_object*)
+	// -- always this client's own player, same reasoning as renderTooltips()/logic() above.
+	Avatar* local = playerm->local();
+
 	// check left mouse click
-	if (inpt->usingMouse()) {
+	if (inpt->usingMouse() && local) {
 		Point mouse_pos = mouse;
 
 		// we may have targeted a once distant piece of loot while using mouse-move
 		// if so, we want to automatically interact with it without requiring any mouse clicks
-		bool mouse_move_target = pc->mm_target_object == Avatar::MM_TARGET_LOOT && pc->isNearMMtarget();
-		if (mouse_move_target && (pc->stats.cur_state == StatBlock::ENTITY_STANCE || pc->stats.cur_state == StatBlock::ENTITY_MOVE)) {
-			pc->stats.cur_state = StatBlock::ENTITY_STANCE;
-			mouse_pos = Utils::mapToScreen(pc->mm_target_object_pos.x, pc->mm_target_object_pos.y, cam.x, cam.y);
+		bool mouse_move_target = local->mm_target_object == Avatar::MM_TARGET_LOOT && local->isNearMMtarget();
+		if (mouse_move_target && (local->stats.cur_state == StatBlock::ENTITY_STANCE || local->stats.cur_state == StatBlock::ENTITY_MOVE)) {
+			local->stats.cur_state = StatBlock::ENTITY_STANCE;
+			mouse_pos = Utils::mapToScreen(local->mm_target_object_pos.x, local->mm_target_object_pos.y, cam.x, cam.y);
 		}
-		else if (pc->mm_target_object == Avatar::MM_TARGET_LOOT && pc->stats.cur_state == StatBlock::ENTITY_STANCE) {
-			pc->stats.cur_state = StatBlock::ENTITY_MOVE;
+		else if (local->mm_target_object == Avatar::MM_TARGET_LOOT && local->stats.cur_state == StatBlock::ENTITY_STANCE) {
+			local->stats.cur_state = StatBlock::ENTITY_MOVE;
 		}
 
 		// I'm starting at the end of the loot list so that more recently-dropped
@@ -499,7 +518,7 @@ ItemStack LootManager::checkPickup(const Point& mouse, const FPoint& cam, const 
 					return loot_stack;
 				}
 				else if (mouse_move_target) {
-					pc->mm_target_object = Avatar::MM_TARGET_NONE;
+					local->mm_target_object = Avatar::MM_TARGET_NONE;
 					loot_stack = it_match->stack;
 					loot.erase(it_match);
 					return loot_stack;
@@ -512,10 +531,10 @@ ItemStack LootManager::checkPickup(const Point& mouse, const FPoint& cam, const 
 					// loot is out of range, but we're clicking on it. For mouse-move, we'll set this as the desired target
 					inpt->lock[interact_key] = true;
 
-					pc->setDesiredMMTarget(it_match->pos);
+					local->setDesiredMMTarget(it_match->pos);
 
-					pc->mm_target_object = Avatar::MM_TARGET_LOOT;
-					pc->mm_target_object_pos = it_match->pos;
+					local->mm_target_object = Avatar::MM_TARGET_LOOT;
+					local->mm_target_object_pos = it_match->pos;
 				}
 			}
 		}
@@ -593,13 +612,17 @@ ItemStack LootManager::checkNearestPickup(const FPoint& hero_pos) {
 }
 
 void LootManager::addRenders(std::vector<Renderable> &ren, std::vector<Renderable> &ren_dead) {
+	// This client's own render list -- always playerm->local(), same reasoning as
+	// renderTooltips()/checkPickup() above.
+	Avatar* local = playerm->local();
+
 	std::vector<Loot>::iterator it;
 	for (it = loot.begin(); it != loot.end(); ++it) {
 		if (mapr && wmap->collider.isOutsideMap(it->pos.x, it->pos.y))
 			continue;
 
-		if (wmap->fogofwar > FogOfWar::TYPE_MINIMAP) {
-			float delta = Utils::calcDist(pc->stats.pos, it->pos);
+		if (wmap->fogofwar > FogOfWar::TYPE_MINIMAP && local) {
+			float delta = Utils::calcDist(local->stats.pos, it->pos);
 			if (delta > fow->mask_radius-1.0) {
 				continue;
 			}
@@ -805,10 +828,14 @@ void LootManager::getLootTable(const std::string &filename, std::vector<EventCom
 	}
 }
 
-void LootManager::checkLootComponent(EventComponent* ec, FPoint *pos, std::vector<ItemStack> *itemstack_vec) {
+void LootManager::checkLootComponent(EventComponent* ec, FPoint *pos, std::vector<ItemStack> *itemstack_vec, Avatar* looter) {
 	FPoint p;
 	ItemStack new_loot;
 	Point src;
+
+	// See the header comment. NULL resolves to playerm->local() -- identical to the pre-P2.2
+	// single-player behavior for every caller that doesn't have a real triggering player to pass.
+	Avatar* target = looter ? looter : playerm->local();
 
 	if (pos) {
 		src = Point(*pos);
@@ -824,11 +851,11 @@ void LootManager::checkLootComponent(EventComponent* ec, FPoint *pos, std::vecto
 		p = wmap->collider.getRandomNeighbor(src, eset->loot.drop_radius, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES);
 
 		if (!wmap->collider.isValidPosition(p.x, p.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES)) {
-			p = pc->stats.pos;
+			if (target) p = target->stats.pos;
 		}
 		else {
-			if (src.x == static_cast<int>(p.x) && src.y == static_cast<int>(p.y))
-				p = pc->stats.pos;
+			if (src.x == static_cast<int>(p.x) && src.y == static_cast<int>(p.y) && target)
+				p = target->stats.pos;
 
 			wmap->collider.block(p.x, p.y, !MapCollision::IS_ALLY);
 			tiles_to_unblock.push_back(Point(p));
@@ -837,15 +864,15 @@ void LootManager::checkLootComponent(EventComponent* ec, FPoint *pos, std::vecto
 
 	std::vector<ItemStack> ex_stacks;
 
-	int quantity_min = ec->data[LOOT_EC_QUANTITY_MIN].Int + ((pc->stats.level-1) * ec->data[LOOT_EC_QUANTITY_PER_LEVEL_MIN].Int);
-	int quantity_max = ec->data[LOOT_EC_QUANTITY_MAX].Int + ((pc->stats.level-1) * ec->data[LOOT_EC_QUANTITY_PER_LEVEL_MAX].Int);
+	int quantity_min = ec->data[LOOT_EC_QUANTITY_MIN].Int + ((target ? (target->stats.level-1) : 0) * ec->data[LOOT_EC_QUANTITY_PER_LEVEL_MIN].Int);
+	int quantity_max = ec->data[LOOT_EC_QUANTITY_MAX].Int + ((target ? (target->stats.level-1) : 0) * ec->data[LOOT_EC_QUANTITY_PER_LEVEL_MAX].Int);
 
 	new_loot.quantity = sim_rng->range(quantity_min, quantity_max);
 
 	// an item id of 0 means we should drop currency instead
 	if (ec->id == 0 || ec->id == eset->misc.currency_id) {
 		new_loot.item = eset->misc.currency_id;
-		new_loot.quantity = static_cast<int>(static_cast<float>(new_loot.quantity) * (100 + pc->stats.get(Stats::CURRENCY_FIND)) / 100);
+		if (target) new_loot.quantity = static_cast<int>(static_cast<float>(new_loot.quantity) * (100 + target->stats.get(Stats::CURRENCY_FIND)) / 100);
 		ex_stacks.push_back(new_loot);
 	}
 	else {
