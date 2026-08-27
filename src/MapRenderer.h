@@ -37,6 +37,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "TooltipData.h"
 #include "Utils.h"
 
+class Avatar;
 class FileParser;
 class Sprite;
 class WidgetTooltip;
@@ -117,6 +118,14 @@ public:
 
 	void drawProcgenChunkMap(Image* canvas);
 
+	/** MapRenderer is constructed before PlayerManager (GameStatePlay's constructor needs a Map
+	 * to exist before it can build an Avatar onto it), so unlike the menus, player can't be a
+	 * constructor parameter here -- it's set once, right after playerm->setLocal(0), via this
+	 * setter. See P2.3. */
+	void setPlayer(Avatar* _player) {
+		player = _player;
+	}
+
 	// cam is where on the map the camera is pointing
 	Camera cam;
 
@@ -133,6 +142,8 @@ public:
 
 	// flag used to prevent rendering when in maps/spawn.txt
 	bool is_spawn_map;
+
+	Avatar* player;
 };
 
 
