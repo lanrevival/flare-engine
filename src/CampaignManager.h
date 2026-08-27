@@ -30,6 +30,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "ItemManager.h"
 #include "Utils.h"
 
+class Avatar;
 class EventComponent;
 class StatBlock;
 
@@ -52,16 +53,27 @@ public:
 	void unsetStatus(const StatusID s);
 	void resetAllStatuses();
 	void getSetStatusStrings(std::vector<std::string>& status_strings);
-	bool checkCurrency(int quantity);
-	bool checkItem(ItemStack istack);
-	void removeCurrency(int quantity);
-	void removeItem(ItemStack istack);
-	void rewardItem(ItemStack istack);
-	void rewardCurrency(int amount);
-	void rewardXP(float amount, bool show_message);
-	void restoreHPMP(const std::string& s);
-	bool checkAllRequirements(const EventComponent& ec);
-	bool checkRequirementsInVector(const std::vector<EventComponent>& ec_vec);
+
+	// P2.2 kind-A migration: these all act on a specific player's inventory/stats -- a quest
+	// reward, a toll-gate currency check, an HP/MP restore trigger. `triggered_by` is that
+	// player. It defaults to NULL, which resolves to playerm->local() inside the .cpp --
+	// identical to the pre-P2.2 single-player behavior, and *only* because every caller this
+	// plan does not touch (NPC.cpp, Entity.cpp, QuestLog.cpp, Map.cpp, SaveLoad.cpp,
+	// GameStatePlay.cpp, main_server.cpp, and StatBlock.cpp's on-kill XP grant) is itself still
+	// single-player-shaped and out of scope here -- see the P2.2 report for the full list.
+	// EventManager.cpp (P2.2 step 6b) is the one caller migrated to pass the real triggering
+	// player, since map events are the case the plan calls out explicitly (a toll gate must
+	// charge the player who walked up to it, not playerm->local()).
+	bool checkCurrency(int quantity, Avatar* triggered_by = NULL);
+	bool checkItem(ItemStack istack, Avatar* triggered_by = NULL);
+	void removeCurrency(int quantity, Avatar* triggered_by = NULL);
+	void removeItem(ItemStack istack, Avatar* triggered_by = NULL);
+	void rewardItem(ItemStack istack, Avatar* triggered_by = NULL);
+	void rewardCurrency(int amount, Avatar* triggered_by = NULL);
+	void rewardXP(float amount, bool show_message, Avatar* triggered_by = NULL);
+	void restoreHPMP(const std::string& s, Avatar* triggered_by = NULL);
+	bool checkAllRequirements(const EventComponent& ec, Avatar* triggered_by = NULL);
+	bool checkRequirementsInVector(const std::vector<EventComponent>& ec_vec, Avatar* triggered_by = NULL);
 
 	void randomStatusAppend(const StatusID s);
 	void randomStatusClear();
