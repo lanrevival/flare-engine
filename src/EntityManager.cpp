@@ -48,7 +48,6 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 EntityManager::EntityManager()
 	: entities()
-	, hero_stealth(0)
 	, player_blocked(false)
 	, player_blocked_timer(Settings::SIM_TICK_HZ / 6) {
 	handleNewMap();
@@ -364,7 +363,6 @@ void EntityManager::logic() {
 	std::vector<Entity*>::iterator it;
 	for (it = entities.begin(); it != entities.end(); ++it) {
 		// new actions this round
-		(*it)->stats.hero_stealth = hero_stealth;
 		if (!(*it)->stats.npc) {
 			(*it)->logic();
 

@@ -744,9 +744,9 @@ static void serverLogic() {
 
 		pc->logic(player_cmd, player_locks);
 
-		// transfer hero data to enemies, for AI use
-		if (pc->stats.get(Stats::STEALTH) > 100) entitym->hero_stealth = 100;
-		else entitym->hero_stealth = pc->stats.get(Stats::STEALTH);
+		// P2.2: stealth is per-player now -- EntityBehavior reads each evaluated player's own
+		// Stats::STEALTH directly (via PlayerManager::nearestAliveTo()), so there's no longer a
+		// single hero value to transfer onto EntityManager here.
 
 		entitym->logic();
 		hazards->logic();

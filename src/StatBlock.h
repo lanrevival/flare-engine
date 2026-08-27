@@ -272,7 +272,11 @@ public:
 	float threat_range_far;
 	float flee_range;
 	int combat_style; // determines how the creature enters combat
-	float hero_stealth;
+	// P2.2: this used to cache a copy of the single global hero's Stats::STEALTH, refreshed onto
+	// every entity's own StatBlock each tick by EntityManager (entitym->hero_stealth). Stealth is
+	// per-player, so that global/cache pair is gone -- EntityBehavior now reads
+	// nearest_alive_player->stats.get(Stats::STEALTH) directly off the specific player it's
+	// evaluating, for every entity, every tick. No field needed here for that.
 	int turn_delay;
 	bool in_combat;
 	bool join_combat;

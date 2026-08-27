@@ -149,7 +149,6 @@ StatBlock::StatBlock()
 	, threat_range_far(0)  // enemy
 	, flee_range(0)  // enemy
 	, combat_style(COMBAT_DEFAULT)//enemy
-	, hero_stealth(0)
 	, turn_delay(0)
 	, in_combat(false)  //enemy only
 	, join_combat(false)
