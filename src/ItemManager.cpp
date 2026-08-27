@@ -39,6 +39,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MessageEngine.h"
 #include "NPC.h"
 #include "PlayerInventory.h"
+#include "PlayerManager.h"
 #include "PowerManager.h"
 #include "Rng.h"
 #include "Settings.h"
@@ -86,10 +87,24 @@ LevelScaledValue::LevelScaledValue()
 	, per_player_primary_step(eset->primary_stats.list.size(), 1)
 {}
 
-float LevelScaledValue::get() const {
-	float result = base + (per_item_level * static_cast<float>(item_level-1)) + (per_player_level * static_cast<float>(pc->stats.level-1));
-	for (size_t i = 0; i < per_player_primary.size(); ++i) {
-		result += per_player_primary[i] * static_cast<float>(pc->stats.get_primary(i)-1);
+// Resolves the P2.2 kind-A default described in ItemManager.h: eval_stats if given, else
+// playerm->local()'s stats, else NULL (only possible with zero players -- callers below treat a
+// NULL stats pointer as "no scaling", matching what happened here before P2.2 could not happen
+// since pc was always non-NULL).
+static const StatBlock* resolveLevelScaleStats(const StatBlock* eval_stats) {
+	if (eval_stats) return eval_stats;
+	Avatar* local = playerm->local();
+	return local ? &local->stats : NULL;
+}
+
+float LevelScaledValue::get(const StatBlock* eval_stats) const {
+	const StatBlock* stats = resolveLevelScaleStats(eval_stats);
+	float result = base + (per_item_level * static_cast<float>(item_level-1));
+	if (stats) {
+		result += per_player_level * static_cast<float>(stats->level-1);
+		for (size_t i = 0; i < per_player_primary.size(); ++i) {
+			result += per_player_primary[i] * static_cast<float>(stats->get_primary(i)-1);
+		}
 	}
 
 	if (result_max_enabled)
@@ -101,10 +116,14 @@ float LevelScaledValue::get() const {
 }
 
 // TODO unused?
-float LevelScaledValue::getMax() const {
-	float result = base_max + (per_item_level_max * static_cast<float>(item_level-1)) + (per_player_level_max * static_cast<float>(pc->stats.level-1));
-	for (size_t i = 0; i < per_player_primary_max.size(); ++i) {
-		result += per_player_primary_max[i] * static_cast<float>(pc->stats.get_primary(i)-1);
+float LevelScaledValue::getMax(const StatBlock* eval_stats) const {
+	const StatBlock* stats = resolveLevelScaleStats(eval_stats);
+	float result = base_max + (per_item_level_max * static_cast<float>(item_level-1));
+	if (stats) {
+		result += per_player_level_max * static_cast<float>(stats->level-1);
+		for (size_t i = 0; i < per_player_primary_max.size(); ++i) {
+			result += per_player_primary_max[i] * static_cast<float>(stats->get_primary(i)-1);
+		}
 	}
 
 	if (result_max_enabled)
@@ -115,10 +134,14 @@ float LevelScaledValue::getMax() const {
 	return (result_round ? roundf(result) : result);
 }
 
-float LevelScaledValue::getStep() const {
-	float result = base_step + (per_item_level_step * static_cast<float>(item_level-1)) + (per_player_level_step * static_cast<float>(pc->stats.level-1));
-	for (size_t i = 0; i < per_player_primary_step.size(); ++i) {
-		result += per_player_primary_step[i] * static_cast<float>(pc->stats.get_primary(i)-1);
+float LevelScaledValue::getStep(const StatBlock* eval_stats) const {
+	const StatBlock* stats = resolveLevelScaleStats(eval_stats);
+	float result = base_step + (per_item_level_step * static_cast<float>(item_level-1));
+	if (stats) {
+		result += per_player_level_step * static_cast<float>(stats->level-1);
+		for (size_t i = 0; i < per_player_primary_step.size(); ++i) {
+			result += per_player_primary_step[i] * static_cast<float>(stats->get_primary(i)-1);
+		}
 	}
 	return result;
 }
@@ -1276,8 +1299,8 @@ void ItemManager::parseBonus(BonusData& bdata, FileParser& infile) {
 	infile.error("ItemManager: Unknown bonus type '%s'.", bonus_str.c_str());
 }
 
-void ItemManager::getBonusString(std::stringstream& ss, BonusData* bdata) {
-	float scaled_bdata_value = bdata->value.get();
+void ItemManager::getBonusString(std::stringstream& ss, BonusData* bdata, const StatBlock* eval_stats) {
+	float scaled_bdata_value = bdata->value.get(eval_stats);
 
 	// power level bonuses can only be whole integers
 	if (bdata->power_id > 0) {
@@ -1422,19 +1445,19 @@ TooltipData ItemManager::getTooltip(ItemStack stack, StatBlock *stats, int conte
 
 	// damage
 	for (size_t i = 0; i < eset->damage_types.list.size(); ++i) {
-		if (item->base_dmg[i].max.get() > 0) {
+		if (item->base_dmg[i].max.get(stats) > 0) {
 			std::stringstream dmg_str;
 			dmg_str << eset->damage_types.list[i].name;
-			dmg_str << ": " << Utils::createMinMaxString(item->base_dmg[i].min.get(), item->base_dmg[i].max.get(), eset->number_format.item_tooltips);
+			dmg_str << ": " << Utils::createMinMaxString(item->base_dmg[i].min.get(stats), item->base_dmg[i].max.get(stats), eset->number_format.item_tooltips);
 			tip.addText(dmg_str.str());
 		}
 	}
 
 	// absorb
-	if (item->base_abs.max.get() > 0) {
+	if (item->base_abs.max.get(stats) > 0) {
 		std::stringstream abs_str;
 		abs_str << msg->get("Absorb");
-		abs_str << ": " << Utils::createMinMaxString(item->base_abs.min.get(), item->base_abs.max.get(), eset->number_format.item_tooltips);
+		abs_str << ": " << Utils::createMinMaxString(item->base_abs.min.get(stats), item->base_abs.max.get(stats), eset->number_format.item_tooltips);
 		tip.addText(abs_str.str());
 	}
 
@@ -1445,7 +1468,7 @@ TooltipData ItemManager::getTooltip(ItemStack stack, StatBlock *stats, int conte
 
 		BonusData* bdata = &item->bonus[bonus_counter];
 
-		float scaled_bdata_value = bdata->value.get();
+		float scaled_bdata_value = bdata->value.get(stats);
 
 		if (bdata->type == BonusData::SPEED || bdata->type == BonusData::ATTACK_SPEED) {
 			if (scaled_bdata_value >= 100)
@@ -1466,7 +1489,7 @@ TooltipData ItemManager::getTooltip(ItemStack stack, StatBlock *stats, int conte
 				color = font->getColor(FontEngine::COLOR_ITEM_PENALTY);
 		}
 
-		getBonusString(ss, bdata);
+		getBonusString(ss, bdata, stats);
 		tip.addColoredText(ss.str(), color);
 		bonus_counter++;
 	}
@@ -1477,7 +1500,7 @@ TooltipData ItemManager::getTooltip(ItemStack stack, StatBlock *stats, int conte
 	}
 
 	// level requirement
-	int scaled_requires_level = static_cast<int>(item->requires_level.get());
+	int scaled_requires_level = static_cast<int>(item->requires_level.get(stats));
 	if (scaled_requires_level > 0) {
 		if (stats->level < scaled_requires_level)
 			color = font->getColor(FontEngine::COLOR_REQUIREMENTS_NOT_MET);
@@ -1489,7 +1512,7 @@ TooltipData ItemManager::getTooltip(ItemStack stack, StatBlock *stats, int conte
 
 	// base stat requirement
 	for (size_t i = 0; i < eset->primary_stats.list.size(); ++i) {
-		int scaled_requires_primary = static_cast<int>(item->requires_stat[i].get());
+		int scaled_requires_primary = static_cast<int>(item->requires_stat[i].get(stats));
 		if (scaled_requires_primary > 0) {
 			if (stats->get_primary(i) < scaled_requires_primary)
 				color = font->getColor(FontEngine::COLOR_REQUIREMENTS_NOT_MET);
@@ -1511,8 +1534,13 @@ TooltipData ItemManager::getTooltip(ItemStack stack, StatBlock *stats, int conte
 	}
 
 	// flavor text
+	// substituteVarsInString() wants an Avatar*, not the StatBlock* this function carries, and
+	// tooltip rendering is inherently this client's own view (same reasoning as
+	// LootManager::renderTooltips()) -- playerm->local() rather than deriving an Avatar from
+	// `stats` (which getTooltip's only real caller, MenuItemStorage.cpp, always sets to local's
+	// stats anyway today).
 	if (!item->flavor.empty()) {
-		tip.addColoredText(Utils::substituteVarsInString(item->flavor, pc), font->getColor(FontEngine::COLOR_ITEM_FLAVOR));
+		tip.addColoredText(Utils::substituteVarsInString(item->flavor, playerm->local()), font->getColor(FontEngine::COLOR_ITEM_FLAVOR));
 	}
 
 	// buy or sell price
@@ -1577,7 +1605,11 @@ TooltipData ItemManager::getTooltip(ItemStack stack, StatBlock *stats, int conte
 	}
 
 	if (item->set > 0) {
-		int set_count = pinv->getEquippedSetCount(item->set);
+		// getEquippedSetCount() wants a PlayerInventory*, not the StatBlock* this function
+		// carries -- same reasoning as the flavor-text substitution above, playerm->local().
+		Avatar* local = playerm->local();
+		PlayerInventory* local_inv = local ? playerm->inventoryFor(local->id) : NULL;
+		int set_count = local_inv ? local_inv->getEquippedSetCount(item->set) : 0;
 
 		// item set bonuses
 		ItemSet* item_set = item_sets[item->set];
@@ -1592,7 +1624,7 @@ TooltipData ItemManager::getTooltip(ItemStack stack, StatBlock *stats, int conte
 
 			ss << "[" << bdata->requirement << "]: ";
 
-			getBonusString(ss, bdata);
+			getBonusString(ss, bdata, stats);
 			if (bdata->requirement <= set_count)
 				tip.addColoredText(ss.str(), item_set->color);
 			else
@@ -1608,6 +1640,12 @@ TooltipData ItemManager::getTooltip(ItemStack stack, StatBlock *stats, int conte
 }
 
 void ItemManager::getTooltipInputHint(TooltipData& tip, ItemStack stack, int context) {
+	// context == PLAYER_INV means "looking at my own inventory" -- input-hint bindings are
+	// inherently this client's own controls, so playerm->local() is the only sensible resolution
+	// here, same as ItemManager::getTooltip()'s flavor-text/set-count reads above.
+	Avatar* local = playerm->local();
+	PlayerInventory* local_inv = local ? playerm->inventoryFor(local->id) : NULL;
+
 	bool show_activate_msg = false;
 	std::string activate_bind_str;
 
@@ -1618,7 +1656,7 @@ void ItemManager::getTooltipInputHint(TooltipData& tip, ItemStack stack, int con
 		tip.addColoredText('\n' + msg->get("Tap icon again for more options"), font->getColor(FontEngine::COLOR_ITEM_BONUS));
 	}
 	else if (inpt->mode == InputState::MODE_JOYSTICK) {
-		if (context == PLAYER_INV && pinv->canActivateItem(stack.item)) {
+		if (context == PLAYER_INV && local_inv && local_inv->canActivateItem(stack.item)) {
 			show_activate_msg = true;
 			activate_bind_str = inpt->getGamepadBindingString(Input::MENU_ACTIVATE);
 		}
@@ -1626,7 +1664,7 @@ void ItemManager::getTooltipInputHint(TooltipData& tip, ItemStack stack, int con
 		more_bind_str = inpt->getGamepadBindingString(Input::ACCEPT);
 	}
 	else if (!inpt->usingMouse()) {
-		if (context == PLAYER_INV && pinv->canActivateItem(stack.item)) {
+		if (context == PLAYER_INV && local_inv && local_inv->canActivateItem(stack.item)) {
 			show_activate_msg = true;
 			activate_bind_str = inpt->getBindingString(Input::MENU_ACTIVATE);
 		}
@@ -1634,7 +1672,7 @@ void ItemManager::getTooltipInputHint(TooltipData& tip, ItemStack stack, int con
 		more_bind_str = inpt->getBindingString(Input::ACCEPT);
 	}
 	else {
-		if (context == PLAYER_INV && pinv->canActivateItem(stack.item)) {
+		if (context == PLAYER_INV && local_inv && local_inv->canActivateItem(stack.item)) {
 			show_activate_msg = true;
 			activate_bind_str = inpt->getBindingString(Input::MAIN2);
 		}
@@ -1649,7 +1687,7 @@ void ItemManager::getTooltipInputHint(TooltipData& tip, ItemStack stack, int con
 		if (items[stack.item] && !items[stack.item]->book.empty() && items[stack.item]->book_is_readable) {
 			tip.addColoredText(msg->getv("Press [%s] to read", activate_bind_str.c_str()), font->getColor(FontEngine::COLOR_ITEM_BONUS));
 		}
-		else if (pinv->canActivateItem(stack.item)) {
+		else if (local_inv && local_inv->canActivateItem(stack.item)) {
 			tip.addColoredText(msg->getv("Press [%s] to use", activate_bind_str.c_str()), font->getColor(FontEngine::COLOR_ITEM_BONUS));
 		}
 	}
@@ -1668,14 +1706,14 @@ bool ItemManager::requirementsMet(const StatBlock *stats, ItemID item_id) {
 	Item* item = items[item_id];
 
 	// level
-	int scaled_requires_level = static_cast<int>(item->requires_level.get());
+	int scaled_requires_level = static_cast<int>(item->requires_level.get(stats));
 	if (scaled_requires_level > 0 && stats->level < scaled_requires_level) {
 		return false;
 	}
 
 	// base stats
 	for (size_t i = 0; i < eset->primary_stats.list.size(); i++) {
-		if (stats->get_primary(i) < static_cast<int>(item->requires_stat[i].get()))
+		if (stats->get_primary(i) < static_cast<int>(item->requires_stat[i].get(stats)))
 			return false;
 	}
 
@@ -1786,10 +1824,17 @@ int Item::getCraftCount() {
 	if (crafting_items.empty())
 		return 0;
 
+	// "How many can I craft" is inherently about the local crafting UI's own player -- same
+	// reasoning as ItemManager::getTooltip()'s local-only reads above.
+	Avatar* local = playerm->local();
+	PlayerInventory* local_inv = local ? playerm->inventoryFor(local->id) : NULL;
+	if (!local_inv)
+		return 0;
+
 	for (size_t i = 0; i < crafting_items.size(); ++i) {
 		ItemStack &stack = crafting_items[i];
-		int item_count = pinv->inventory[PlayerInventory::CARRIED].count(stack.item);
-		item_count += pinv->inventory[PlayerInventory::EQUIPMENT].count(stack.item);
+		int item_count = local_inv->inventory[PlayerInventory::CARRIED].count(stack.item);
+		item_count += local_inv->inventory[PlayerInventory::EQUIPMENT].count(stack.item);
 		craft_count = std::min(craft_count, item_count / stack.quantity);
 	}
 
@@ -1972,8 +2017,16 @@ ItemID ItemManager::getExtendedItem(ItemID item_id) {
 				items[extended_item]->level = sim_rng->range(min, max);
 			}
 			else if (option->level_src == ItemRandomizerDef::Option::LEVEL_SRC_HERO) {
-				int min = std::max(1, pc->stats.level + option->level_range_min);
-				int max = std::min(eset->xp.getMaxLevel(), std::max(min, pc->stats.level + option->level_range_max));
+				// No specific triggering player is available for extended-item randomization
+				// (unlike D15's spawn_level=hero_level, which the plan explicitly routes through
+				// a party average -- Map.cpp, P2.2 step 7b), so this keeps the pre-P2.2
+				// simplification of playerm->local(). A genuine "whose loot is this" identity
+				// would need threading through every allocateExtendedItem()/getExtendedItem()
+				// caller, which is P5.2 (loot distribution) territory, not this file alone.
+				Avatar* local = playerm->local();
+				int hero_level = local ? local->stats.level : 1;
+				int min = std::max(1, hero_level + option->level_range_min);
+				int max = std::min(eset->xp.getMaxLevel(), std::max(min, hero_level + option->level_range_max));
 
 				items[extended_item]->level = sim_rng->range(min, max);
 			}

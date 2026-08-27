@@ -63,9 +63,16 @@ public:
 
 	LevelScaledValue();
 	~LevelScaledValue() {}
-	float get() const;
-	float getMax() const;
-	float getStep() const;
+	// per_player_level/per_player_primary scale this value against a specific player's
+	// level/stats. `eval_stats` is that player -- NULL (the default) resolves to
+	// playerm->local(), the pre-P2.2 single-player behavior every existing caller in this tree
+	// (ItemManager.cpp itself, PlayerInventory.cpp, MenuItemStorage.cpp -- the last two out of
+	// scope for P2.2) still relies on. getTooltip()/requirementsMet() below, which already carry
+	// a StatBlock* for the player being evaluated, pass it through for real per-player
+	// correctness; everywhere else keeps the default.
+	float get(const StatBlock* eval_stats = NULL) const;
+	float getMax(const StatBlock* eval_stats = NULL) const;
+	float getStep(const StatBlock* eval_stats = NULL) const;
 	void randomize();
 	void parse(std::string& s);
 	void setBaseFromFloat(float f);
@@ -324,7 +331,7 @@ protected:
 private:
 	void loadAll();
 	void parseBonus(BonusData& bdata, FileParser& infile);
-	void getBonusString(std::stringstream& ss, BonusData* bdata);
+	void getBonusString(std::stringstream& ss, BonusData* bdata, const StatBlock* eval_stats = NULL);
 	void getTooltipInputHint(TooltipData& tip, ItemStack stack, int context);
 
 	ItemRandomizerDef* loadRandomizerDef(const::std::string& filename);
