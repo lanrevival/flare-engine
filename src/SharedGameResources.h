@@ -19,8 +19,6 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #ifndef SHAREDGAMEOBJECTS_H
 #define SHAREDGAMEOBJECTS_H
 
-class ActionBarState;
-class Avatar;
 class CampaignManager;
 class EnemyGroupManager;
 class EntityManager;
@@ -34,9 +32,7 @@ class MenuActionBar;
 class MenuManager;
 class MenuPowers;
 class NPCManager;
-class PlayerInventory;
 class PlayerManager;
-class PowerBonusState;
 class PowerManager;
 class FogOfWar;
 class XPScaling;
@@ -44,11 +40,11 @@ class XPScaling;
 /* These objects are created in the GameStatePlay constructor and deleted in the GameStatePlay destructor
 *  so can be accessed safely anywhere in between. The objects must not be changed by any other class.
 */
-// pc/pinv/pab/pbs are PlayerManager's compatibility aliases for playerm->local() and its three
-// sibling objects (PlayerManager.h/.cpp) -- kept in sync by PlayerManager::setLocal()/create()/
-// remove(), not written to directly by anyone else. See plans/phase2/P2.1-player-manager.md.
+// P2.3b deleted the pc/pinv/pab/pbs compatibility-alias globals that used to live here --
+// PlayerManager::get()/inventoryFor()/actionbarFor()/powerbonusFor()/local() (PlayerManager.h) are
+// the only way to reach a player's Avatar/PlayerInventory/ActionBarState/PowerBonusState now, for
+// any player including local(). See plans/phase2/P2.3b-delete-player-globals.md.
 extern PlayerManager *playerm;
-extern Avatar *pc;
 extern CampaignManager *camp;
 extern EnemyGroupManager *enemyg;
 extern EntityManager *entitym;
@@ -64,12 +60,9 @@ extern LootManager *loot;
 extern Map *wmap;
 extern MapRenderer *mapr;
 extern MenuActionBar *menu_act;
-extern ActionBarState *pab;
 extern MenuManager *menu;
 extern MenuPowers *menu_powers;
 extern NPCManager *npcs;
-extern PlayerInventory *pinv;
-extern PowerBonusState *pbs;
 extern PowerManager *powers;
 extern FogOfWar *fow;
 extern XPScaling *xp_scaling;

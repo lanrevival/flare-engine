@@ -16,8 +16,6 @@ You should have received a copy of the GNU General Public License along with
 FLARE.  If not, see http://www.gnu.org/licenses/
 */
 
-#include "ActionBarState.h"
-#include "Avatar.h"
 #include "CampaignManager.h"
 #include "EnemyGroupManager.h"
 #include "EntityManager.h"
@@ -27,15 +25,12 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuActionBar.h"
 #include "MenuPowers.h"
 #include "NPCManager.h"
-#include "PlayerInventory.h"
 #include "PlayerManager.h"
-#include "PowerBonusState.h"
 #include "PowerManager.h"
 #include "XPScaling.h"
 #include "SharedGameResources.h"
 
 PlayerManager *playerm = NULL;
-Avatar *pc = NULL;
 MenuManager *menu = NULL;
 CampaignManager *camp = NULL;
 EnemyGroupManager *enemyg = NULL;
@@ -47,11 +42,8 @@ LootManager *loot = NULL;
 Map *wmap = NULL;
 MapRenderer *mapr = NULL;
 MenuActionBar *menu_act= NULL;
-ActionBarState *pab = NULL;
 MenuPowers *menu_powers = NULL;
 NPCManager *npcs = NULL;
-PlayerInventory *pinv = NULL;
-PowerBonusState *pbs = NULL;
 PowerManager *powers = NULL;
 FogOfWar *fow = NULL;
 XPScaling *xp_scaling = NULL;

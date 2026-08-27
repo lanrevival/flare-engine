@@ -243,6 +243,64 @@ jobs:
           fi
           echo "OK: no menu-routed inventory mutator access in the sim-side consumers"
 
+  player-globals-guard:
+    # P2.3b deleted the pc/pinv/pab/pbs compatibility-alias globals (SharedGameResources.h) that
+    # PlayerManager used to keep pointed at whichever player was local() -- see
+    # plans/phase2/P2.3b-delete-player-globals.md. Nothing in the type system stops a re-declared
+    # `extern Avatar *pc;` from compiling clean on its own, or a new call site reaching for pc->
+    # muscle memory, so this does. Run the same thing locally before pushing:
+    #
+    #   git grep -nE '\bpc->|\bpinv->|\bpab->|\bpbs->' -- 'src/*.cpp' 'src/*.h'
+    #   git grep -nE 'extern Avatar \*pc|extern PlayerInventory \*pinv|extern ActionBarState \*pab|extern PowerBonusState \*pbs' -- 'src/*.cpp' 'src/*.h'
+    #
+    # Both match comments as well as code, deliberately, for the reason the RNG guard above gives:
+    # an exclusion list is how a guard rots into decoration, and a comment that still spells the
+    # global out in working code (`pc->stats...`) is exactly the kind of thing that gets
+    # copy-pasted back into real code by someone who trusts it. This is a NEW guard, distinct from
+    # inventory-guard above -- that job bans reaching FIELDS through a MENU (menu->inv->/
+    # menu->act->/menu->pow->) once they had moved onto pinv/pab/pbs; this one bans the four
+    # player-scoped globals THEMSELVES, which inventory-guard's own checks never touched (P2.2/
+    # P2.3 left them in place throughout, and P2.3b is what finally deletes them).
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: pc/pinv/pab/pbs stay deleted from every player-scoped read
+        run: |
+          hits=$(git grep -nE '\bpc->|\bpinv->|\bpab->|\bpbs->' -- 'src/*.cpp' 'src/*.h' || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo ""
+            echo "ERROR: pc/pinv/pab/pbs (SharedGameResources.h) were deleted in P2.3b -- see"
+            echo "plans/phase2/P2.3b-delete-player-globals.md. Every player-scoped read goes"
+            echo "through PlayerManager now, for any player including local():"
+            echo "  pc->stats   -> playerm->local()->stats (or an explicitly bound player)"
+            echo "  pinv->...   -> playerm->inventoryFor(id)->..."
+            echo "  pab->...    -> playerm->actionbarFor(id)->..."
+            echo "  pbs->...    -> playerm->powerbonusFor(id)->..."
+            echo "PlayerInventory/ActionBarState/PowerBonusState's own methods use the owner/"
+            echo "actionbar/powerbonus back-pointers PlayerManager::create() wires up instead."
+            exit 1
+          fi
+          echo "OK: no pc->/pinv->/pab->/pbs-> in src/"
+
+      - name: pc/pinv/pab/pbs are not re-declared or redefined
+        run: |
+          decl=$(git grep -nE 'extern Avatar \*pc|extern PlayerInventory \*pinv|extern ActionBarState \*pab|extern PowerBonusState \*pbs' -- 'src/*.cpp' 'src/*.h' || true)
+          def=$(git grep -nE 'Avatar \*pc =|PlayerInventory \*pinv =|ActionBarState \*pab =|PowerBonusState \*pbs =' -- 'src/*.cpp' 'src/*.h' || true)
+          if [ -n "$decl" ] || [ -n "$def" ]; then
+            echo "$decl"
+            echo "$def"
+            echo ""
+            echo "ERROR: a pc/pinv/pab/pbs global declaration or definition reappeared. These were"
+            echo "deleted from SharedGameResources.h/.cpp in P2.3b -- see"
+            echo "plans/phase2/P2.3b-delete-player-globals.md. Do not bring them back, even as a"
+            echo "compatibility shim -- that is precisely the mechanism (PlayerManager's old"
+            echo "setLocal()-driven alias) this plan removed."
+            exit 1
+          fi
+          echo "OK: no pc/pinv/pab/pbs declaration or definition in src/"
+
   replays:
     # Replays a corpus of recorded input and compares world-state digests against committed
     # goldens. This is the regression test Phases 1 and 2 lean on: almost every plan in them is a
