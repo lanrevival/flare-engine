@@ -80,11 +80,19 @@ private:
 	bool update_minimap;
 	bool loaded;
 
-	void calcBoundaries();
+	// P2.2 step 7 (kind C): revealed area is the union of every player's mask, not one hero's.
+	// calcBoundaries(pos) computes `bounds` around a single position -- called once per player
+	// from updateTiles()'s loop -- while calcMiniBoundaries() computes the union bounding box
+	// across every player, for the single shared minimap texture.
+	void calcBoundaries(const FPoint& pos);
 	void calcMiniBoundaries();
 	void updateTiles();
 
-	FPoint prev_hero_pos;
+	// Previous tick's player positions, parallel to playerm->players by index, used to skip
+	// updateTiles() when nothing has moved. A size or position mismatch against playerm->players
+	// (a join/leave, or the first tick) always counts as "changed". With one player this is the
+	// same single-position skip check as before P2.2.
+	std::vector<FPoint> prev_player_pos;
 };
 
 #endif

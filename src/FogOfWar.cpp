@@ -34,11 +34,15 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Menu.h"
 #include "MenuManager.h"
 #include "MenuMiniMap.h"
+#include "PlayerManager.h"
 #include "RenderDevice.h"
 #include "SharedGameResources.h"
 #include "SharedResources.h"
 #include "Utils.h"
 #include "UtilsParsing.h"
+
+#include <limits>
+#include <set>
 
 short unsigned FogOfWar::TILE_HIDDEN = 0;
 
@@ -55,7 +59,7 @@ FogOfWar::FogOfWar()
 	, color_dark(0,0,0)
 	, update_minimap(true)
 	, loaded(false)
-	, prev_hero_pos(-1, -1) {
+	, prev_player_pos() {
 }
 
 int FogOfWar::load() {
@@ -177,10 +181,20 @@ int FogOfWar::load() {
 }
 
 void FogOfWar::logic() {
-	if (prev_hero_pos.x == pc->stats.pos.x && prev_hero_pos.y == pc->stats.pos.y)
+	// P2.2 step 7 (kind C): skip the update only if *no* player has moved since last tick. A
+	// player count change (join/leave) always counts as "moved" -- see the field comment in
+	// FogOfWar.h. With one player this is the same single-position check as before P2.2.
+	bool any_moved = prev_player_pos.size() != playerm->players.size();
+	for (size_t i = 0; !any_moved && i < playerm->players.size(); ++i) {
+		if (prev_player_pos[i].x != playerm->players[i]->stats.pos.x || prev_player_pos[i].y != playerm->players[i]->stats.pos.y)
+			any_moved = true;
+	}
+	if (!any_moved)
 		return;
 
-	prev_hero_pos = pc->stats.pos;
+	prev_player_pos.clear();
+	for (size_t i = 0; i < playerm->players.size(); ++i)
+		prev_player_pos.push_back(playerm->players[i]->stats.pos);
 
 	updateTiles();
 	if (update_minimap) {
@@ -196,7 +210,14 @@ void FogOfWar::logic() {
 }
 
 void FogOfWar::handleIntramapTeleport() {
-	calcBoundaries();
+	// Kind A -- the specific player who just teleported -- but neither of this function's
+	// callers (GameStatePlay.cpp, main_server.cpp, both out of scope for P2.2) has that identity
+	// to pass through yet, so this keeps the pre-P2.2 simplification of playerm->local(). A
+	// non-local player's intramap teleport wouldn't get its destination fog re-hidden correctly
+	// today -- a known, stated gap, same class as NPCManager/EntityManager's identical pattern.
+	Avatar* local = playerm->local();
+	if (!local) return;
+	calcBoundaries(local->stats.pos);
 
 	for (int x = bounds.x; x <= bounds.w; x++) {
 		for (int y = bounds.y; y <= bounds.h; y++) {
@@ -216,18 +237,41 @@ Color FogOfWar::getTileColorMod(const int_fast16_t x, const int_fast16_t y) {
 		return color_sight;
 }
 
-void FogOfWar::calcBoundaries() {
-	bounds.x = static_cast<short>(pc->stats.pos.x)-mask_radius;
-	bounds.y = static_cast<short>(pc->stats.pos.y)-mask_radius;
-	bounds.w = static_cast<short>(pc->stats.pos.x)+mask_radius;
-	bounds.h = static_cast<short>(pc->stats.pos.y)+mask_radius;
+void FogOfWar::calcBoundaries(const FPoint& pos) {
+	bounds.x = static_cast<short>(pos.x)-mask_radius;
+	bounds.y = static_cast<short>(pos.y)-mask_radius;
+	bounds.w = static_cast<short>(pos.x)+mask_radius;
+	bounds.h = static_cast<short>(pos.y)+mask_radius;
 }
 
 void FogOfWar::calcMiniBoundaries() {
-	bounds.x = static_cast<short>(pc->stats.pos.x)-mask_radius;
-	bounds.y = static_cast<short>(pc->stats.pos.y)-mask_radius;
-	bounds.w = static_cast<short>(pc->stats.pos.x)+mask_radius;
-	bounds.h = static_cast<short>(pc->stats.pos.y)+mask_radius;
+	// Union bounding box across every player -- the minimap is one shared texture, not
+	// per-viewer, so it needs the box that covers everyone's mask, not just one player's.
+	if (playerm->players.empty()) {
+		bounds.x = 0;
+		bounds.y = 0;
+		bounds.w = 0;
+		bounds.h = 0;
+		return;
+	}
+
+	short min_x = std::numeric_limits<short>::max();
+	short min_y = std::numeric_limits<short>::max();
+	short max_x = std::numeric_limits<short>::min();
+	short max_y = std::numeric_limits<short>::min();
+
+	for (size_t i = 0; i < playerm->players.size(); ++i) {
+		const FPoint& pos = playerm->players[i]->stats.pos;
+		min_x = std::min(min_x, static_cast<short>(static_cast<short>(pos.x)-mask_radius));
+		min_y = std::min(min_y, static_cast<short>(static_cast<short>(pos.y)-mask_radius));
+		max_x = std::max(max_x, static_cast<short>(static_cast<short>(pos.x)+mask_radius));
+		max_y = std::max(max_y, static_cast<short>(static_cast<short>(pos.y)+mask_radius));
+	}
+
+	bounds.x = min_x;
+	bounds.y = min_y;
+	bounds.w = max_x;
+	bounds.h = max_y;
 
 	if (bounds.x < 0) bounds.x = 0;
 	if (bounds.y < 0) bounds.y = 0;
@@ -239,22 +283,42 @@ void FogOfWar::updateTiles() {
 	if (!def_mask)
 		return;
 
-	calcBoundaries();
-	const unsigned short * mask = &def_mask[0];
+	// P2.2 step 7 (kind C): union of every player's mask, one pass per player.
+	// dark_layer_id is already cumulative across time (AND, monotonic -- once a bit clears it
+	// never comes back), so a second player's mask over the same tile can only reveal it further,
+	// never re-hide it: no extra bookkeeping needed there.
+	// fog_layer_id is a per-tick snapshot of *current* visibility, previously a blind assignment
+	// (correct with exactly one pass/one player). With several players' boxes potentially
+	// overlapping in the same tick, the first player to touch a tile this tick still assigns
+	// (matching the old single-player behavior exactly when there's only one pass), but a second
+	// player touching the same tile must AND their mask in rather than overwrite it, or their
+	// value could make a tile the first player currently sees look foggy again.
+	std::set<int> touched_this_tick;
 
-	for (int x = bounds.x; x <= bounds.w; x++) {
-		for (int y = bounds.y; y <= bounds.h; y++) {
-			if (x>=0 && y>=0 && x < wmap->w && y < wmap->h) {
-				unsigned short prev_dark_tile = wmap->layers[dark_layer_id][x][y];
+	for (size_t p = 0; p < playerm->players.size(); ++p) {
+		calcBoundaries(playerm->players[p]->stats.pos);
+		const unsigned short * mask = &def_mask[0];
 
-				wmap->layers[dark_layer_id][x][y] &= *mask;
-				wmap->layers[fog_layer_id][x][y] = *mask;
+		for (int x = bounds.x; x <= bounds.w; x++) {
+			for (int y = bounds.y; y <= bounds.h; y++) {
+				if (x>=0 && y>=0 && x < wmap->w && y < wmap->h) {
+					unsigned short prev_dark_tile = wmap->layers[dark_layer_id][x][y];
 
-				if (prev_dark_tile != wmap->layers[dark_layer_id][x][y]) {
-					update_minimap = true;
+					wmap->layers[dark_layer_id][x][y] &= *mask;
+
+					if (touched_this_tick.insert(x * wmap->h + y).second) {
+						wmap->layers[fog_layer_id][x][y] = *mask;
+					}
+					else {
+						wmap->layers[fog_layer_id][x][y] &= *mask;
+					}
+
+					if (prev_dark_tile != wmap->layers[dark_layer_id][x][y]) {
+						update_minimap = true;
+					}
 				}
+				mask++;
 			}
-			mask++;
 		}
 	}
 }
