@@ -59,6 +59,14 @@ Entity *EntityManager::getEntityPrototype(const std::string& type_id) {
 	return e;
 }
 
+bool EntityManager::hasLoadedPrototype(const std::string& type_id) const {
+	for (size_t i = 0; i < prototypes.size(); ++i) {
+		if (prototypes[i].type_filename == type_id)
+			return true;
+	}
+	return false;
+}
+
 size_t EntityManager::loadEntityPrototype(const std::string& type_id) {
 	for (size_t i = 0; i < prototypes.size(); i++) {
 		if (prototypes[i].type_filename == type_id) {
@@ -137,6 +145,11 @@ void EntityManager::handleNewMap () {
 	}
 	prototypes.clear();
 
+	// Resolved once for this whole function -- no specific triggering player exists for a
+	// map-defined enemy spawn or a persistent ally's map-transition anchor, so both keep the
+	// pre-P2.2 simplification of using playerm->local() (see the two comments below).
+	Avatar* local = playerm->local();
+
 	// load new entities
 	while (!wmap->enemies.empty()) {
 		me = wmap->enemies.front();
@@ -163,9 +176,7 @@ void EntityManager::handleNewMap () {
 		// Set level. If spawn_level's ratio_source is RATIO_SOURCE_HERO, applyToStatBlock
 		// (Map.cpp, P2.2 step 7b/D15) ignores this argument entirely and substitutes the party
 		// average instead -- this argument only matters for other ratio_source/mode
-		// combinations. No specific triggering player exists for a map-defined enemy spawn, so
-		// this keeps the pre-P2.2 simplification of using playerm->local().
-		Avatar* local = playerm->local();
+		// combinations.
 		if (local) {
 			me.spawn_level.applyToStatBlock(&e->stats, &local->stats);
 		}

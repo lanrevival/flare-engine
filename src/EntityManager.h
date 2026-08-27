@@ -47,6 +47,11 @@ public:
 
 	Entity *getEntityPrototype(const std::string& type_id);
 
+	/** True if a prototype for this entity type is already loaded (prototypes is otherwise
+	 * protected -- see the class comment on why the preload loop this backs matters for P2.2).
+	 * Used by main_server.cpp's --dump-summon-prototypes diagnostic (AC7). */
+	bool hasLoadedPrototype(const std::string& type_id) const;
+
 	void handleNewMap();
 	void handleSpawn();
 	bool checkPartyMembers();

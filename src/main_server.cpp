@@ -154,7 +154,11 @@ static QuestLog* server_quests = NULL;
 
 class ServerCmdLineArgs {
 public:
-	ServerCmdLineArgs() : mod_list(), load_slot(), data_path(), max_ticks(0), hash_every(0), hash_at_exit(false), sim_seed(RNG_DEFAULT_SIM_SEED), record_path(), replay_path(), dump_players(false), assert_pc_alias(false) {}
+	ServerCmdLineArgs()
+		: mod_list(), load_slot(), data_path(), max_ticks(0), hash_every(0), hash_at_exit(false)
+		, sim_seed(RNG_DEFAULT_SIM_SEED), record_path(), replay_path(), dump_players(false)
+		, assert_pc_alias(false), spawn_test_players(0), test_player_summon(0)
+		, dump_ai_targets(false), dump_summon_prototypes(false) {}
 	std::vector<std::string> mod_list;
 	std::string load_slot;
 	std::string data_path;
@@ -166,6 +170,14 @@ public:
 	std::string replay_path;
 	bool dump_players;
 	bool assert_pc_alias;
+
+	// P2.2 AC5-AC7 test infrastructure -- see the P2.2 report for what this can and cannot
+	// prove. None of this touches SaveLoad.cpp (out of scope): test players are constructed
+	// directly here by cloning player 0's already-loaded state, not through a save file.
+	int spawn_test_players;      // total player count, including the one --load-slot already loads
+	PowerID test_player_summon;  // if nonzero, bound to the last spawned test player's action bar
+	bool dump_ai_targets;
+	bool dump_summon_prototypes;
 };
 
 // The Platform implementations are compiled by #include-ing them into the entry point rather
@@ -1127,6 +1139,168 @@ static void serverConstructSim(const ServerCmdLineArgs& args) {
 	}
 }
 
+// P2.2 AC5-AC7 test infrastructure. Not a general multi-player join path (that's P3.5) and not
+// routed through SaveLoad.cpp (out of scope for P2.2): each additional player is built by
+// cloning player 0's already-loaded state (Avatar::stats, PlayerInventory, ActionBarState) into
+// a freshly playerm->create()-d id, then offsetting position so proximity-based AI targeting has
+// something to distinguish. playerm->create()'s Avatar constructor already sizes/allocates
+// power_cooldown_timers, power_cast_timers and calls Avatar::init() -- see Avatar.cpp -- so this
+// only needs to overlay the class/gear/action-bar state init() doesn't set.
+//
+// Known gap, stated rather than papered over: these test players have no input channel. Replay
+// (Replay.h) drives a single global InputState, and Avatar::logic() is called once per player,
+// each from its own PlayerCommand -- there is no per-player recorded-input format to extend this
+// into "player 1 replays its own actions." A spawned test player is inert (never calls
+// Avatar::logic() with real commands) unless something else moves it. That is enough for AC5/AC6
+// (proximity-based targeting of a stationary second player) and for AC7 (the summon-prototype
+// preload is a map-load-time effect of the action-bar binding below, not something that needs
+// the player to actually cast anything at run time) -- but it is not a general second playable
+// character, and building one is a materially larger feature (a real per-player replay format)
+// that this plan's file list does not include.
+static void serverSpawnTestPlayers(const ServerCmdLineArgs& args) {
+	if (args.spawn_test_players <= 1)
+		return;
+
+	if (args.spawn_test_players > 8) {
+		Utils::logError("main_server: --spawn-test-players=%d exceeds the 8-player max (D3).", args.spawn_test_players);
+		Utils::Exit(1);
+	}
+
+	Avatar* source = playerm->local();
+	PlayerInventory* source_inv = playerm->inventoryFor(0);
+	ActionBarState* source_ab = playerm->actionbarFor(0);
+	if (!source || !source_inv || !source_ab) {
+		Utils::logError("main_server: --spawn-test-players requires player 0 (--load-slot) to already be loaded.");
+		Utils::Exit(1);
+	}
+
+	PlayerID last_id = 0;
+	for (int i = 1; i < args.spawn_test_players; ++i) {
+		PlayerID new_id = playerm->create(static_cast<PlayerID>(i));
+		Avatar* new_avatar = playerm->get(new_id);
+		PlayerInventory* new_inv = playerm->inventoryFor(new_id);
+		ActionBarState* new_ab = playerm->actionbarFor(new_id);
+		if (!new_avatar || !new_inv || !new_ab)
+			continue;
+
+		// Copy the loaded class/stats state. Does NOT touch power_cooldown_timers/power_cast_timers
+		// (Avatar fields, not StatBlock) -- new_avatar's own constructor already allocated those
+		// correctly-sized for THIS avatar; overwriting stats wholesale leaves them alone since
+		// they live outside the StatBlock being assigned here.
+		new_avatar->stats = source->stats;
+
+		// NOT *new_inv = *source_inv -- ItemStorage (PlayerInventory::inventory[]) owns a raw
+		// `ItemStack* storage` array with no user-defined copy assignment, so a struct-copy here
+		// would shallow-copy that pointer and double-free it the moment either player's inventory
+		// was destroyed. Found by running this directly (SIGABRT, no assertion message, during
+		// PlayerManager::remove() -- see the P2.2 report) rather than through the replay corpus,
+		// which never destructs a second player. Sized/initialized the same way player 0's was in
+		// serverConstructSim() above instead: a properly-owned, empty inventory. Test players
+		// don't need player 0's actual items, only a valid one of their own.
+		new_inv->loadEquipmentData();
+		if (new_inv->max_equipment_set > 0)
+			new_inv->active_equipment_set = 1;
+
+		// ActionBarState has no owned pointers (all std::vector members), so a struct-copy is
+		// safe and gives the test player the same slot count/lock flags as player 0's --
+		// initSlots() alone (without menus/actionbar.txt, unavailable headless) would leave it
+		// zero-sized.
+		*new_ab = *source_ab;
+		for (unsigned s = 0; s < new_ab->hotkeys.size(); ++s)
+			new_ab->hotkeys[s] = 0;
+
+		// Spread test players apart (map tiles) so nearestTo()/nearestAliveTo() has more than one
+		// meaningfully different distance to choose between.
+		new_avatar->stats.pos.x = source->stats.pos.x + static_cast<float>(i) * 3.0f;
+		new_avatar->stats.pos.y = source->stats.pos.y;
+
+		// SaveLoad::loadGame() (out of scope) is what calls this for player 0 -- see
+		// serverCheckEquipmentChange()'s own comment on why it is load-bearing, not cosmetic:
+		// AnimationManager reference-counts by filename, and skipping this left the clone's
+		// stats.animations ("animations/hero.txt") never increfed, so its destructor's
+		// decreaseCount() had nothing to release -- logErrorDialog() then blocked waiting on a
+		// display that does not exist headless. Found by running this directly rather than
+		// through the replay corpus (see the P2.2 report).
+		new_avatar->loadAnimations();
+		new_avatar->loadSounds();
+
+		Utils::logInfo("main_server: spawned test player id=%u at (%.1f, %.1f)",
+		               static_cast<unsigned>(new_id), static_cast<double>(new_avatar->stats.pos.x), static_cast<double>(new_avatar->stats.pos.y));
+
+		last_id = new_id;
+	}
+
+	if (args.test_player_summon != 0 && last_id != 0) {
+		ActionBarState* last_ab = playerm->actionbarFor(last_id);
+		if (last_ab && !last_ab->hotkeys.empty()) {
+			last_ab->hotkeys[0] = args.test_player_summon;
+			Utils::logInfo("main_server: bound power id=%zu to player id=%u's action bar slot 0",
+			               args.test_player_summon, static_cast<unsigned>(last_id));
+
+			// The summon-prototype preload (EntityManager::handleNewMap(), P2.2 step 7b) already
+			// ran once, inside serverLoadGame() above, before this player -- and this binding --
+			// existed. Re-running it is safe: the enemy-spawn and ally-repositioning queues it
+			// also processes are already drained (harmless no-ops), and loadEntityPrototype()
+			// itself skips anything already loaded, so this only adds what the new binding needs.
+			entitym->handleNewMap();
+		}
+	}
+}
+
+// P2.2 AC7 diagnostic. Prints one line per player per spawn-type power bound to their
+// known-powers list or action bar, and whether EntityManager has a loaded prototype for it.
+// `player=N power=P spawn_type=S loaded=0|1`. Exits without running the simulation, same shape
+// as --assert-pc-alias.
+static void serverDumpSummonPrototypes() {
+	for (size_t p = 0; p < playerm->players.size(); ++p) {
+		Avatar* player = playerm->players[p];
+		std::vector<PowerID> to_check = player->stats.powers_list;
+
+		ActionBarState* ab = playerm->actionbarFor(player->id);
+		if (ab) {
+			for (size_t i = 0; i < ab->hotkeys.size(); ++i) {
+				if (ab->hotkeys[i] != 0)
+					to_check.push_back(ab->hotkeys[i]);
+			}
+		}
+
+		for (size_t i = 0; i < to_check.size(); ++i) {
+			PowerID power_index = to_check[i];
+			if (!powers->isValid(power_index))
+				continue;
+
+			const std::string& spawn_type = powers->powers[power_index]->spawn_type;
+			if (spawn_type.empty() || spawn_type == "untransform")
+				continue;
+
+			std::vector<Enemy_Level> spawn_enemies = enemyg->getEnemiesInCategory(spawn_type);
+			for (size_t j = 0; j < spawn_enemies.size(); ++j) {
+				bool loaded = entitym->hasLoadedPrototype(spawn_enemies[j].type);
+				printf("player=%u power=%zu spawn_type=%s loaded=%d\n",
+				       static_cast<unsigned>(player->id), power_index, spawn_type.c_str(), loaded ? 1 : 0);
+			}
+		}
+	}
+}
+
+// P2.2 AC5/AC6 diagnostic. One line per hostile entity per tick: which player it is currently
+// nearest-targeting, via the exact same playerm->nearestAliveTo() call EntityBehavior itself now
+// uses (P2.2 step 3), so this observes the migrated logic rather than re-deriving its own guess
+// at it. `tick=T entity=I target=<player id>|none`.
+static void serverDumpAiTargets(unsigned long tick) {
+	for (size_t i = 0; i < entitym->entities.size(); ++i) {
+		Entity* e = entitym->entities[i];
+		if (e->stats.hero_ally || e->stats.npc || !e->stats.alive)
+			continue;
+
+		Avatar* target = playerm->nearestAliveTo(e->stats.pos);
+		if (target)
+			printf("tick=%lu entity=%zu target=%u\n", tick, i, static_cast<unsigned>(target->id));
+		else
+			printf("tick=%lu entity=%zu target=none\n", tick, i);
+	}
+}
+
 static void serverCleanup() {
 	// Same deletion order GameStatePlay::~GameStatePlay() uses for the objects both sides
 	// construct; menu/mapr are simply absent from both the construction and this list.
@@ -1209,7 +1383,7 @@ static const unsigned long TRAJECTORY_SAMPLE_TICKS = 30;
 
 static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_every,
                                     uint64_t* trajectory, unsigned long* last_event_tick,
-                                    unsigned long* died_tick) {
+                                    unsigned long* died_tick, bool dump_ai_targets) {
 	bool done = false;
 	unsigned long total_ticks = 0;
 	uint64_t traj = WorldHash::init();
@@ -1273,6 +1447,11 @@ static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_
 			inpt->resetScroll();
 
 			total_ticks++;
+
+			// P2.2 AC5/AC6 diagnostic -- after this tick's logic (and its total_ticks++), same
+			// tick number the digest/liveness bookkeeping just below uses.
+			if (dump_ai_targets)
+				serverDumpAiTargets(total_ticks);
 
 			// Liveness. A recording that has stopped simulating still produces a digest and
 			// still satisfies every 'requires' entry it satisfied earlier, because those ask
@@ -1360,7 +1539,23 @@ static void printHelp() {
 	       "                         running the simulation: 0 if all four match, 1 otherwise.\n"
 	       "--max-fps=<N>            Render frame limit. Accepted and ignored: the server\n"
 	       "                         renders nothing and always simulates at 60 Hz.\n"
-	       "--headless               Accepted and implied; the server is always headless.\n");
+	       "--headless               Accepted and implied; the server is always headless.\n"
+	       "--spawn-test-players=<N> P2.2 test infrastructure. Total player count (including the\n"
+	       "                         one --load-slot loads as id 0): clones player 0's loaded\n"
+	       "                         stats/inventory/action bar into ids 1..N-1, spaced apart so\n"
+	       "                         proximity-based AI targeting has something to distinguish.\n"
+	       "                         Does not go through SaveLoad.cpp.\n"
+	       "--test-player-summon=<ID>  With --spawn-test-players, binds power ID to the LAST\n"
+	       "                         spawned test player's action bar (not player 0's), then\n"
+	       "                         re-runs the summon-prototype preload so it sees the new\n"
+	       "                         binding.\n"
+	       "--dump-ai-targets        Prints one line per hostile entity per tick: which player\n"
+	       "                         id it is currently nearest-targeting (playerm->nearestAliveTo()),\n"
+	       "                         or target=none.\n"
+	       "--dump-summon-prototypes Prints one line per player per spawn-type power bound to\n"
+	       "                         their known-powers list or action bar, and whether\n"
+	       "                         EntityManager has a loaded prototype for it, then exits\n"
+	       "                         without running the simulation.\n");
 }
 
 static std::string parseServerArg(const std::string& arg) {
@@ -1442,6 +1637,18 @@ int main(int argc, char *argv[]) {
 		else if (arg == "assert-pc-alias") {
 			args.assert_pc_alias = true;
 		}
+		else if (arg == "spawn-test-players") {
+			args.spawn_test_players = strtol(parseServerArgValue(arg_full).c_str(), NULL, 10);
+		}
+		else if (arg == "test-player-summon") {
+			args.test_player_summon = static_cast<PowerID>(strtoul(parseServerArgValue(arg_full).c_str(), NULL, 10));
+		}
+		else if (arg == "dump-ai-targets") {
+			args.dump_ai_targets = true;
+		}
+		else if (arg == "dump-summon-prototypes") {
+			args.dump_summon_prototypes = true;
+		}
 		else if (arg == "max-fps") {
 			// Accepted so that the sim-rate-vs-render-rate claim can actually be tested: a
 			// server run at 30 and at 144 must produce the same tick count in the same wall
@@ -1498,6 +1705,17 @@ int main(int argc, char *argv[]) {
 	// ordering is load-bearing rather than cosmetic.
 	serverConstructSim(args);
 
+	// P2.2 AC5-AC7 test infrastructure -- after player 0 is fully loaded (serverSpawnTestPlayers()
+	// clones its state), before any tick has run.
+	serverSpawnTestPlayers(args);
+
+	if (args.dump_summon_prototypes) {
+		serverDumpSummonPrototypes();
+		// Diagnostic mode, same idiom as --assert-pc-alias below: exits without running the
+		// simulation.
+		Utils::Exit(0);
+	}
+
 	// P2.1 diagnostics -- both read playerm right after construction, before any tick has run.
 	// stdout, not the log: golden/CI parsing shouldn't have to deal with timestamps.
 	if (args.dump_players) {
@@ -1527,7 +1745,7 @@ int main(int argc, char *argv[]) {
 	unsigned long last_event_tick = 0;
 	unsigned long died_tick = 0;
 	unsigned long ticks = serverMainLoop(args.max_ticks, args.hash_every, &trajectory,
-	                                     &last_event_tick, &died_tick);
+	                                     &last_event_tick, &died_tick, args.dump_ai_targets);
 
 	replay->finish();
 
