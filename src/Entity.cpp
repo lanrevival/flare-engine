@@ -62,6 +62,7 @@ Entity::Entity()
 	, activeAnimation(NULL)
 	, animationSet(NULL)
 	, stats()
+	, net_id(0)
 	, type_filename("")
 {
 	// MSVC complains if you use 'this' in the init list
@@ -86,6 +87,7 @@ Entity& Entity::operator=(const Entity& e) {
 	sound_lowhp = e.sound_lowhp;
 
 	stats = StatBlock(e.stats);
+	net_id = e.net_id;
 
 	activeAnimation = NULL;
 	animationSet = NULL;

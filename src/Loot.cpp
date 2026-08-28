@@ -31,7 +31,8 @@ Loot::Loot()
 	, tip_visible(false)
 	, dropped_by_hero(false)
 	, on_ground(false)
-	, sound_played(false) {
+	, sound_played(false)
+	, net_id(0) {
 	tip.clear();
 }
 
@@ -39,6 +40,7 @@ Loot::Loot(const Loot &other)
 	: gfx("")
 	, animation(NULL)
 	, wtip(NULL)
+	, net_id(0)
 {
 	// operator= creates a new animation and tooltip
 	*this = other;
@@ -72,6 +74,7 @@ Loot& Loot::operator= (const Loot &other) {
 	dropped_by_hero = other.dropped_by_hero;
 	on_ground = other.on_ground;
 	sound_played = other.sound_played;
+	net_id = other.net_id;
 
 	return *this;
 }

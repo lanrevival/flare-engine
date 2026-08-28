@@ -42,6 +42,10 @@ public:
 	bool on_ground;
 	bool sound_played;
 
+	// Stable cross-client identity for replication (P3.4). Always 0 until then; see
+	// plans/phase3/P3.1-transport-and-peer-identity.md.
+	uint32_t net_id;
+
 	Loot();
 	Loot(const Loot &other);
 	Loot& operator= (const Loot &other);

@@ -81,6 +81,12 @@ EndIf(NOT IS_ABSOLUTE "${BINDIR}")
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/distribution/flare.desktop.in" "${CMAKE_CURRENT_BINARY_DIR}/flare.desktop")
 
 
+# Every other header in src/ is found via same-directory quoted-#include resolution (everything
+# lived flat in src/ until src/net/ -- P3.1 -- introduced the first subdirectory). This makes src/
+# itself part of the include path so a file under src/net/ can still quote-include a top-level
+# header like "PlayerManager.h" the same way every other file in the tree already does.
+INCLUDE_DIRECTORIES(${CMAKE_SOURCE_DIR}/src)
+
 # Detect missing dependencies
 # First, search for SDL2 modules
 
@@ -204,6 +210,8 @@ Set (FLARE_HEADERS
 	./src/MenuVendor.h
 	./src/MessageEngine.h
 	./src/ModManager.h
+	./src/net/NetPlatform.h
+	./src/net/NetworkManager.h
 	./src/NPC.h
 	./src/NullFontEngine.h
 	./src/NullInputState.h
@@ -327,8 +335,14 @@ List (APPEND FLARE_SERVER_SOURCES ./src/main_server.cpp)
 # is not literally built by linking this library (it has its own broader FLARE_SERVER_SOURCES,
 # see above) -- this target exists purely so FLARE_SIM_SOURCES' own boundary (compiles and links
 # standalone, no presentation dependency at all) stays verified in isolation, per P1.4b.
+# src/net/* needs Winsock on Windows -- POSIX platforms need nothing extra for BSD sockets.
+Set (FLARE_NET_LIBRARY "")
+If (WIN32)
+	Set (FLARE_NET_LIBRARY "ws2_32")
+EndIf (WIN32)
+
 Add_Library (flare_sim STATIC ${FLARE_SIM_SOURCES})
-Target_Link_Libraries (flare_sim ${CMAKE_LD_FLAGS} ${SDL2_LIBRARY})
+Target_Link_Libraries (flare_sim ${CMAKE_LD_FLAGS} ${SDL2_LIBRARY} ${FLARE_NET_LIBRARY})
 
 Add_Executable (flare ${FLARE_SOURCES} ${FLARE_HEADERS})
 Add_Executable (flare-server ${FLARE_SERVER_SOURCES} ${FLARE_HEADERS})
@@ -338,14 +352,14 @@ If (NOT SDL2MAIN_LIBRARY)
 	Set (SDL2MAIN_LIBRARY "")
 EndIf (NOT SDL2MAIN_LIBRARY)
 
-Target_Link_Libraries (flare ${CMAKE_LD_FLAGS} ${SDL2_LIBRARY} ${SDL2IMAGE_LIBRARY} ${SDL2MIXER_LIBRARY} ${SDL2TTF_LIBRARY} ${SDL2MAIN_LIBRARY})
+Target_Link_Libraries (flare ${CMAKE_LD_FLAGS} ${SDL2_LIBRARY} ${SDL2IMAGE_LIBRARY} ${SDL2MIXER_LIBRARY} ${SDL2TTF_LIBRARY} ${SDL2MAIN_LIBRARY} ${FLARE_NET_LIBRARY})
 # No SDL2_image/SDL2_mixer: FLARE_SERVER_SOURCES excludes every file that calls into them (see
 # the comment above FLARE_SERVER_EXCLUDED_PRESENTATION_SOURCES). SDL2_ttf stays -- MenuConfig.cpp
 # needs SDLFontEngine to exist for linking even though nothing server-side ever constructs a
 # MenuConfig (same comment). SDL2_LIBRARY (core) stays too -- e.g. SDL_GetTicks and the SDL type
 # aliases CommonIncludes.h pulls in are still used outside the excluded files, and the AC block
 # explicitly expects libSDL2-2 still linked.
-Target_Link_Libraries (flare-server ${CMAKE_LD_FLAGS} ${SDL2_LIBRARY} ${SDL2TTF_LIBRARY} ${SDL2MAIN_LIBRARY})
+Target_Link_Libraries (flare-server ${CMAKE_LD_FLAGS} ${SDL2_LIBRARY} ${SDL2TTF_LIBRARY} ${SDL2MAIN_LIBRARY} ${FLARE_NET_LIBRARY})
 
 # Link-time guard (P1.4d): if flare-server ever gains a real SDL_Render*/SDL_CreateWindow call,
 # a Mix_ audio call, or an IMG_ image-loading call, fail the build immediately rather than

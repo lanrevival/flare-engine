@@ -57,6 +57,7 @@ Hazard::Hazard(MapCollision *_collider)
 	, power(NULL)
 	, power_index(0)
 	, parent(NULL)
+	, net_id(0)
 	, collider(_collider)
 	, activeAnimation(NULL)
 	, animation_name("")
@@ -101,6 +102,7 @@ Hazard& Hazard::operator=(const Hazard& other) {
 
 	parent = other.parent;
 	children = other.children;
+	net_id = other.net_id;
 
 	if (!other.animation_name.empty()) {
 		animation_name = other.animation_name;

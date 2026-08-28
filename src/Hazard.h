@@ -81,6 +81,10 @@ public:
 
 	FPoint prev_pos;
 
+	// Stable cross-client identity for replication (P3.4). Always 0 until then; see
+	// plans/phase3/P3.1-transport-and-peer-identity.md.
+	uint32_t net_id;
+
 private:
     void reflect();
 
