@@ -940,15 +940,39 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 				// Named without the arrow on purpose: the acceptance greps for menu access count
 				// comments as well as code, which is how a guard avoids rotting into decoration.
 				if (cmd.respawn) {
-					wmap->teleportation = true;
-					wmap->teleport_mapname = wmap->respawn_map;
-
 					if (stats.permadeath) {
+						wmap->teleportation = true;
+						wmap->teleport_mapname = wmap->respawn_map;
+
 						// set these positions so it doesn't flash before jumping to Title
 						wmap->teleport_destination.x = stats.pos.x;
 						wmap->teleport_destination.y = stats.pos.y;
 					}
+					else if (usePerPlayerCollision()) {
+						// D21: respawn near a living party member, after the delay the death
+						// animation already imposes (see the corpse/game-over gate above this
+						// state), and local to the current map -- NOT the single-player intermap
+						// teleport below, which under D12 (one shared map) would drag the whole
+						// party back to an old checkpoint just because one member died. Falls
+						// back to the map's own entry point (hero_pos) if no other party member
+						// is alive.
+						respawn = true;
+
+						FPoint respawn_pos = wmap->hero_pos;
+						for (size_t i = 0; i < playerm->players.size(); ++i) {
+							Avatar* member = playerm->players[i];
+							if (member != this && member->stats.alive && !member->stats.corpse) {
+								respawn_pos = wmap->collider.getRandomNeighbor(Point(member->stats.pos), 1, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_HERO);
+								break;
+							}
+						}
+
+						stats.pos = respawn_pos;
+					}
 					else {
+						wmap->teleportation = true;
+						wmap->teleport_mapname = wmap->respawn_map;
+
 						respawn = true;
 
 						// set teleportation variables.  GameEngine acts on these.
