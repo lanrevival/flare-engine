@@ -30,6 +30,7 @@ Set (FLARE_SIM_SOURCES
 	./src/MessageEngine.cpp
 	./src/ModManager.cpp
 	./src/net/NetPlatform.cpp
+	./src/net/NetProtocol.cpp
 	./src/net/NetworkManager.cpp
 	./src/NPC.cpp
 	./src/NPCManager.cpp

@@ -16,6 +16,8 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 */
 
 #include "NetworkManager.h"
+#include "NetProtocol.h"
+#include "Version.h"
 
 #include <cstring>
 #include <sstream>
@@ -38,9 +40,14 @@ NetworkManager::NetworkManager()
 	, started(false)
 	, listen_socket(NetPlatform::INVALID)
 	, max_players_cap(0)
+	, required_mod_hash(0)
 	, peers()
 	, inbound()
 	, next_id(0)
+	, has_local_id(false)
+	, local_player_id(0)
+	, last_refusal_key()
+	, local_mod_hash_pending(0)
 {
 }
 
@@ -48,7 +55,7 @@ NetworkManager::~NetworkManager() {
 	shutdown();
 }
 
-bool NetworkManager::startHost(unsigned short port, unsigned int max_players) {
+bool NetworkManager::startHost(unsigned short port, unsigned int max_players, uint32_t required_mod_hash_) {
 	if (started)
 		return false;
 	if (!NetPlatform::platformInit())
@@ -81,10 +88,11 @@ bool NetworkManager::startHost(unsigned short port, unsigned int max_players) {
 	is_host = true;
 	started = true;
 	max_players_cap = max_players;
+	required_mod_hash = required_mod_hash_;
 	return true;
 }
 
-bool NetworkManager::startClient(const std::string& host_addr, unsigned short port, const std::string& display_name) {
+bool NetworkManager::startClient(const std::string& host_addr, unsigned short port, const std::string& display_name, uint32_t local_mod_hash) {
 	if (started)
 		return false;
 	if (!NetPlatform::platformInit())
@@ -120,14 +128,17 @@ bool NetworkManager::startClient(const std::string& host_addr, unsigned short po
 
 	Peer peer;
 	peer.socket = s;
-	peer.id = 0; // the host is the only "peer" a client tracks; id is meaningless client-side
+	peer.id = 0; // the host is the only "peer" a client tracks; not this client's real PlayerID --
+	             // see localPlayerID(), populated once HELLO_OK arrives.
 	peer.display_name = display_name;
 	peer.connecting = (rc != 0); // rare but possible: loopback can complete connect() synchronously
 	peer.alive = true;
+	peer.handshake_done = false; // unused client-side (has_local_id is the client's own gate)
 	peers.push_back(peer);
 
+	local_mod_hash_pending = local_mod_hash;
 	if (!peer.connecting)
-		appendFramed(peers.back().send_buffer, "HELLO " + display_name);
+		appendFramed(peers.back().send_buffer, Net::encodeHello(display_name, local_mod_hash));
 
 	is_host = false;
 	started = true;
@@ -171,7 +182,7 @@ void NetworkManager::acceptLoop() {
 			// Refuse politely: still drains the accept queue (so a refused connection doesn't
 			// wedge the next legitimate one behind it), but consumes no PlayerID and no peer slot.
 			std::string refusal;
-			appendFramed(refusal, "REFUSED server full");
+			appendFramed(refusal, Net::encodeRefused(Net::REFUSED_SERVER_FULL, "Server is full."));
 			send(s, refusal.data(), static_cast<int>(refusal.size()), 0);
 			NetPlatform::closeSocket(s);
 			continue;
@@ -183,6 +194,7 @@ void NetworkManager::acceptLoop() {
 		peer.display_name = "";
 		peer.connecting = false; // inbound connections are already established by accept()
 		peer.alive = true;
+		peer.handshake_done = false;
 		peers.push_back(peer);
 	}
 }
@@ -210,7 +222,7 @@ void NetworkManager::pumpPeer(Peer& peer) {
 			peer.alive = false; // connect() failed -- caller (update()) removes this peer
 			return;
 		}
-		appendFramed(peer.send_buffer, "HELLO " + peer.display_name);
+		appendFramed(peer.send_buffer, Net::encodeHello(peer.display_name, local_mod_hash_pending));
 		return; // let the next tick's pumpPeer() do the first real recv/send on this socket
 	}
 
@@ -236,18 +248,77 @@ void NetworkManager::pumpPeer(Peer& peer) {
 		return;
 	}
 	for (size_t i = 0; i < frames.size(); ++i) {
-		// The placeholder handshake is display-only: it sets the name shown for this PlayerID, it
-		// never changes what PlayerID the message is attributed to. peer.id was assigned at
-		// accept() and is never touched by anything read off the wire.
-		if (peer.display_name.empty() && frames[i].compare(0, 6, "HELLO ") == 0)
-			peer.display_name = frames[i].substr(6);
-		else
-			inbound.push_back(std::make_pair(peer.id, frames[i]));
+		if (is_host && !peer.handshake_done) {
+			// The handshake sets the name shown for this PlayerID and validates the connecting
+			// build; it never changes what PlayerID the message is attributed to. peer.id was
+			// assigned at accept() and is never touched by anything read off the wire.
+			Net::MsgHello hello;
+			bool decoded = Net::peekMessageType(frames[i]) == Net::MSG_HELLO && Net::decodeHello(frames[i], hello);
+
+			uint8_t reason = 0;
+			std::string reason_key;
+			if (!decoded) {
+				reason = Net::REFUSED_MALFORMED;
+				reason_key = "Malformed connection request.";
+			}
+			else if (hello.protocol_version != Net::PROTOCOL_VERSION
+			         || VersionInfo::ENGINE != Version(hello.engine_x, hello.engine_y, hello.engine_z)) {
+				reason = Net::REFUSED_VERSION_MISMATCH;
+				reason_key = "This server requires a different game version.";
+			}
+			else if (hello.mod_hash != required_mod_hash) {
+				reason = Net::REFUSED_MOD_MISMATCH;
+				reason_key = "This server's mods do not match yours.";
+			}
+
+			if (reason != 0) {
+				appendFramed(peer.send_buffer, Net::encodeRefused(reason, reason_key));
+				peer.alive = false; // update() closes the socket after flushing send_buffer below
+				break; // don't process any further frames from a peer being refused
+			}
+
+			peer.display_name = hello.display_name;
+			peer.handshake_done = true;
+			appendFramed(peer.send_buffer, Net::encodeHelloOk(peer.id));
+			continue;
+		}
+
+		if (!is_host && !has_local_id) {
+			// Expect the host's first reply to be HELLO_OK (accepted) or REFUSED (rejected).
+			uint8_t type = Net::peekMessageType(frames[i]);
+			if (type == Net::MSG_HELLO_OK) {
+				Net::MsgHelloOk ok_msg;
+				if (Net::decodeHelloOk(frames[i], ok_msg)) {
+					local_player_id = ok_msg.assigned_id;
+					has_local_id = true;
+				}
+				else {
+					peer.alive = false;
+				}
+			}
+			else if (type == Net::MSG_REFUSED) {
+				Net::MsgRefused refused;
+				if (Net::decodeRefused(frames[i], refused))
+					last_refusal_key = refused.message_key;
+				peer.alive = false;
+			}
+			else {
+				peer.alive = false; // protocol violation: expected a handshake reply first
+			}
+			continue;
+		}
+
+		inbound.push_back(std::make_pair(peer.id, frames[i]));
 	}
 
-	if (!peer.alive)
-		return;
-
+	// Flush send_buffer even if this same call just set alive=false (e.g. a REFUSED frame queued
+	// above, right before refusing the peer) -- the socket is still open until update() removes it
+	// at the end of this tick, and a small refusal frame virtually always clears in one write() on
+	// a LAN/loopback socket. This is best-effort, not guaranteed: if the write partially blocks, the
+	// remaining bytes never get a second tick to go out, since a !alive peer is removed before
+	// pumpPeer() runs again. Attempting send() on an already-broken socket (alive went false because
+	// of a real recv() error above) is harmless -- it fails immediately and re-sets alive=false, a
+	// no-op.
 	if (!peer.send_buffer.empty()) {
 		int n = static_cast<int>(send(peer.socket, peer.send_buffer.data(), static_cast<int>(peer.send_buffer.size()), 0));
 		if (n > 0)

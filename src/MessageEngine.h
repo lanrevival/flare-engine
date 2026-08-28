@@ -32,6 +32,21 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 #include "CommonIncludes.h"
 
+/**
+ * One typed argument for MessageEngine::getv(key, args) -- the network-safe alternative to the
+ * varargs getv() below. A network message can carry a key plus a vector of these (see
+ * src/net/NetProtocol.h's MsgSystemMessage), which true C varargs cannot be reconstructed from
+ * generically. Only int and string are modelled because those are the only conversions
+ * (%d/%u and %s) this codebase's message catalog actually uses.
+ */
+struct MessageArg {
+	enum Type { ARG_INT, ARG_STR } type;
+	int i;
+	std::string s;
+	explicit MessageArg(int _i) : type(ARG_INT), i(_i), s("") {}
+	explicit MessageArg(const std::string& _s) : type(ARG_STR), i(0), s(_s) {}
+};
+
 class MessageEngine {
 
 private:
@@ -42,6 +57,16 @@ public:
 	~MessageEngine();
 	std::string get(const std::string& key);
 	std::string getv(const std::string key, ...);
+	std::string getv(const std::string& key, const std::vector<MessageArg>& args);
+
+	// Substitutes %d/%u/%s tokens in 'format' from 'args', in order, without touching a
+	// MessageEngine instance -- 'format' is already the looked-up (and already localized) string.
+	// Static and side-effect-free so it's testable without constructing a real MessageEngine (which
+	// needs mods/settings/filesystem access to load .po catalogs). Fewer args than tokens: the
+	// unmatched trailing token(s) are left literally in the output. Extra args: ignored. Never
+	// reads past args.size() -- this exists specifically so malformed/short arg lists from the
+	// network can't cause a crash.
+	static std::string substitute(const std::string& format, const std::vector<MessageArg>& args);
 };
 
 #endif

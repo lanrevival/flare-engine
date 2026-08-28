@@ -211,6 +211,7 @@ Set (FLARE_HEADERS
 	./src/MessageEngine.h
 	./src/ModManager.h
 	./src/net/NetPlatform.h
+	./src/net/NetProtocol.h
 	./src/net/NetworkManager.h
 	./src/NPC.h
 	./src/NullFontEngine.h

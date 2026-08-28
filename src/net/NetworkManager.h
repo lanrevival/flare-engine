@@ -28,9 +28,10 @@ FLARE.  If not, see http://www.gnu.org/licenses/
  * documented flaw ("source peer is not tracked at this layer"); see this plan's "Sequencing note"
  * for why this is a fresh implementation rather than a literal port.
  *
- * Nothing calls this yet. P3.3 wires it into the server tick loop; P3.2 replaces the placeholder
- * HELLO/REFUSED frames used here with a real versioned schema. See
- * plans/phase3/P3.1-transport-and-peer-identity.md.
+ * Nothing calls this yet. P3.3 wires it into the server tick loop. The handshake speaks the
+ * versioned binary schema defined in NetProtocol.h (P3.2) -- protocol version, engine version,
+ * and a mod-list hash are checked on connect, and a client learns its own server-assigned
+ * PlayerID via HELLO_OK. See plans/phase3/P3.2-binary-protocol-with-versioning.md.
  */
 
 #ifndef NET_NETWORKMANAGER_H
@@ -53,14 +54,18 @@ public:
 	NetworkManager();
 	~NetworkManager();
 
-	// Starts listening on 'port' for up to 'max_players' peers. Returns false if the socket could
-	// not be created, made non-blocking, bound, or put into listen().
-	bool startHost(unsigned short port, unsigned int max_players);
+	// Starts listening on 'port' for up to 'max_players' peers. 'required_mod_hash' is this host's
+	// own Net::hashModList() result, checked against every incoming HELLO -- protocol version and
+	// engine version are checked too, but against this binary's own compiled-in constants
+	// (Net::PROTOCOL_VERSION, VersionInfo::ENGINE), not a parameter. Returns false if the socket
+	// could not be created, made non-blocking, bound, or put into listen().
+	bool startHost(unsigned short port, unsigned int max_players, uint32_t required_mod_hash);
 
 	// Connects (non-blocking) to a host. Completion is confirmed by the first update() call, not
 	// by this call returning -- false here only means the connect() attempt itself could not be
-	// started (socket creation failed, address didn't resolve).
-	bool startClient(const std::string& host_addr, unsigned short port, const std::string& display_name);
+	// started (socket creation failed, address didn't resolve). 'local_mod_hash' is this client's
+	// own Net::hashModList() result, sent to the host as part of the HELLO handshake.
+	bool startClient(const std::string& host_addr, unsigned short port, const std::string& display_name, uint32_t local_mod_hash);
 
 	// Closes every peer socket and the listen socket (if hosting), releases the platform socket
 	// layer. Safe to call more than once.
@@ -88,6 +93,16 @@ public:
 	size_t peerCount() const { return peers.size(); }
 	std::string displayNameFor(PlayerID id) const;
 
+	// Client only. True once this client's HELLO has been accepted and HELLO_OK decoded -- P3.1
+	// left client-side PlayerID genuinely unknowable (peer.id was hardcoded to 0 and documented
+	// "meaningless client-side"); this is what closes that gap.
+	bool hasLocalPlayerID() const { return has_local_id; }
+	PlayerID localPlayerID() const { return local_player_id; }
+
+	// Client only. Empty until a REFUSED frame has been decoded; holds the message key from that
+	// frame afterward (never cleared -- a NetworkManager is not reused across connection attempts).
+	std::string lastRefusalMessage() const { return last_refusal_key; }
+
 private:
 	struct Peer {
 		NetSocket socket;
@@ -98,15 +113,24 @@ private:
 		bool connecting; // client mode only: true while the non-blocking connect() is unresolved
 		bool alive;      // false once a close/error/protocol-violation has been observed; removed
 		                 // at the end of the update() that set this, never removed mid-tick
+		bool handshake_done; // host mode only: true once this peer's HELLO has been accepted.
+		                     // NOT inferred from display_name being non-empty -- an intentionally
+		                     // empty display name must not be mistaken for "handshake pending".
 	};
 
 	bool is_host;
 	bool started;
 	NetSocket listen_socket;
 	unsigned int max_players_cap;
+	uint32_t required_mod_hash; // host only: what an incoming HELLO's mod_hash must equal
 	std::vector<Peer> peers;
 	std::deque<std::pair<PlayerID, std::string> > inbound;
 	PlayerID next_id;
+	bool has_local_id;         // client only
+	PlayerID local_player_id;  // client only, valid iff has_local_id
+	std::string last_refusal_key; // client only
+	uint32_t local_mod_hash_pending; // client only: startClient()'s mod_hash, held for the deferred
+	                                  // HELLO send once a pending connect() resolves (pumpPeer())
 
 	void acceptLoop();
 	void pumpPeer(Peer& peer);

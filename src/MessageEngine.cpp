@@ -130,6 +130,57 @@ std::string MessageEngine::getv(const std::string key, ...) {
 	return std::string(buffer);
 }
 
+std::string MessageEngine::getv(const std::string& key, const std::vector<MessageArg>& args) {
+	std::string message = messages[key];
+	if (message == "") message = key;
+	return unescape(MessageEngine::substitute(message, args));
+}
+
+std::string MessageEngine::substitute(const std::string& format, const std::vector<MessageArg>& args) {
+	std::string out;
+	out.reserve(format.size());
+	size_t arg_index = 0;
+
+	for (size_t i = 0; i < format.size(); ++i) {
+		if (format[i] != '%' || i + 1 >= format.size()) {
+			out += format[i];
+			continue;
+		}
+
+		char conv = format[i + 1];
+		if (conv == '%') {
+			// Not a substitution token -- literal percent, handled the same way unescape() already
+			// handles "%%" elsewhere in this class. Left as-is here; unescape() runs afterward.
+			out += format[i];
+			out += format[i + 1];
+			++i;
+			continue;
+		}
+		if ((conv != 'd' && conv != 'u' && conv != 's') || arg_index >= args.size()) {
+			// Unknown specifier, or no more args to substitute -- leave the token literally in the
+			// output rather than guessing or crashing. See this method's header comment.
+			out += format[i];
+			continue;
+		}
+
+		const MessageArg& arg = args[arg_index++];
+		char buf[16];
+		if (conv == 's' && arg.type == MessageArg::ARG_STR) {
+			out += arg.s;
+		}
+		else {
+			// Either a numeric conversion, or an %s given an int arg (and vice versa) -- render
+			// through the argument's actual type rather than trusting the format string, so a
+			// type/format mismatch degrades to a readable number instead of undefined behaviour.
+			snprintf(buf, sizeof(buf), "%d", (arg.type == MessageArg::ARG_INT) ? arg.i : 0);
+			out += buf;
+		}
+		++i; // consume the conversion character
+	}
+
+	return out;
+}
+
 // unescape c formatted string
 std::string MessageEngine::unescape(const std::string& _val) {
 	std::string val = _val;
