@@ -1324,6 +1324,10 @@ GameStatePlay::~GameStatePlay() {
 	delete quests;
 	delete npcs;
 	delete hazards;
+	// D26 (P2.5 step 5): playerm->remove(0) below expires any in-flight hazard the local player
+	// owns, so hazards must already read as safely-NULL here rather than dangling from the delete
+	// above -- see main_server.cpp::serverCleanup()'s matching comment.
+	hazards = NULL;
 	delete entitym;
 	delete mapr;
 	delete menu;

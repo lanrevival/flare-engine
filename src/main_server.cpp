@@ -1477,6 +1477,12 @@ static void serverCleanup() {
 	delete server_quests;
 	delete npcs;
 	delete hazards;
+	// D26 (P2.5 step 5): PlayerManager::remove(), called by the loop right below, expires any
+	// in-flight hazard owned by the departing player -- so hazards must already be a safe-to-check
+	// NULL here, not a pointer dangling from the delete above. Every other global this function
+	// deletes gets the same treatment further down; this one was missing it, harmlessly until
+	// remove() started reading it.
+	hazards = NULL;
 	delete entitym;
 	while (!playerm->players.empty())
 		playerm->remove(playerm->players.back()->id);

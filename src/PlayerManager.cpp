@@ -19,8 +19,11 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 #include "ActionBarState.h"
 #include "Avatar.h"
+#include "Hazard.h"
+#include "HazardManager.h"
 #include "PlayerInventory.h"
 #include "PowerBonusState.h"
+#include "SharedGameResources.h"
 #include "StatBlock.h"
 #include "Utils.h"
 
@@ -93,6 +96,28 @@ void PlayerManager::remove(PlayerID id) {
 	size_t i = indexOf(id);
 	if (i == players.size())
 		return;
+
+	// D26: sever every raw back-reference into this player's StatBlock before freeing it.
+	// Hazard::src_stats is dereferenced unconditionally every tick (Hazard.cpp), and
+	// HazardManager.cpp re-fires chain powers using it as the caster on expire/wall-hit -- a
+	// hazard left to age out naturally would still be carrying a dangling pointer by then, so
+	// these are deleted outright rather than merely marked to expire. D26 already calls this
+	// acceptable ("a departing player's fireball vanishing is unobjectionable").
+	StatBlock* victim_stats = &players[i]->stats;
+	if (hazards) {
+		for (size_t hi = hazards->h.size(); hi > 0; --hi) {
+			if (hazards->h[hi - 1]->src_stats == victim_stats) {
+				delete hazards->h[hi - 1];
+				hazards->h.erase(hazards->h.begin() + static_cast<std::vector<Hazard*>::difference_type>(hi - 1));
+			}
+		}
+	}
+
+	// Same decision (D26) for summons: removeSummons() already exists for this exact shape of
+	// problem (StatBlock.cpp, used today when a summon power is swapped out) -- recursively
+	// kills every summon this player owns and clears their StatBlock::summoner back-reference,
+	// rather than inventing a second orphaning path.
+	victim_stats->removeSummons();
 
 	delete players[i];
 	delete inventories[i];

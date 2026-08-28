@@ -63,7 +63,13 @@ public:
 	PlayerID create(PlayerID id);
 
 	/** Frees all four objects for this id and removes them from the parallel arrays. A remove()
-	 * for an id not present is a no-op. */
+	 * for an id not present is a no-op.
+	 *
+	 * D26 (plans/phase2/P2.5-real-remote-players.md step 5): before freeing, this also deletes
+	 * any in-flight Hazard this player owns (Hazard::src_stats is dereferenced unconditionally
+	 * every tick) and recursively kills+orphans this player's summons via
+	 * StatBlock::removeSummons(), so nothing is left holding a raw pointer into the Avatar being
+	 * freed below. */
 	void remove(PlayerID id);
 
 	Avatar*          get(PlayerID id);
