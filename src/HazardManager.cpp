@@ -44,10 +44,24 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 HazardManager::HazardManager()
 	: last_enemy(NULL)
+	, dump_damage_events(false)
+	, dump_tick(0)
 {
 }
 
+/**
+ * P2.4 step 0/6 (--dump-damage-events, AC6). source/dest are each 'hero', 'ally' or 'enemy' --
+ * printed as "src->dst" specifically so a friendly-fire hit between two players greps as the
+ * literal substring 'hero->hero'.
+ */
+static const char* damageEventLabel(const StatBlock& stats) {
+	if (stats.hero) return "hero";
+	if (stats.hero_ally) return "ally";
+	return "enemy";
+}
+
 void HazardManager::logic() {
+	dump_tick++;
 
 	// remove all hazards with lifespan 0.  Most hazards still display their last frame.
 	for (size_t i=h.size(); i>0; i--) {
@@ -129,9 +143,31 @@ void HazardManager::logic() {
 						if (!hazard->hasEntity(e)) {
 							// hit!
 							hazard->addEntity(e);
-							hitEntity(hindex, e->takeHit(*hazard));
+							bool hit = e->takeHit(*hazard);
+							hitEntity(hindex, hit);
 							if (!hazard->power->beacon) {
 								last_enemy = e;
+							}
+
+							if (hit) {
+								if (dump_damage_events) {
+									printf("tick=%lu %s->%s dmg=hit\n", dump_tick,
+									       damageEventLabel(*hazard->src_stats), damageEventLabel(e->stats));
+								}
+
+								// P2.4 step 1: record threat for chooseAggroTarget() (EntityBehavior.cpp)
+								// whenever a specific player's own hazard lands -- ally/summon-dealt
+								// damage isn't attributed to a player id here, kept simple per the
+								// plan's own "keep it simple" guidance rather than walking summoner
+								// chains to find an owning player.
+								if (hazard->source_type == Power::SOURCE_TYPE_HERO) {
+									for (size_t pi = 0; pi < playerm->players.size(); ++pi) {
+										if (&playerm->players[pi]->stats == hazard->src_stats) {
+											e->stats.registerThreat(playerm->players[pi]->id);
+											break;
+										}
+									}
+								}
 							}
 						}
 					}
@@ -150,7 +186,19 @@ void HazardManager::logic() {
 							if (!hazard->hasEntity(player)) {
 								// hit!
 								hazard->addEntity(player);
-								hitEntity(hindex, player->takeHit(*hazard));
+								bool hit = player->takeHit(*hazard);
+								hitEntity(hindex, hit);
+
+								// This loop only ever runs for enemy/neutral-sourced hazards (the
+								// guard above), so 'src' here is never 'hero' or 'ally' -- a
+								// friendly-fire hit between two players is architecturally
+								// impossible today (see AC6/step 6): a hero/ally-sourced hazard
+								// only ever checks entitym->entities, never playerm->players, and
+								// this is the only loop that checks playerm->players at all.
+								if (hit && dump_damage_events) {
+									printf("tick=%lu %s->%s dmg=hit\n", dump_tick,
+									       damageEventLabel(*hazard->src_stats), damageEventLabel(player->stats));
+								}
 							}
 						}
 					}
@@ -244,3 +292,5 @@ HazardManager::~HazardManager() {
 	// h.clear(); not needed in destructor
 	last_enemy = NULL;
 }
+
+

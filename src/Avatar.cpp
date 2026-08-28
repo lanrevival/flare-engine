@@ -55,6 +55,10 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "UtilsMath.h"
 #include "UtilsParsing.h"
 
+static bool usePerPlayerCollision() {
+	return playerm && playerm->players.size() > 1;
+}
+
 Avatar::Avatar()
 	: Entity()
 	, mm_key(settings->mouse_move_swap ? Input::MAIN2 : Input::MAIN1)
@@ -467,7 +471,10 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 	}
 
 	// clear current space to allow correct movement
-	wmap->collider.unblock(stats.pos.x, stats.pos.y);
+	if (usePerPlayerCollision())
+		wmap->collider.unblockPlayer(stats.pos.x, stats.pos.y, id);
+	else
+		wmap->collider.unblock(stats.pos.x, stats.pos.y);
 
 	// turn on all passive powers
 	if ((stats.hp > 0 || stats.effects.triggered_death) && !respawn && !transform_triggered)
@@ -822,7 +829,10 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 					if (activeAnimation->isActiveFrame() && !stats.hold_state) {
 						// some powers check if the caster is blocking a tile
 						// so we block the player tile prematurely here
-						wmap->collider.block(stats.pos.x, stats.pos.y, !MapCollision::IS_ALLY);
+						if (usePerPlayerCollision())
+							wmap->collider.blockPlayer(stats.pos.x, stats.pos.y, id);
+						else
+							wmap->collider.block(stats.pos.x, stats.pos.y, !MapCollision::IS_ALLY);
 
 						powers->activate(current_power, &stats, stats.pos, act_target);
 						power_cooldown_timers[current_power]->setDuration(power->cooldown);
@@ -969,7 +979,10 @@ void Avatar::logic(const PlayerCommand& cmd, PlayerInputLocks& locks) {
 	}
 
 	// make the current square solid
-	wmap->collider.block(stats.pos.x, stats.pos.y, !MapCollision::IS_ALLY);
+	if (usePerPlayerCollision())
+		wmap->collider.blockPlayer(stats.pos.x, stats.pos.y, id);
+	else
+		wmap->collider.block(stats.pos.x, stats.pos.y, !MapCollision::IS_ALLY);
 
 	if (stats.state_timer.isEnd() && stats.hold_state)
 		stats.hold_state = false;
@@ -1096,7 +1109,10 @@ void Avatar::untransform(PlayerInputLocks& locks) {
 	locks.unlockActionBar();
 
 	// For timed transformations, move the player to the last valid tile when untransforming
-	wmap->collider.unblock(stats.pos.x, stats.pos.y);
+	if (usePerPlayerCollision())
+		wmap->collider.unblockPlayer(stats.pos.x, stats.pos.y, id);
+	else
+		wmap->collider.unblock(stats.pos.x, stats.pos.y);
 	if (!wmap->collider.isValidPosition(stats.pos.x, stats.pos.y, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_HERO)) {
 		logMsg(msg->get("Transformation expired. You have been moved back to a safe place."), MSG_NORMAL);
 		if (transform_map != wmap->getFilename()) {
@@ -1111,7 +1127,10 @@ void Avatar::untransform(PlayerInputLocks& locks) {
 			stats.pos.y = floorf(transform_pos.y) + 0.5f;
 		}
 	}
-	wmap->collider.block(stats.pos.x, stats.pos.y, !MapCollision::IS_ALLY);
+	if (usePerPlayerCollision())
+		wmap->collider.blockPlayer(stats.pos.x, stats.pos.y, id);
+	else
+		wmap->collider.block(stats.pos.x, stats.pos.y, !MapCollision::IS_ALLY);
 
 	stats.transformed = false;
 	transform_triggered = true;

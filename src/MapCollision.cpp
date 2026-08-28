@@ -51,6 +51,8 @@ MapCollision::MapCollision()
 	, raycast_resolution(eset->misc.raycast_resolution)
 	, raycast_resolution_recip(1.f / eset->misc.raycast_resolution)
 	, map_size(Point())
+	, player_occupancy()
+	, player_positions()
 {
 	colmap.resize(1);
 	colmap[0].resize(1);
@@ -58,10 +60,13 @@ MapCollision::MapCollision()
 
 void MapCollision::setMap(const Map_Layer& _colmap, unsigned short w, unsigned short h) {
 	has_empty_tile = false;
+	player_positions.clear();
 
 	colmap.resize(w);
+	player_occupancy.resize(w);
 	for (unsigned i=0; i<w; ++i) {
 		colmap[i].resize(h);
+		player_occupancy[i].assign(h, 0);
 	}
 	for (unsigned i=0; i<w; i++)
 		for (unsigned j=0; j<h; j++) {
@@ -240,6 +245,12 @@ bool MapCollision::isValidTile(const int& tile_x, const int& tile_y, int movemen
 	// outside the map isn't valid
 	if (isTileOutsideMap(tile_x,tile_y)) return false;
 
+	// Player occupancy is transparent to other players, including when the first player's legacy
+	// BLOCKS_ENTITIES marker is still present. It remains a blocker for ALL_ENTITIES, so enemies
+	// cannot walk through a player.
+	if (collide_type == COLLIDE_TYPE_HERO && player_occupancy[tile_x][tile_y] > 0)
+		return true;
+
 	if (collide_type == COLLIDE_TYPE_ALL_ENTITIES) {
 		if (colmap[tile_x][tile_y] == BLOCKS_ENEMIES)
 			return false;
@@ -248,6 +259,8 @@ bool MapCollision::isValidTile(const int& tile_x, const int& tile_y, int movemen
 	}
 	else if (collide_type == COLLIDE_TYPE_HERO) {
 		if (colmap[tile_x][tile_y] == BLOCKS_ENEMIES && !eset->misc.enable_ally_collision)
+			return true;
+		if (colmap[tile_x][tile_y] == BLOCKS_PLAYER)
 			return true;
 	}
 
@@ -264,7 +277,7 @@ bool MapCollision::isValidTile(const int& tile_x, const int& tile_y, int movemen
 		return true;
 
 	// normal creatures can only be in empty spaces
-	return (colmap[tile_x][tile_y] == BLOCKS_NONE) || (collide_type == COLLIDE_TYPE_HAZARD && (colmap[tile_x][tile_y] == BLOCKS_ENEMIES || colmap[tile_x][tile_y] == BLOCKS_ENTITIES));
+	return (colmap[tile_x][tile_y] == BLOCKS_NONE) || (collide_type == COLLIDE_TYPE_HAZARD && (colmap[tile_x][tile_y] == BLOCKS_ENEMIES || colmap[tile_x][tile_y] == BLOCKS_ENTITIES || colmap[tile_x][tile_y] == BLOCKS_PLAYER));
 }
 
 /**
@@ -341,14 +354,22 @@ bool MapCollision::lineOfMovement(const float& x1, const float& y1, const float&
 	int tile_y = int(y2);
 	bool target_blocks = false;
 	int target_blocks_type = colmap[tile_x][tile_y];
-	if (colmap[tile_x][tile_y] == BLOCKS_ENTITIES || colmap[tile_x][tile_y] == BLOCKS_ENEMIES) {
+	if (colmap[tile_x][tile_y] == BLOCKS_ENTITIES || colmap[tile_x][tile_y] == BLOCKS_ENEMIES || colmap[tile_x][tile_y] == BLOCKS_PLAYER) {
 		target_blocks = true;
-		unblock(x2,y2);
+		if (colmap[tile_x][tile_y] == BLOCKS_PLAYER)
+			colmap[tile_x][tile_y] = BLOCKS_NONE;
+		else
+			unblock(x2,y2);
 	}
 
 	bool has_movement = lineCheck(x1, y1, x2, y2, CHECK_MOVEMENT, movement_type);
 
-	if (target_blocks) block(x2,y2, target_blocks_type == BLOCKS_ENEMIES);
+	if (target_blocks) {
+		if (target_blocks_type == BLOCKS_PLAYER)
+			restorePlayerBlock(tile_x, tile_y);
+		else
+			block(x2,y2, target_blocks_type == BLOCKS_ENEMIES);
+	}
 	return has_movement;
 
 }
@@ -406,9 +427,12 @@ bool MapCollision::computePath(const FPoint& start_pos, const FPoint& end_pos, s
 	// if the target square has an entity, temporarily clear it to compute the path
 	bool target_blocks = false;
 	int target_blocks_type = colmap[end.x][end.y];
-	if (colmap[end.x][end.y] == BLOCKS_ENTITIES || colmap[end.x][end.y] == BLOCKS_ENEMIES) {
+	if (colmap[end.x][end.y] == BLOCKS_ENTITIES || colmap[end.x][end.y] == BLOCKS_ENEMIES || colmap[end.x][end.y] == BLOCKS_PLAYER) {
 		target_blocks = true;
-		unblock(end_pos.x, end_pos.y);
+		if (colmap[end.x][end.y] == BLOCKS_PLAYER)
+			colmap[end.x][end.y] = BLOCKS_NONE;
+		else
+			unblock(end_pos.x, end_pos.y);
 	}
 
 	Point current = start;
@@ -493,7 +517,12 @@ bool MapCollision::computePath(const FPoint& start_pos, const FPoint& end_pos, s
 		}
 	}
 	// reblock target if needed
-	if (target_blocks) block(end_pos.x, end_pos.y, target_blocks_type == BLOCKS_ENEMIES);
+	if (target_blocks) {
+		if (target_blocks_type == BLOCKS_PLAYER)
+			restorePlayerBlock(end.x, end.y);
+		else
+			block(end_pos.x, end_pos.y, target_blocks_type == BLOCKS_ENEMIES);
+	}
 
 	return !path.empty();
 }
@@ -523,8 +552,77 @@ void MapCollision::unblock(const float& map_x, const float& map_y) {
 
 	if (colmap[tile_x][tile_y] == BLOCKS_ENTITIES || colmap[tile_x][tile_y] == BLOCKS_ENEMIES) {
 		colmap[tile_x][tile_y] = BLOCKS_NONE;
+		restorePlayerBlock(tile_x, tile_y);
 	}
 
+}
+
+void MapCollision::restorePlayerBlock(const int& tile_x, const int& tile_y) {
+	if (isTileOutsideMap(tile_x, tile_y))
+		return;
+
+	if (player_occupancy[tile_x][tile_y] > 0 && colmap[tile_x][tile_y] == BLOCKS_NONE) {
+		bool player_zero_present = false;
+		for (std::map<PlayerID, Point>::const_iterator it = player_positions.begin(); it != player_positions.end(); ++it) {
+			if (it->first == 0 && it->second.x == tile_x && it->second.y == tile_y) {
+				player_zero_present = true;
+				break;
+			}
+		}
+		colmap[tile_x][tile_y] = player_zero_present ? BLOCKS_ENTITIES : BLOCKS_PLAYER;
+	}
+}
+
+void MapCollision::blockPlayer(const float& map_x, const float& map_y, PlayerID player_id) {
+	const int tile_x = int(map_x);
+	const int tile_y = int(map_y);
+
+	std::map<PlayerID, Point>::iterator old = player_positions.find(player_id);
+	if (old != player_positions.end()) {
+		if (old->second.x == tile_x && old->second.y == tile_y)
+			return;
+
+		if (!isTileOutsideMap(old->second.x, old->second.y) && player_occupancy[old->second.x][old->second.y] > 0) {
+			player_occupancy[old->second.x][old->second.y]--;
+			if (player_occupancy[old->second.x][old->second.y] == 0 && colmap[old->second.x][old->second.y] == BLOCKS_PLAYER)
+				colmap[old->second.x][old->second.y] = BLOCKS_NONE;
+		}
+		player_positions.erase(old);
+	}
+
+	if (isTileOutsideMap(tile_x, tile_y))
+		return;
+
+	// A player may share another player's tile, and may pass through an ally when ally collision is
+	// disabled. Walls and enemy/entity blockers remain solid.
+	if (colmap[tile_x][tile_y] == BLOCKS_ENTITIES && player_occupancy[tile_x][tile_y] == 0)
+		return;
+	if (colmap[tile_x][tile_y] == BLOCKS_ENEMIES && eset->misc.enable_ally_collision)
+		return;
+	if (colmap[tile_x][tile_y] != BLOCKS_NONE && colmap[tile_x][tile_y] != BLOCKS_ENEMIES && colmap[tile_x][tile_y] != BLOCKS_PLAYER)
+		return;
+
+	if (player_occupancy[tile_x][tile_y] == 0 && colmap[tile_x][tile_y] == BLOCKS_NONE)
+		colmap[tile_x][tile_y] = (player_id == 0 ? BLOCKS_ENTITIES : BLOCKS_PLAYER);
+	player_occupancy[tile_x][tile_y]++;
+	player_positions[player_id] = Point(tile_x, tile_y);
+}
+
+void MapCollision::unblockPlayer(const float& map_x, const float& map_y, PlayerID player_id) {
+	(void)map_x;
+	(void)map_y;
+	std::map<PlayerID, Point>::iterator it = player_positions.find(player_id);
+	if (it == player_positions.end())
+		return;
+
+	const Point old = it->second;
+	player_positions.erase(it);
+	if (isTileOutsideMap(old.x, old.y) || player_occupancy[old.x][old.y] == 0)
+		return;
+
+	player_occupancy[old.x][old.y]--;
+	if (player_occupancy[old.x][old.y] == 0 && (colmap[old.x][old.y] == BLOCKS_PLAYER || colmap[old.x][old.y] == BLOCKS_ENTITIES))
+		colmap[old.x][old.y] = BLOCKS_NONE;
 }
 
 /**

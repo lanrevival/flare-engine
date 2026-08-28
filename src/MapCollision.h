@@ -27,7 +27,10 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #define MAP_COLLISION_H
 
 #include "CommonIncludes.h"
+#include "PlayerManager.h"
 #include "Utils.h"
+
+#include <map>
 
 typedef std::vector< std::vector<unsigned short> > Map_Layer;
 
@@ -53,6 +56,7 @@ private:
 		float &x, float &y, float step_x, float step_y, int movement_type, int collide_type);
 
 	bool isValidTile(const int& x, const int& y, int movement_type, int collide_type) const;
+	void restorePlayerBlock(const int& tile_x, const int& tile_y);
 
 	FPoint collisionToMap(const Point& p);
 
@@ -93,7 +97,8 @@ public:
 		MAP_ONLY = 5,
 		MAP_ONLY_ALT = 6,
 		BLOCKS_ENTITIES = 7, // hero or enemies are blocking this tile, so any other entity is blocked
-		BLOCKS_ENEMIES = 8  // an ally is standing on that tile, so the hero could pass if ENABLE_ALLY_COLLISION is false
+		BLOCKS_ENEMIES = 8, // an ally is standing on that tile, so the hero could pass if ENABLE_ALLY_COLLISION is false
+		BLOCKS_PLAYER = 9   // one or more players occupy this tile; players pass through it, enemies do not
 	};
 
 	MapCollision();
@@ -116,6 +121,8 @@ public:
 
 	void block(const float& map_x, const float& map_y, bool is_ally);
 	void unblock(const float& map_x, const float& map_y);
+	void blockPlayer(const float& map_x, const float& map_y, PlayerID player_id);
+	void unblockPlayer(const float& map_x, const float& map_y, PlayerID player_id);
 
 	FPoint getRandomNeighbor(const Point& target, int range, int movement_type, int collide_type);
 
@@ -127,6 +134,12 @@ public:
 
 	Map_Layer colmap;
 	Point map_size;
+
+	// Player occupancy is kept separately from colmap because several players may share a tile.
+	// The map itself only stores BLOCKS_PLAYER while the tile has no other entity blocker; this
+	// makes generic entity block/unblock operations reversible without losing player occupants.
+	std::vector< std::vector<unsigned short> > player_occupancy;
+	std::map<PlayerID, Point> player_positions;
 };
 
 #endif

@@ -46,6 +46,15 @@ public:
 
 	std::vector<Hazard*> h;
 	Entity* last_enemy;
+
+	// P2.4 step 0/6 (--dump-damage-events, AC6). Off by default and cost-free when off: the
+	// print is skipped entirely, and dump_tick is otherwise unused. Not a real simulation tick
+	// number (this class isn't handed one) -- just a per-call counter so printed lines have a
+	// stable, monotonically increasing "tick=" label to read/diff, matching --dump-ai-targets'
+	// line shape without needing to thread a tick argument through serverLogic()'s signature.
+	bool dump_damage_events;
+	unsigned long dump_tick;
 };
 
 #endif
+
