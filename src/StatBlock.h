@@ -290,6 +290,41 @@ public:
 	Timer cooldown_los;
 	float resting_hp_regen_seconds;
 
+	// P2.4 step 1: minimal per-player threat bookkeeping backing EntityBehavior's scored aggro
+	// selection (chooseAggroTarget()) -- distance alone always picked the geometrically nearest
+	// player; this lets "who has been hitting me, and how recently" pull the target away from
+	// that when appropriate. Fixed-size, indexed directly by PlayerID rather than a map: D3 caps
+	// a party at 8 players, so a dense array is both simpler and cheaper for something read every
+	// tick, for every hostile entity, against every connected player.
+	//
+	// threat_timer[p] is reset to THREAT_WINDOW_TICKS every time player p lands a hit on this
+	// entity (registerThreat(), called from HazardManager::logic() right where a hit already
+	// resolves) and counts down every tick after -- its current value IS the recency score,
+	// decaying to 0 on its own so old threat can never linger forever. threat_points[p] counts
+	// how many hits landed within that same window (the "taunt" term: more recent hits = more
+	// threat) and is cleared the moment threat_timer[p] runs out.
+	//
+	// No existing taunt power/flag exists anywhere in this codebase to hook into instead (checked
+	// -- see P2.4's plan doc); this reuses "damage already dealt" as the only threat signal there
+	// is, rather than inventing new power content out of scope for this plan.
+	static const size_t THREAT_TABLE_SIZE = 8;
+	// How long a landed hit keeps counting toward recency/threat before decaying away entirely --
+	// shared with EntityBehavior.cpp's scoring weights (AGGRO_RECENCY_WEIGHT is defined in terms
+	// of this), so it lives here as one named constant rather than a magic number in two files.
+	// 60 is Settings::SIM_TICK_HZ, duplicated rather than referenced: SIM_TICK_HZ is declared
+	// `static const` without an initializer (defined in Settings.cpp), so it isn't usable in an
+	// in-class constant expression here, and this header has no other reason to depend on
+	// Settings.h. 5 seconds.
+	static const unsigned THREAT_WINDOW_TICKS = 60 * 5;
+	Timer threat_timer[THREAT_TABLE_SIZE];
+	int threat_points[THREAT_TABLE_SIZE];
+
+	/** Records that the player at this index (0..THREAT_TABLE_SIZE-1, a PlayerID) just landed a
+	 * hit on this entity. Out-of-range indices are ignored rather than asserted -- D3's 8-player
+	 * cap is enforced elsewhere (PlayerManager/main_server.cpp); this stays defensive since it is
+	 * reached from hit resolution, not construction. */
+	void registerThreat(size_t player_index);
+
 	std::vector<EventComponent> loot_table;
 	Point loot_count;
 
@@ -371,4 +406,6 @@ public:
 };
 
 #endif
+
+
 

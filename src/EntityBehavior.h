@@ -43,9 +43,27 @@ private:
 	static const float ALLY_FOLLOW_DISTANCE_STOP;
 	static const float ALLY_TELEPORT_DISTANCE;
 
+	// P2.4 step 1 -- chooseAggroTarget()'s scoring weights. All in "distance-equivalent tiles" so
+	// they can be added straight onto -distance. See EntityBehavior.cpp for the reasoning behind
+	// each: LOS is a near-dominant preference (AC5b), recency/threat matter within a visibility
+	// tier, and hysteresis (deliberately smaller than the LOS gap, so a target going out of sight
+	// doesn't get "stuck") keeps an entity from flipping between two near-equidistant players.
+	static const float AGGRO_LOS_BONUS;
+	static const float AGGRO_RECENCY_WEIGHT;
+	static const float AGGRO_THREAT_POINTS_WEIGHT;
+	static const float AGGRO_HYSTERESIS_BONUS;
+
 	// logic steps
 	void doUpkeep();
 	void findTarget();
+	// P2.4 step 1. Scores every alive player as a candidate aggro target for a HOSTILE entity
+	// (distance + per-player threat/recency + hysteresis toward whoever is already the target),
+	// evaluating LOS per candidate before scoring rather than after picking one. Returns NULL if
+	// no player is alive. With exactly one player this always resolves to that player (or NULL),
+	// identical to the old nearest_alive_player-only read (AC1). See EntityBehavior.cpp for the
+	// scoring weights and the executor notes in plans/phase2/P2.4-n-hero-ai.md on why the
+	// hysteresis term exists at all (oscillating aggro between two near-equidistant players).
+	Avatar* chooseAggroTarget();
 	void checkPower();
 	void checkMove();
 	void checkMoveStateStance();
@@ -100,6 +118,21 @@ protected:
 	// AC-REPLAY holds; with several, targeting/ally logic becomes per-entity-correct.
 	Avatar* nearest_player;
 	Avatar* nearest_alive_player;
+	// For hero allies, this is the connected player whose stats are their summoner. It falls back
+	// to nearest_player for legacy allies without an owner, preserving the single-player behavior.
+	Avatar* follow_player;
+
+	// P2.4 step 1: sticky aggro target across ticks, read/written only by chooseAggroTarget() --
+	// the hysteresis bonus goes to whichever candidate matches this id, so a target needs to
+	// score meaningfully higher elsewhere before this entity switches. -1 means "no current
+	// target" (never chosen one yet, or the previous one is no longer a valid candidate -- e.g.
+	// dead -- and simply stopped being iterated, no explicit clearing needed).
+	int aggro_target_id;
+	// Whether THAT target had line of sight at the moment it was chosen -- exposed for
+	// main_server.cpp's --dump-ai-targets (AC3/AC4/AC5b), which needs to report the AI's actual
+	// scored choice, not independently recompute nearestAliveTo() the way it did before scored
+	// aggro existed (that would silently stop matching what the entity really targets).
+	bool aggro_target_los;
 
 public:
 	explicit EntityBehavior(Entity *_e);
@@ -108,6 +141,12 @@ public:
 
 	std::vector<FPoint>& getPath() { return path; }
 	FPoint& getPursuePos() { return pursue_pos; };
+
+	// P2.4 step 1 -- see the member comments above. -1 = this entity currently has no player
+	// target (hero_ally, or no player is alive).
+	int getAggroTargetId() const { return aggro_target_id; }
+	bool getAggroTargetLos() const { return aggro_target_los; }
 };
 
 #endif
+

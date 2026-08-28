@@ -204,6 +204,13 @@ StatBlock::StatBlock()
 	, ai_debuff_power(NULL)
 	, ai_hit_power(NULL)
 {
+	// P2.4 step 1: threat_timer/threat_points are C arrays (see StatBlock.h), so they can't be
+	// given a non-default duration through the initializer list above -- set it here instead.
+	for (size_t i = 0; i < THREAT_TABLE_SIZE; ++i) {
+		threat_timer[i].setDuration(THREAT_WINDOW_TICKS);
+		threat_points[i] = 0;
+	}
+
 	primary.resize(eset->primary_stats.list.size(), 0);
 	primary_starting.resize(eset->primary_stats.list.size(), 0);
 	primary_additional.resize(eset->primary_stats.list.size(), 0);
@@ -872,6 +879,24 @@ void StatBlock::load(const std::string& filename) {
 }
 
 /**
+ * P2.4 step 1: see the threat_timer/threat_points comment in StatBlock.h.
+ */
+void StatBlock::registerThreat(size_t player_index) {
+	if (player_index >= THREAT_TABLE_SIZE)
+		return;
+
+	threat_timer[player_index].reset(Timer::BEGIN);
+
+	// Points are capped, not left to grow forever, so a very long unbroken fight against one
+	// player can't make their score dominate every other term by an unbounded margin -- keeps
+	// the scored comparison in EntityBehavior::chooseAggroTarget() from being decided by a runaway
+	// integer instead of the actual combat situation.
+	static const int THREAT_POINTS_CAP = 20;
+	if (threat_points[player_index] < THREAT_POINTS_CAP)
+		threat_points[player_index]++;
+}
+
+/**
  * Reduce temphp first, then hp
  */
 void StatBlock::takeDamage(float dmg, bool crit, int source_type) {
@@ -913,22 +938,24 @@ void StatBlock::takeDamage(float dmg, bool crit, int source_type) {
 				}
 
 				// reward XP; adjust for party exp if necessary
-				float xp_multiplier = 1;
+				float base_xp_multiplier = 1;
 				if (source_type == Power::SOURCE_TYPE_ALLY)
-					xp_multiplier = eset->misc.party_exp_percentage / 100.0f;
+					base_xp_multiplier = eset->misc.party_exp_percentage / 100.0f;
 
-				// Same "no killer identity tracked" gap as LootManager's checkEnemiesForLoot()/
-				// EntityManager's map-enemy spawn level (P2.2) -- nothing in this codebase
-				// records who actually killed an enemy, so the level-difference XP scaling below
-				// keeps the pre-P2.2 simplification of playerm->local(). camp->rewardXP() right
-				// below this also defaults to local() for the same reason. Real per-player XP
-				// attribution is P2.4/P5.1 territory (XP sharing/party-size rules), explicitly
-				// out of scope here.
-				Avatar* local = playerm->local();
-				if (local)
-					xp_multiplier *= xp_scaling->getMultiplier(this, &(local->stats));
-
-				camp->rewardXP(static_cast<float>(xp) * xp_multiplier, !CampaignManager::XP_SHOW_MSG);
+				// P2.4 step 3 (D20): XP is shared with the whole party -- every connected player
+				// gets it, no proximity check and no "did this player actually damage the enemy"
+				// check (D12 already keeps the party on one map, so distance is bounded; a radius
+				// check would only punish someone for looting a corner two rooms away). Each
+				// player's own XPScaling::getMultiplier() still applies, so a lower-level player
+				// in the party correctly earns more from the identical kill. With exactly one
+				// player this is one call to camp->rewardXP() for that one player -- the same
+				// call the old local()-only code made -- so single-player is unchanged (AC1).
+				// Level-difference scaling and party-size penalties are explicitly P5.1, not here.
+				for (size_t p = 0; p < playerm->players.size(); ++p) {
+					Avatar* member = playerm->players[p];
+					float xp_multiplier = base_xp_multiplier * xp_scaling->getMultiplier(this, &(member->stats));
+					camp->rewardXP(static_cast<float>(xp) * xp_multiplier, !CampaignManager::XP_SHOW_MSG, member);
+				}
 
 				// drop loot
 				loot->addEnemyLoot(this);
@@ -1076,6 +1103,16 @@ void StatBlock::applyEffects() {
 void StatBlock::logic() {
 	alive = !(hp <= 0 && !effects.triggered_death && !effects.revive);
 
+	// P2.4 step 1: decay per-player threat every tick, for every entity (players included --
+	// harmless and unread for them, and keeping this unconditional avoids a hero/enemy branch
+	// here for a handful of Timer::tick() calls). See the threat_timer/threat_points comment in
+	// StatBlock.h: once a player's recency timer runs out, their accumulated threat points are
+	// cleared with it, so old threat can never linger past the window.
+	for (size_t ti = 0; ti < THREAT_TABLE_SIZE; ++ti) {
+		if (threat_timer[ti].tick())
+			threat_points[ti] = 0;
+	}
+
 	// handle party buffs
 	if (entitym && powers) {
 		while (!party_buffs.empty()) {
@@ -1083,10 +1120,39 @@ void StatBlock::logic() {
 			party_buffs.pop();
 			Power *buff_power = powers->powers[power_index];
 
+			// P2.4 steps 2/4: a party-targeted power now reaches every OTHER connected player
+			// too, not just the caster's own summons -- checkPartyMembers() (EntityManager.cpp)
+			// already counts "more than one connected player" as a party even with no summons at
+			// all, so this is the other half of that: actually delivering the buff to them.
+			// hero() casts always broadcast to hero()s; hero() vs their own summons is handled by
+			// the entities loop just below, unchanged in shape.
+			if (hero && playerm) {
+				for (size_t p = 0; p < playerm->players.size(); ++p) {
+					StatBlock& member_stats = playerm->players[p]->stats;
+					if (&member_stats == this)
+						continue; // the caster already received this via buff()'s own effect() call
+					if (member_stats.hp > 0) {
+						powers->effect(&member_stats, this, power_index, Power::SOURCE_TYPE_HERO);
+					}
+				}
+			}
+
 			for (size_t i=0; i < entitym->entities.size(); ++i) {
 				Entity* party_member = entitym->entities[i];
+				// P2.4 step 2: hero_ally entities follow their OWN summoner, not "any hero" --
+				// the pre-P2.4 check here was just `hero` (true for every player casting a party
+				// buff), so with several players any hero's cast hit every player's summons
+				// indiscriminately. Both ally kinds now check summoner == this, the way the
+				// enemy_ally half already did -- except a hero_ally with NO summoner at all
+				// (a converted former-enemy, which is never spawned through a power and so never
+				// gets one) falls back to the old "any hero" reach, so a single-player game with
+				// a converted ally sees no behaviour change at all (AC1).
+				bool is_this_casters_ally =
+					party_member->stats.summoner == this ||
+					(party_member->stats.summoner == NULL && party_member->stats.hero_ally && hero);
 				if(party_member->stats.hp > 0 &&
-				   ((party_member->stats.hero_ally && hero) || (party_member->stats.enemy_ally && party_member->stats.summoner == this)) &&
+				   (party_member->stats.hero_ally || party_member->stats.enemy_ally) &&
+				   is_this_casters_ally &&
 				   (buff_power->buff_party_power_id == 0 || buff_power->buff_party_power_id == party_member->stats.summoned_power_index)
 				) {
 					powers->effect(&(party_member->stats), this, power_index, (hero ? Power::SOURCE_TYPE_HERO : Power::SOURCE_TYPE_ENEMY));

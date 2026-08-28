@@ -580,13 +580,23 @@ void EffectManager::addEffect(StatBlock* stats, EffectDef &effect, EffectParams 
 				return; // trigger effects can only be cast once per trigger
 
 			if (!effect.can_stack) {
-				if (static_cast<unsigned>(params.duration) < ei.timer.getCurrent() && params.magnitude == ei.magnitude_max) {
-					// Duration is shorter than time remaining for existing effect with same magnitude, so don't bother adding this one
-					// TODO What if the new effect has a *different* magnitude? Maybe it makes sense to always replace the old one in those cases.
-					return;
-				}
+				// A non-stacking effect has one shared instance, even when several casters
+				// apply it. Keep the stronger magnitude and the longer remaining duration.
+				// The old code only preserved an existing effect when both values matched;
+				// a weaker, longer cast could therefore downgrade a stronger buff.
+				unsigned remaining = ei.timer.getCurrent();
+				unsigned incoming_duration = params.duration > 0 ? static_cast<unsigned>(params.duration) : 0;
+				unsigned duration = std::max(remaining, incoming_duration);
+				float magnitude = std::max(ei.magnitude_max, params.magnitude);
 
-				removeEffect(i-1);
+				if (duration <= remaining && magnitude <= ei.magnitude_max)
+					return;
+
+				ei.timer.setDuration(duration);
+				ei.timer.setCurrent(duration);
+				ei.magnitude = magnitude;
+				ei.magnitude_max = magnitude;
+				return;
 			}
 			else{
 				if (effect.type == Effect::SHIELD && effect.group_stack){

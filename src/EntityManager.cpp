@@ -47,6 +47,18 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 #include <limits>
 
+static Avatar* playerForSummoner(StatBlock* summoner) {
+	if (!summoner || !playerm)
+		return NULL;
+
+	for (size_t i = 0; i < playerm->players.size(); ++i) {
+		if (&playerm->players[i]->stats == summoner)
+			return playerm->players[i];
+	}
+
+	return NULL;
+}
+
 EntityManager::EntityManager()
 	: entities()
 	, player_blocked(false)
@@ -145,9 +157,9 @@ void EntityManager::handleNewMap () {
 	}
 	prototypes.clear();
 
-	// Resolved once for this whole function -- no specific triggering player exists for a
-	// map-defined enemy spawn or a persistent ally's map-transition anchor, so both keep the
-	// pre-P2.2 simplification of using playerm->local() (see the two comments below).
+	// No specific triggering player exists for a map-defined enemy spawn, so its level remains
+	// anchored to the local player. Persistent allies do carry their summoner pointer, and use it
+	// below when their map-transition position is rebuilt.
 	Avatar* local = playerm->local();
 
 	// load new entities
@@ -190,10 +202,10 @@ void EntityManager::handleNewMap () {
 	}
 
 	// TODO support spawning flying enemies over pits?
-	// Persistent ally NPC anchor, same reasoning/limitation as NPCManager::handleNewMap()'s
-	// identical pattern: no per-player companion-ownership concept exists yet, so this keeps the
-	// pre-P2.2 simplification of anchoring to playerm->local().
-	FPoint spawn_pos = local ? wmap->collider.getRandomNeighbor(Point(local->stats.pos), 1, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES) : FPoint();
+	// Keep the legacy draw even when there are no persistent allies. The single-player replay path
+	// depends on this exact RNG position; multi-player owners may request an additional neighbor
+	// draw below when an ally belongs to a non-local player.
+	FPoint legacy_spawn_pos = local ? wmap->collider.getRandomNeighbor(Point(local->stats.pos), 1, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES) : FPoint();
 	while (!allies.empty()) {
 
 		Entity *e = allies.front();
@@ -203,8 +215,14 @@ void EntityManager::handleNewMap () {
 		Entity* temp = getEntityPrototype(e->type_filename);
 		delete temp;
 
+		Avatar* owner = playerForSummoner(e->stats.summoner);
+		if (!owner)
+			owner = local;
+		FPoint spawn_pos = legacy_spawn_pos;
+		if (playerm && playerm->players.size() > 1 && owner && owner != local)
+			spawn_pos = wmap->collider.getRandomNeighbor(Point(owner->stats.pos), 1, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES);
 		e->stats.pos = spawn_pos;
-		if (local) e->stats.direction = local->stats.direction;
+		if (owner) e->stats.direction = owner->stats.direction;
 
 		entities.push_back(e);
 
@@ -383,6 +401,11 @@ void EntityManager::handleSpawn() {
 }
 
 bool EntityManager::checkPartyMembers() {
+	// Every connected player is a party member, even when the party has not summoned an ally yet.
+	// This is what lets a party-targeted power reach another player through StatBlock::party_buffs.
+	if (playerm && playerm->players.size() > 1)
+		return true;
+
 	for (unsigned int i=0; i < entities.size(); i++) {
 		if(entities[i]->stats.hero_ally && entities[i]->stats.hp > 0) {
 			return true;
