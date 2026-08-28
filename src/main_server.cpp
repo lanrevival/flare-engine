@@ -50,6 +50,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "CommonIncludes.h"
 #include "EngineSettings.h"
 #include "EnemyGroupManager.h"
+#include "EntityBehavior.h"
 #include "EntityManager.h"
 #include "EventManager.h"
 #include "FileParser.h"
@@ -165,7 +166,7 @@ public:
 		: mod_list(), load_slot(), data_path(), max_ticks(0), hash_every(0), hash_at_exit(false)
 		, sim_seed(RNG_DEFAULT_SIM_SEED), record_path(), replay_path(), dump_players(false)
 		, assert_player_wiring(false), spawn_test_players(0), test_player_summon(0)
-		, dump_ai_targets(false), dump_summon_prototypes(false) {}
+		, dump_ai_targets(false), dump_summon_prototypes(false), dump_damage_events(false), kill_player(-1) {}
 	std::vector<std::string> mod_list;
 	std::string load_slot;
 	std::string data_path;
@@ -185,6 +186,8 @@ public:
 	PowerID test_player_summon;  // if nonzero, bound to the last spawned test player's action bar
 	bool dump_ai_targets;
 	bool dump_summon_prototypes;
+	bool dump_damage_events;
+	int kill_player;
 };
 
 // The Platform implementations are compiled by #include-ing them into the entry point rather
@@ -471,7 +474,10 @@ static void serverCheckTeleport() {
 			if (fow->fog_layer_id != 0)
 				fow->handleIntramapTeleport();
 
-		wmap->collider.unblock(local->stats.pos.x, local->stats.pos.y);
+		if (playerm->players.size() > 1)
+			wmap->collider.unblockPlayer(local->stats.pos.x, local->stats.pos.y, local->id);
+		else
+			wmap->collider.unblock(local->stats.pos.x, local->stats.pos.y);
 
 		if (wmap->teleportation) {
 			local->stats.pos.x = wmap->teleport_destination.x;
@@ -565,7 +571,10 @@ static void serverCheckTeleport() {
 			local->stats.pos.y = 0.5f;
 		}
 
-		wmap->collider.block(local->stats.pos.x, local->stats.pos.y, !MapCollision::IS_ALLY);
+		if (playerm->players.size() > 1)
+			wmap->collider.blockPlayer(local->stats.pos.x, local->stats.pos.y, local->id);
+		else
+			wmap->collider.block(local->stats.pos.x, local->stats.pos.y, !MapCollision::IS_ALLY);
 
 		local->stats.teleportation = false;
 
@@ -1308,6 +1317,14 @@ static void serverSpawnTestPlayers(const ServerCmdLineArgs& args) {
 	}
 
 	PlayerID last_id = 0;
+	FPoint spawn_anchor = source->stats.pos;
+	if (wmap->teleportation)
+		spawn_anchor = wmap->teleport_destination;
+
+	// These are deliberately explicit, stable map offsets rather than a random spread. They keep
+	// the acceptance fixtures deterministic and put several clones near different enemy groups.
+	static const int spawn_offset_x[] = {-11, 2, 9, -18, 4, -9, 14};
+	static const int spawn_offset_y[] = {2, 15, -2, 4, 24, 16, -4};
 	for (int i = 1; i < args.spawn_test_players; ++i) {
 		PlayerID new_id = playerm->create(static_cast<PlayerID>(i));
 		Avatar* new_avatar = playerm->get(new_id);
@@ -1348,8 +1365,8 @@ static void serverSpawnTestPlayers(const ServerCmdLineArgs& args) {
 
 		// Spread test players apart (map tiles) so nearestTo()/nearestAliveTo() has more than one
 		// meaningfully different distance to choose between.
-		new_avatar->stats.pos.x = source->stats.pos.x + static_cast<float>(i) * 3.0f;
-		new_avatar->stats.pos.y = source->stats.pos.y;
+		new_avatar->stats.pos.x = spawn_anchor.x + static_cast<float>(spawn_offset_x[i - 1]);
+		new_avatar->stats.pos.y = spawn_anchor.y + static_cast<float>(spawn_offset_y[i - 1]);
 
 		// SaveLoad::loadGame() (out of scope) is what calls this for player 0 -- see
 		// serverCheckEquipmentChange()'s own comment on why it is load-bearing, not cosmetic:
@@ -1360,6 +1377,7 @@ static void serverSpawnTestPlayers(const ServerCmdLineArgs& args) {
 		// through the replay corpus (see the P2.2 report).
 		new_avatar->loadAnimations();
 		new_avatar->loadSounds();
+		wmap->collider.blockPlayer(new_avatar->stats.pos.x, new_avatar->stats.pos.y, new_id);
 
 		Utils::logInfo("main_server: spawned test player id=%u at (%.1f, %.1f)",
 		               static_cast<unsigned>(new_id), static_cast<double>(new_avatar->stats.pos.x), static_cast<double>(new_avatar->stats.pos.y));
@@ -1382,6 +1400,22 @@ static void serverSpawnTestPlayers(const ServerCmdLineArgs& args) {
 			entitym->handleNewMap();
 		}
 	}
+}
+
+static void serverKillPlayer(const ServerCmdLineArgs& args) {
+	if (args.kill_player < 0)
+		return;
+
+	Avatar* victim = playerm->get(static_cast<PlayerID>(args.kill_player));
+	if (!victim) {
+		Utils::logError("main_server: --kill-player=%d does not name a connected player.", args.kill_player);
+		Utils::Exit(1);
+	}
+
+	victim->stats.hp = 0;
+	victim->stats.takeDamage(0, false, Power::SOURCE_TYPE_ENEMY);
+	victim->stats.alive = false;
+	wmap->collider.unblockPlayer(victim->stats.pos.x, victim->stats.pos.y, victim->id);
 }
 
 // P2.2 AC7 diagnostic. Prints one line per player per spawn-type power bound to their
@@ -1420,21 +1454,20 @@ static void serverDumpSummonPrototypes() {
 	}
 }
 
-// P2.2 AC5/AC6 diagnostic. One line per hostile entity per tick: which player it is currently
-// nearest-targeting, via the exact same playerm->nearestAliveTo() call EntityBehavior itself now
-// uses (P2.2 step 3), so this observes the migrated logic rather than re-deriving its own guess
-// at it. `tick=T entity=I target=<player id>|none`.
+// P2.4 AC3/AC4/AC5b diagnostic. One line per hostile entity per tick, reading the target and LOS
+// selected by EntityBehavior itself rather than independently re-deriving a nearest-player guess.
+// `tick=T entity=I target_los=0|1 target=<player id>|none`.
 static void serverDumpAiTargets(unsigned long tick) {
 	for (size_t i = 0; i < entitym->entities.size(); ++i) {
 		Entity* e = entitym->entities[i];
 		if (e->stats.hero_ally || e->stats.npc || !e->stats.alive)
 			continue;
 
-		Avatar* target = playerm->nearestAliveTo(e->stats.pos);
-		if (target)
-			printf("tick=%lu entity=%zu target=%u\n", tick, i, static_cast<unsigned>(target->id));
+		int target_id = e->behavior->getAggroTargetId();
+		if (target_id >= 0)
+			printf("tick=%lu entity=%zu target_los=%d target=%d\n", tick, i, e->behavior->getAggroTargetLos() ? 1 : 0, target_id);
 		else
-			printf("tick=%lu entity=%zu target=none\n", tick, i);
+			printf("tick=%lu entity=%zu target_los=- target=none\n", tick, i);
 	}
 }
 
@@ -1445,7 +1478,8 @@ static void serverCleanup() {
 	delete npcs;
 	delete hazards;
 	delete entitym;
-	playerm->remove(0);
+	while (!playerm->players.empty())
+		playerm->remove(playerm->players.back()->id);
 	delete playerm;
 	delete loot;
 	delete camp;
@@ -1693,9 +1727,12 @@ static void printHelp() {
 	       "                         spawned test player's action bar (not player 0's), then\n"
 	       "                         re-runs the summon-prototype preload so it sees the new\n"
 	       "                         binding.\n"
-	       "--dump-ai-targets        Prints one line per hostile entity per tick: which player\n"
-	       "                         id it is currently nearest-targeting (playerm->nearestAliveTo()),\n"
-	       "                         or target=none.\n"
+		   "--dump-ai-targets        Prints one line per hostile entity per tick: which player\n"
+		   "                         id the scored AI target selector chose, with target_los=0|1|-,\n"
+		   "                         or target=none.\n"
+		   "--dump-damage-events    Prints one line per resolved damage event as source->target,\n"
+		   "                         including hero->hero when friendly fire occurs.\n"
+		   "--kill-player=<N>       Sets player N dead immediately after startup, for continuity tests.\n"
 	       "--dump-summon-prototypes Prints one line per player per spawn-type power bound to\n"
 	       "                         their known-powers list or action bar, and whether\n"
 	       "                         EntityManager has a loaded prototype for it, then exits\n"
@@ -1790,6 +1827,12 @@ int main(int argc, char *argv[]) {
 		else if (arg == "dump-ai-targets") {
 			args.dump_ai_targets = true;
 		}
+		else if (arg == "dump-damage-events") {
+			args.dump_damage_events = true;
+		}
+		else if (arg == "kill-player") {
+			args.kill_player = strtol(parseServerArgValue(arg_full).c_str(), NULL, 10);
+		}
 		else if (arg == "dump-summon-prototypes") {
 			args.dump_summon_prototypes = true;
 		}
@@ -1852,6 +1895,8 @@ int main(int argc, char *argv[]) {
 	// P2.2 AC5-AC7 test infrastructure -- after player 0 is fully loaded (serverSpawnTestPlayers()
 	// clones its state), before any tick has run.
 	serverSpawnTestPlayers(args);
+	hazards->dump_damage_events = args.dump_damage_events;
+	serverKillPlayer(args);
 
 	if (args.dump_summon_prototypes) {
 		serverDumpSummonPrototypes();
@@ -2018,6 +2063,13 @@ int main(int argc, char *argv[]) {
 		printf(" hotkeys_pab=%d hotkeys_menu=%d", hotkeys_pab, hotkeys_menu);
 
 		printf("\n");
+	}
+
+	if (args.dump_players) {
+		for (size_t p = 0; p < playerm->players.size(); ++p) {
+			Avatar* player = playerm->players[p];
+			printf("player id=%u xp=%lu alive=%d\n", static_cast<unsigned>(player->id), player->stats.xp, player->stats.alive ? 1 : 0);
+		}
 	}
 
 	// stdout, not the log: golden-file comparison should not have to parse timestamps.

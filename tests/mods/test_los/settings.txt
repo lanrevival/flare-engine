@@ -1,0 +1,5 @@
+description=TEST ONLY. A small room split by one wall, with a single enemy on one side, for P2.4's AC5b (enemies do not target players they cannot see).
+requires=fantasycore,empyrean_campaign
+game=flare-game
+version=1.00
+engine_version_min=1.15
