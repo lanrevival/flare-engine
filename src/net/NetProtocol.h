@@ -55,7 +55,8 @@ enum MessageType {
 	MSG_HELLO_OK = 2,
 	MSG_REFUSED = 3,
 	MSG_PLAYER_COMMAND = 4,
-	MSG_SYSTEM_MESSAGE = 5
+	MSG_SYSTEM_MESSAGE = 5,
+	MSG_PLAYER_SNAPSHOT = 6
 };
 
 enum RefusalReason {
@@ -86,6 +87,23 @@ struct MsgSystemMessage {
 	std::vector<MessageArg> args;
 };
 
+// One player's server-computed state for one tick -- P3.4. position/direction/animation/hp/alive
+// are exactly what the server's own Avatar::logic() (run per-player since P3.3) just produced;
+// there is nothing for a receiving client to compute or predict, only apply.
+struct PlayerSnapshotEntry {
+	PlayerID id;
+	float pos_x, pos_y;
+	uint8_t direction;
+	std::string animation; // Animation::getName(); empty if the avatar has none yet
+	float hp;
+	float hp_max;
+	bool alive;
+};
+
+struct MsgPlayerSnapshot {
+	std::vector<PlayerSnapshotEntry> players;
+};
+
 std::string encodeHello(const std::string& display_name, uint32_t mod_hash);
 bool decodeHello(const std::string& payload, MsgHello& out);
 
@@ -100,6 +118,9 @@ bool decodePlayerCommand(const std::string& payload, PlayerCommand& out);
 
 std::string encodeSystemMessage(const std::string& key, const std::vector<MessageArg>& args);
 bool decodeSystemMessage(const std::string& payload, MsgSystemMessage& out);
+
+std::string encodePlayerSnapshot(const std::vector<PlayerSnapshotEntry>& players);
+bool decodePlayerSnapshot(const std::string& payload, MsgPlayerSnapshot& out);
 
 // Reads just the message-type byte, without decoding anything else -- callers switch on this
 // before picking a decode*(). Returns 0 (not a valid MessageType) if payload is empty.

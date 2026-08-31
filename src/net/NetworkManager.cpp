@@ -27,6 +27,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include <ws2tcpip.h>
 #else
 #include <arpa/inet.h>
+#include <csignal>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/select.h>
@@ -51,6 +52,19 @@ NetworkManager::NetworkManager()
 	, last_refusal_key()
 	, local_mod_hash_pending(0)
 {
+	// P3.4 found this the hard way: once the host broadcasts once per tick (serverBroadcastSnapshot()),
+	// a peer that disconnects is virtually guaranteed to have a send() land on its socket before the
+	// next update() notices and removes it. The default SIGPIPE disposition is process termination --
+	// pumpPeer()'s own send() failure handling (peer.alive = false on a negative return) never even
+	// runs, because the process is dead before send() returns. There's no portable MSG_NOSIGNAL/
+	// SO_NOSIGPIPE flag that works identically on both BSD-derived (macOS) and Linux sockets, so
+	// ignore the signal process-wide instead -- the one-line, cross-platform fix -- which is exactly
+	// what turns this into the graceful "mark the peer dead" path that already existed. Windows has no
+	// SIGPIPE at all (send() there simply returns an error), and its <csignal> doesn't even declare
+	// the macro, so this is guarded out on that platform rather than merely being a harmless no-op.
+#ifndef _WIN32
+	signal(SIGPIPE, SIG_IGN);
+#endif
 }
 
 NetworkManager::~NetworkManager() {

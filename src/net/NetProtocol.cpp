@@ -330,6 +330,54 @@ bool decodeSystemMessage(const std::string& payload, MsgSystemMessage& out) {
 	return true;
 }
 
+std::string encodePlayerSnapshot(const std::vector<PlayerSnapshotEntry>& players) {
+	std::string out;
+	writeU8(out, static_cast<uint8_t>(MSG_PLAYER_SNAPSHOT));
+	writeU8(out, static_cast<uint8_t>(players.size()));
+	for (size_t i = 0; i < players.size(); ++i) {
+		const PlayerSnapshotEntry& p = players[i];
+		writeU8(out, p.id);
+		writeFloat(out, p.pos_x);
+		writeFloat(out, p.pos_y);
+		writeU8(out, p.direction);
+		writeString(out, p.animation);
+		writeFloat(out, p.hp);
+		writeFloat(out, p.hp_max);
+		writeU8(out, p.alive ? 1 : 0);
+	}
+	return out;
+}
+
+bool decodePlayerSnapshot(const std::string& payload, MsgPlayerSnapshot& out) {
+	size_t offset = 0;
+	uint8_t type;
+	if (!readU8(payload, offset, type) || type != MSG_PLAYER_SNAPSHOT)
+		return false;
+
+	uint8_t count;
+	if (!readU8(payload, offset, count))
+		return false;
+
+	out.players.clear();
+	for (uint8_t i = 0; i < count; ++i) {
+		PlayerSnapshotEntry p;
+		uint8_t alive_byte;
+		if (!readU8(payload, offset, p.id)
+		    || !readFloat(payload, offset, p.pos_x)
+		    || !readFloat(payload, offset, p.pos_y)
+		    || !readU8(payload, offset, p.direction)
+		    || !readString(payload, offset, p.animation)
+		    || !readFloat(payload, offset, p.hp)
+		    || !readFloat(payload, offset, p.hp_max)
+		    || !readU8(payload, offset, alive_byte))
+			return false;
+		p.alive = alive_byte != 0;
+		out.players.push_back(p);
+	}
+
+	return true;
+}
+
 uint8_t peekMessageType(const std::string& payload) {
 	if (payload.empty())
 		return 0;
@@ -377,6 +425,13 @@ std::string debugDump(const std::string& payload) {
 				return "<truncated:SYSTEM_MESSAGE>";
 			snprintf(header, sizeof(header), "SYSTEM_MESSAGE args=%u key=\"", static_cast<unsigned>(m.args.size()));
 			return std::string(header) + m.message_key + "\"";
+		}
+		case MSG_PLAYER_SNAPSHOT: {
+			MsgPlayerSnapshot m;
+			if (!decodePlayerSnapshot(payload, m))
+				return "<truncated:PLAYER_SNAPSHOT>";
+			snprintf(header, sizeof(header), "PLAYER_SNAPSHOT players=%u", static_cast<unsigned>(m.players.size()));
+			return std::string(header);
 		}
 		default:
 			return payload.empty() ? "<empty>" : "<unknown>";

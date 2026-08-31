@@ -41,6 +41,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 #include "ActionBarState.h"
 #include "AnimationManager.h"
+#include "Animation.h"
 #include "Avatar.h"
 #include "CampaignManager.h"
 #include "PlayerCommand.h"
@@ -866,6 +867,32 @@ static void serverSyncNetworkPlayers() {
 			Utils::logError("main_server: dropped a malformed PLAYER_COMMAND from player id=%u.", static_cast<unsigned>(from));
 		}
 	}
+}
+
+// P3.4. --dedicated only (netmgr is NULL otherwise, and this is a no-op). Called once per tick,
+// right after serverLogic() has advanced the simulation, so every field read here is this tick's
+// settled server-computed state -- not last tick's. playerm->players already holds exactly the
+// players worth broadcasting (local id 0 plus every id serverSyncNetworkPlayers() currently keeps
+// provisioned), sorted by id.
+static void serverBroadcastSnapshot() {
+	if (!netmgr)
+		return;
+
+	std::vector<Net::PlayerSnapshotEntry> entries;
+	for (size_t i = 0; i < playerm->players.size(); ++i) {
+		Avatar* av = playerm->players[i];
+		Net::PlayerSnapshotEntry entry;
+		entry.id = av->id;
+		entry.pos_x = av->stats.pos.x;
+		entry.pos_y = av->stats.pos.y;
+		entry.direction = av->stats.direction;
+		entry.animation = av->activeAnimation ? av->activeAnimation->getName() : std::string();
+		entry.hp = av->stats.hp;
+		entry.hp_max = av->stats.get(Stats::HP_MAX);
+		entry.alive = av->stats.alive;
+		entries.push_back(entry);
+	}
+	netmgr->broadcast(Net::encodePlayerSnapshot(entries));
 }
 
 // The tick-order-preserving port of GameStatePlay::logic(), replacing gswitch->logic(). See
@@ -1843,8 +1870,12 @@ static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_
 			static bool first_tick = true;
 			if (first_tick)
 				first_tick = false;
-			else
+			else {
 				serverLogic();
+				// P3.4: broadcast this tick's settled state. Guarded inside the function itself
+				// (netmgr is NULL on every non---dedicated run), so this call is free elsewhere.
+				serverBroadcastSnapshot();
+			}
 			inpt->resetScroll();
 
 			total_ticks++;
