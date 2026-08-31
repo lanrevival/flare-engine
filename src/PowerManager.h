@@ -398,6 +398,15 @@ public:
 
 	std::vector<ItemID> used_items;
 	std::vector<ItemID> used_equipped_items;
+	// Index-aligned with the two vectors above: which player's StatBlock paid for that entry.
+	// Never dereferenced here -- PowerManager stays decoupled from PlayerManager. A caller that
+	// knows what a StatBlock* maps to (main_server.cpp) resolves it by pointer identity.
+	std::vector<StatBlock*> used_items_caster;
+	std::vector<StatBlock*> used_equipped_items_caster;
+
+	// Clears all four vectors above together, so a caller can never clear the id vectors while
+	// leaving a stale, differently-sized caster vector behind (or vice versa).
+	void clearUsedItems();
 };
 
 #endif

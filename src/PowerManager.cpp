@@ -193,7 +193,9 @@ Power::Power()
 PowerManager::PowerManager()
 	: collider(NULL)
 	, used_items()
-	, used_equipped_items() {
+	, used_equipped_items()
+	, used_items_caster()
+	, used_equipped_items_caster() {
 	loadEffects();
 	loadPowers();
 }
@@ -2114,10 +2116,14 @@ void PowerManager::payPowerCost(PowerID power_index, StatBlock *src_stats) {
 
 					int quantity = pri.quantity;
 					while (quantity > 0) {
-						if (pri.equipped)
+						if (pri.equipped) {
 							used_equipped_items.push_back(pri.id);
-						else
+							used_equipped_items_caster.push_back(src_stats);
+						}
+						else {
 							used_items.push_back(pri.id);
+							used_items_caster.push_back(src_stats);
+						}
 
 						quantity--;
 					}
@@ -2134,6 +2140,13 @@ void PowerManager::payPowerCost(PowerID power_index, StatBlock *src_stats) {
 			src_stats->target_corpse = NULL;
 		}
 	}
+}
+
+void PowerManager::clearUsedItems() {
+	used_items.clear();
+	used_equipped_items.clear();
+	used_items_caster.clear();
+	used_equipped_items_caster.clear();
 }
 
 /**

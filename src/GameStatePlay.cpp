@@ -695,8 +695,7 @@ void GameStatePlay::checkUsedItems() {
 		player_inventory->inventory[PlayerInventory::EQUIPMENT].remove(powers->used_equipped_items[i], 1);
 		player_inventory->applyEquipment();
 	}
-	powers->used_items.clear();
-	powers->used_equipped_items.clear();
+	powers->clearUsedItems();
 }
 
 /**

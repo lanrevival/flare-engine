@@ -43,6 +43,8 @@ NetworkManager::NetworkManager()
 	, required_mod_hash(0)
 	, peers()
 	, inbound()
+	, newly_connected()
+	, newly_disconnected()
 	, next_id(0)
 	, has_local_id(false)
 	, local_player_id(0)
@@ -190,7 +192,24 @@ void NetworkManager::acceptLoop() {
 
 		Peer peer;
 		peer.socket = s;
-		peer.id = next_id++;
+		// next_id is a floor (see seedNextPlayerID()), not a running counter -- assign the
+		// smallest id at or above it not currently held by any connected peer, so ids stay
+		// bounded and get reused after a disconnect rather than climbing forever.
+		{
+			PlayerID candidate = next_id;
+			bool taken;
+			do {
+				taken = false;
+				for (size_t j = 0; j < peers.size(); ++j) {
+					if (peers[j].id == candidate) {
+						taken = true;
+						++candidate;
+						break;
+					}
+				}
+			} while (taken);
+			peer.id = candidate;
+		}
 		peer.display_name = "";
 		peer.connecting = false; // inbound connections are already established by accept()
 		peer.alive = true;
@@ -280,6 +299,7 @@ void NetworkManager::pumpPeer(Peer& peer) {
 			peer.display_name = hello.display_name;
 			peer.handshake_done = true;
 			appendFramed(peer.send_buffer, Net::encodeHelloOk(peer.id));
+			newly_connected.push_back(peer.id);
 			continue;
 		}
 
@@ -347,8 +367,14 @@ void NetworkManager::update() {
 		// an incomplete trailing frame in recv_buffer, if any, cannot be completed by a peer that
 		// just went away, so it is safe to drop the whole peer here. 'connecting' peers are never
 		// touched by this check -- see pumpPeer()'s own early-return while a connect() is pending.
-		if (!peers[i - 1].alive)
+		if (!peers[i - 1].alive) {
+			// Only a peer whose handshake completed was ever surfaced to the caller via
+			// popConnected() / bound to a player slot -- a peer refused or dropped before that
+			// point has nothing for popDisconnected() to meaningfully report.
+			if (peers[i - 1].handshake_done)
+				newly_disconnected.push_back(peers[i - 1].id);
 			removePeer(i - 1);
+		}
 	}
 }
 
@@ -359,6 +385,28 @@ bool NetworkManager::popPacket(PlayerID* from, std::string* payload) {
 	*payload = inbound.front().second;
 	inbound.pop_front();
 	return true;
+}
+
+bool NetworkManager::popConnected(PlayerID* id) {
+	if (newly_connected.empty())
+		return false;
+	*id = newly_connected.front();
+	newly_connected.pop_front();
+	return true;
+}
+
+bool NetworkManager::popDisconnected(PlayerID* id) {
+	if (newly_disconnected.empty())
+		return false;
+	*id = newly_disconnected.front();
+	newly_disconnected.pop_front();
+	return true;
+}
+
+void NetworkManager::seedNextPlayerID(PlayerID id) {
+	if (!peers.empty())
+		return; // too late -- ids already handed out under the old sequence
+	next_id = id;
 }
 
 void NetworkManager::sendTo(PlayerID to, const std::string& payload) {

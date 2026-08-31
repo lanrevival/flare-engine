@@ -28,7 +28,9 @@ FLARE.  If not, see http://www.gnu.org/licenses/
  * GameStatePlay::logic(), not through any GameState at all. See plans/phase1/P1.4c's plan doc for
  * the full classification this rewrite is built from.
  *
- * There is no networking here. That is Phase 3.
+ * P3.3 adds real networking: --dedicated opens a NetworkManager host socket and every tick's
+ * per-player command loop (see serverSyncNetworkPlayers()/serverLogic()) drives connected peers'
+ * Avatars for real, not just player 0's. See plans/phase3/P3.3-authoritative-server-tick.md.
  */
 
 #include <algorithm>
@@ -65,6 +67,8 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MessageEngine.h"
 #include "ModManager.h"
 #include "NPCManager.h"
+#include "net/NetProtocol.h"
+#include "net/NetworkManager.h"
 #include "PowerManager.h"
 #include "QuestLog.h"
 #include "RenderDevice.h"
@@ -160,13 +164,19 @@ static bool server_equipment_changed[8] = { true, true, true, true, true, true, 
 // and delete it once. Never dereferenced beyond that; see the construction site's own comment.
 static QuestLog* server_quests = NULL;
 
+// P3.3. NULL unless --dedicated was passed -- every use below is gated on that, so a non-dedicated
+// run (today's only mode before this plan) never touches it.
+static Net::NetworkManager* netmgr = NULL;
+static const unsigned short DEFAULT_SERVER_PORT = 44680; // arbitrary, dynamic/private range
+
 class ServerCmdLineArgs {
 public:
 	ServerCmdLineArgs()
 		: mod_list(), load_slot(), data_path(), max_ticks(0), hash_every(0), hash_at_exit(false)
 		, sim_seed(RNG_DEFAULT_SIM_SEED), record_path(), replay_path(), dump_players(false)
 		, assert_player_wiring(false), spawn_test_players(0), test_player_summon(0)
-		, dump_ai_targets(false), dump_summon_prototypes(false), dump_damage_events(false), kill_player(-1) {}
+		, dump_ai_targets(false), dump_summon_prototypes(false), dump_damage_events(false), kill_player(-1)
+		, dedicated(false), port(0), max_players(8) {}
 	std::vector<std::string> mod_list;
 	std::string load_slot;
 	std::string data_path;
@@ -188,6 +198,12 @@ public:
 	bool dump_summon_prototypes;
 	bool dump_damage_events;
 	int kill_player;
+
+	// P3.3: real network multiplayer. All three are no-ops unless dedicated is set -- see
+	// plans/phase3/P3.3-authoritative-server-tick.md's Scope note.
+	bool dedicated;
+	unsigned short port;    // 0 means "use DEFAULT_SERVER_PORT", set below main()
+	int max_players;        // includes the reserved local id 0 -- see serverInitNetwork()
 };
 
 // The Platform implementations are compiled by #include-ing them into the entry point rather
@@ -713,23 +729,42 @@ static void serverCheckEquipmentChange(Avatar* player, PlayerInventory* inventor
 // PlayerInventory::remove()'s general-case fallback is already the correct sim-side equivalent.
 //
 // P2.3b, kind A -- not a default: PowerManager::used_items/used_equipped_items (PowerManager.h)
-// are single queues with no per-caster tag at all, so there is no way to tell which player's
-// power consumption produced a given entry without PowerManager itself recording the caster (a
-// StatBlock.h/PowerManager.h change beyond this plan's scope -- PowerManager.cpp's own step 2
-// reclassification is limited to its five already-parameterized call sites, not a redesign of
-// these two queues). Applies every consumption to playerm->local(), matching today's
-// only-real-player-drives-power-casts behaviour exactly.
+// USED TO be single queues with no per-caster tag at all, so there was no way to tell which
+// player's power consumption produced a given entry without PowerManager itself recording the
+// caster. That gap was real but unreachable before P3.3 -- only one player ever had real input,
+// so "apply every consumption to playerm->local()" was correct by coincidence. P3.3 is the first
+// plan where two real players can use an item in the same tick, so it closes the gap for real
+// (see PowerManager.h's used_items_caster/used_equipped_items_caster) instead of shipping it
+// broken. See this plan's Why section for the full finding.
+//
+// P3.3. PowerManager::used_items/used_equipped_items are attributed by caster StatBlock* (see
+// PowerManager.h's own comment) -- resolved here, by pointer identity only, never dereferenced,
+// since main_server.cpp is what knows a StatBlock* maps to a PlayerID via playerm. A caster that
+// no longer matches any current player (should be structurally impossible within one tick given
+// serverSyncNetworkPlayers()'s drain order -- see this plan's Notes) is skipped rather than acted
+// on incorrectly.
+static PlayerInventory* serverInventoryForCaster(StatBlock* caster) {
+	for (size_t p = 0; p < playerm->players.size(); ++p) {
+		if (&playerm->players[p]->stats == caster)
+			return playerm->inventories[p];
+	}
+	return NULL;
+}
+
 static void serverCheckUsedItems() {
-	PlayerInventory* local_inv = playerm->inventoryFor(playerm->local_id);
 	for (unsigned i = 0; i < powers->used_items.size(); i++) {
-		local_inv->remove(powers->used_items[i], 1);
+		PlayerInventory* inventory = serverInventoryForCaster(powers->used_items_caster[i]);
+		if (inventory)
+			inventory->remove(powers->used_items[i], 1);
 	}
 	for (unsigned i = 0; i < powers->used_equipped_items.size(); i++) {
-		local_inv->inventory[PlayerInventory::EQUIPMENT].remove(powers->used_equipped_items[i], 1);
-		local_inv->applyEquipment();
+		PlayerInventory* inventory = serverInventoryForCaster(powers->used_equipped_items_caster[i]);
+		if (inventory) {
+			inventory->inventory[PlayerInventory::EQUIPMENT].remove(powers->used_equipped_items[i], 1);
+			inventory->applyEquipment();
+		}
 	}
-	powers->used_items.clear();
-	powers->used_equipped_items.clear();
+	powers->clearUsedItems();
 }
 
 // Ported unchanged from GameStatePlay::updateActionBar() / its UPDATE_ACTIONBAR_ALL constant.
@@ -753,24 +788,110 @@ static void serverUpdateActionBar(ActionBarState* actionbar, PlayerInventory* in
 	}
 }
 
+// Forward declaration -- defined near serverSpawnTestPlayers() below, which shares this same
+// per-id provisioning mechanism (see that function's own comment). serverSyncNetworkPlayers()
+// needs it earlier in the file, at the real connect-time call site.
+static Avatar* serverProvisionPlayer(PlayerID id, FPoint spawn_pos);
+
+// P3.3. Ids currently bound to a connected, handshake-completed peer -- distinct from
+// server_net_cmd below, which only holds THIS tick's decoded packets. A connected player who sent
+// no packet this tick is still driven (they're just idle, not disconnected); server_net_cmd being
+// empty for their id is what makes serverNetCommandFor() fall back to a neutral PlayerCommand().
+static std::set<PlayerID> server_net_players;
+static std::map<PlayerID, PlayerCommand> server_net_cmd;
+
+// True for playerm->local_id (this machine's own keyboard) and for any id currently bound to a
+// connected peer. Every other player -- e.g. a --spawn-test-players clone nothing has bound to a
+// real connection -- stays exactly as inert as it always has been (see serverSpawnTestPlayers()'s
+// own comment): never passed a command, never ticked by the per-player loops this plan adds.
+static bool serverPlayerIsDriven(PlayerID id) {
+	return id == playerm->local_id || server_net_players.find(id) != server_net_players.end();
+}
+
+// This tick's decoded network command for 'id', or a neutral/idle default if none arrived --
+// D2: the server never waits a tick on a slow peer. Never called for playerm->local_id (that
+// player's command is built from *inpt* instead -- see serverLogic()'s own per-player loop).
+static PlayerCommand serverNetCommandFor(PlayerID id) {
+	std::map<PlayerID, PlayerCommand>::const_iterator it = server_net_cmd.find(id);
+	if (it != server_net_cmd.end())
+		return it->second;
+	return PlayerCommand();
+}
+
+// P3.3. --dedicated only (netmgr is NULL otherwise, and this is a no-op). Called first thing in
+// serverLogic(), before anything reads playerm->players -- a newly-connected peer must already be
+// a real player by the time this tick's kind-C loops (loot, title, death penalty, ...) run, and a
+// just-removed one must already be gone.
+static void serverSyncNetworkPlayers() {
+	server_net_cmd.clear();
+	if (!netmgr)
+		return;
+
+	netmgr->update();
+
+	PlayerID id;
+	while (netmgr->popDisconnected(&id)) {
+		server_net_players.erase(id);
+		// D26 (P2.5 step 5): frees any in-flight Hazard/summons this player owned. get() guards
+		// against a disconnect racing a provisioning failure (serverProvisionPlayer() returned
+		// NULL for this id -- see popConnected() below), which would otherwise call remove() on an
+		// id playerm never actually created.
+		if (playerm->get(id))
+			playerm->remove(id);
+	}
+
+	while (netmgr->popConnected(&id)) {
+		FPoint spawn_pos = playerm->local()->stats.pos;
+		if (wmap->teleportation)
+			spawn_pos = wmap->teleport_destination;
+		if (serverProvisionPlayer(id, spawn_pos))
+			server_net_players.insert(id);
+		// else: logged by serverProvisionPlayer() itself. The peer stays connected but bound to no
+		// player -- its packets simply decode into server_net_cmd and are never read by anything,
+		// since serverPlayerIsDriven() only ever consults server_net_players.
+	}
+
+	PlayerID from;
+	std::string payload;
+	while (netmgr->popPacket(&from, &payload)) {
+		PlayerCommand cmd;
+		if (Net::decodePlayerCommand(payload, cmd)) {
+			server_net_cmd[from] = cmd;
+		}
+		else {
+			// P3.2's own fuzz-safety guarantee (AC4) is what makes this safe to just drop: a
+			// malformed payload cannot corrupt state, only fail to decode. One bad frame is not
+			// grounds to disconnect a peer over -- matches every other decode-failure path in this
+			// codebase.
+			Utils::logError("main_server: dropped a malformed PLAYER_COMMAND from player id=%u.", static_cast<unsigned>(from));
+		}
+	}
+}
+
 // The tick-order-preserving port of GameStatePlay::logic(), replacing gswitch->logic(). See
 // P1.4c's plan doc for the classification every drop/port/substitution below is based on.
 static Timer server_second_timer;
 
 static void serverLogic() {
-	// P2.3b: the single-input-driven block below (PlayerCommand, respawn-from-ACCEPT-key,
-	// RESPEC, transform/revert, level-up consumption) stays bound to one explicit player rather
-	// than looping -- kind A, not a default: every piece of state driving it comes from *this
-	// machine's own* InputState (inpt, a single global), and there is no second source of
-	// PlayerCommand input to iterate over until Phase 3 actually connects a second real client.
-	// Test players (--spawn-test-players) are deliberately inert for exactly this reason -- see
-	// serverSpawnTestPlayers()'s own comment. The functions that DON'T depend on player_cmd/input
-	// at all (loot, log, title, equipment-change, action-bar update, each player's own drop_stack)
-	// are reclassified kind C below and iterate every player instead.
+	serverSyncNetworkPlayers();
+
+	// P2.3b named this whole block kind A -- bound to one explicit player, not looped -- because
+	// every piece of state driving it came from *this machine's own* InputState (inpt, a single
+	// global) and there was no second source of PlayerCommand input to iterate over "until Phase 3
+	// actually connects a second real client." P3.3 is that connection: the blocks below that are
+	// genuinely per-player state (level-up consumption, the command+logic() call itself, RESPEC,
+	// transform/revert, respawn) now loop over every player serverPlayerIsDriven() returns true
+	// for -- playerm->local_id (still built from *inpt*, exactly as before) plus any id currently
+	// bound to a connected peer (built from that tick's decoded network command instead). A
+	// --spawn-test-players clone nothing has connected to stays exactly as inert as it always was.
+	// The two blocks that stay genuinely local-only -- wmap->checkNearestEventInteraction()
+	// (mouse-driven, no headless equivalent for anyone) and serverCheckTeleport()/
+	// serverCheckCutscene() (party-wide map-change coordination, P3.6's job, not this plan's) -- are
+	// called out individually below, not generalised.
+	// local_inv/local_ab/local_pbs no longer live here -- every block below that needs them now
+	// derives its own inventory/actionbar/powerbonus per player inside its own loop (playerm->
+	// inventories[p]/actionbars[p]/powerbonuses[p]), local included.
 	Avatar* local = playerm->local();
-	PlayerInventory* local_inv = playerm->inventoryFor(playerm->local_id);
-	ActionBarState* local_ab = playerm->actionbarFor(playerm->local_id);
-	PowerBonusState* local_pbs = playerm->powerbonusFor(playerm->local_id);
 
 	PlayerCommand player_cmd;
 	PlayerInputLocks player_locks;
@@ -814,13 +935,18 @@ static void serverLogic() {
 	// call, so the interrupt+heal a tick sees is for the PREVIOUS tick's level-up, one full tick
 	// after Avatar::logic() sets the flag. Moving this after local->logic() would apply it a tick
 	// early instead and desync from every golden that already banked the one-tick delay. Kind A:
-	// see this function's own header comment -- level_up only ever becomes true for local, the
-	// only player whose logic() runs with real input.
-	if (local->stats.level_up) {
-		local_inv->applyEquipment();
-		local->stats.hp = local->stats.get(Stats::HP_MAX);
-		local->stats.mp = local->stats.get(Stats::MP_MAX);
-		local->stats.level_up = false;
+	// see this function's own header comment -- level_up only ever becomes true for a player whose
+	// logic() ran with a real command, i.e. a driven player (P3.3: local or a connected peer).
+	for (size_t p = 0; p < playerm->players.size(); ++p) {
+		Avatar* player = playerm->players[p];
+		if (!serverPlayerIsDriven(player->id))
+			continue;
+		if (player->stats.level_up) {
+			playerm->inventories[p]->applyEquipment();
+			player->stats.hp = player->stats.get(Stats::HP_MAX);
+			player->stats.mp = player->stats.get(Stats::MP_MAX);
+			player->stats.level_up = false;
+		}
 	}
 
 	// isPaused() is the constant false server-side (settings->headless is always true -- see
@@ -855,28 +981,62 @@ static void serverLogic() {
 			serverCheckTitle(playerm->players[p]);
 		}
 
-		// The one place player intent is read out of global input. mapr->cam.pos becomes
-		// local->stats.pos -- see P1.4c's "Camera-position substitution" note.
-		PlayerCommandBuilder::build(player_cmd, *inpt, local->stats.pos);
-		local_ab->checkHotkeyActions(local->action_queue);
-		player_cmd.actions = local->action_queue;
-		player_cmd.click_consumed_by_ui = false;
+		// P3.3: one PlayerCommand+logic() call per DRIVEN player, not just local. local's command
+		// is still the one place player intent is read out of global input (mapr->cam.pos becomes
+		// player->stats.pos -- see P1.4c's "Camera-position substitution" note), using the SAME
+		// player_cmd/player_locks declared at this function's top -- checkTransform() and the
+		// respawn/RESPEC/transform blocks further down still read player_locks by that name, and
+		// it must be the exact object local->logic() just wrote into, not a copy. Every other
+		// driven player uses a fresh, per-iteration command/locks pair: their command comes from
+		// this tick's decoded network packet (or a neutral default -- see serverNetCommandFor()),
+		// and their locks are never copied to/from anything -- remote click-arbitration has no
+		// meaning yet (no presentation layer has reached a remote player).
+		for (size_t p = 0; p < playerm->players.size(); ++p) {
+			Avatar* player = playerm->players[p];
+			if (!serverPlayerIsDriven(player->id))
+				continue;
 
-		// Respawn: no "Continue" button exists headless, so holding/pressing ACCEPT while dead
-		// is the server's respawn gesture. See P1.4c's "Respawn trigger" note -- the one piece
-		// of this plan with no client-side equivalent to diff against. death/deathfull are the
-		// corpus rows that exercise it.
-		player_cmd.respawn = inpt->pressing[Input::ACCEPT] && !local->stats.alive;
+			PlayerInventory* inventory = playerm->inventories[p];
+			ActionBarState* actionbar = playerm->actionbars[p];
+			bool is_local = (player->id == playerm->local_id);
 
-		if (local_inv->applyEquipmentSetDelta(player_cmd.equip_set_delta)) {
-			inpt->lock[player_cmd.equip_set_delta > 0 ? Input::EQUIPMENT_SWAP : Input::EQUIPMENT_SWAP_PREV] = true;
-			// Mirrors MenuInventory's changeEquipmentSet() setting changed_equipment = true
-			// (MenuInventory.cpp) -- a switch changes which items are active, same as an equip/
-			// unequip drag would.
-			server_equipment_changed[local->id] = true;
+			PlayerCommand net_cmd;
+			PlayerInputLocks net_locks;
+			PlayerCommand& cmd = is_local ? player_cmd : net_cmd;
+			PlayerInputLocks& locks = is_local ? player_locks : net_locks;
+
+			if (is_local) {
+				PlayerCommandBuilder::build(cmd, *inpt, player->stats.pos);
+				actionbar->checkHotkeyActions(player->action_queue);
+				cmd.actions = player->action_queue;
+				cmd.click_consumed_by_ui = false;
+
+				// Respawn: no "Continue" button exists headless, so holding/pressing ACCEPT while
+				// dead is the server's respawn gesture. See P1.4c's "Respawn trigger" note -- the
+				// one piece of this plan with no client-side equivalent to diff against.
+				// death/deathfull are the corpus rows that exercise it.
+				cmd.respawn = inpt->pressing[Input::ACCEPT] && !player->stats.alive;
+			}
+			else {
+				// PlayerCommand.h's own comment on the respawn field: "Phase 3 sets this from a
+				// network message instead; nothing in Avatar has to change for that." This is that
+				// wiring -- cmd.respawn arrives already decoded from the wire (P3.2's
+				// encode/decodePlayerCommand), same field, same downstream Avatar::logic() path.
+				cmd = serverNetCommandFor(player->id);
+			}
+
+			if (inventory->applyEquipmentSetDelta(cmd.equip_set_delta)) {
+				if (is_local) {
+					inpt->lock[cmd.equip_set_delta > 0 ? Input::EQUIPMENT_SWAP : Input::EQUIPMENT_SWAP_PREV] = true;
+				}
+				// Mirrors MenuInventory's changeEquipmentSet() setting changed_equipment = true
+				// (MenuInventory.cpp) -- a switch changes which items are active, same as an equip/
+				// unequip drag would.
+				server_equipment_changed[player->id] = true;
+			}
+
+			player->logic(cmd, locks);
 		}
-
-		local->logic(player_cmd, player_locks);
 
 		// P2.2: stealth is per-player now -- EntityBehavior reads each evaluated player's own
 		// Stats::STEALTH directly (via PlayerManager::nearestAliveTo()), so there's no longer a
@@ -892,13 +1052,19 @@ static void serverLogic() {
 
 	// close menus when the player dies, but still allow them to be reopened: no menus exist
 	// headless, so only the flags themselves need resetting -- matches the already-documented
-	// P1.3f-permadeath-gap. Kind A: close_menus/show_game_over are one-shot flags consumed by a
-	// menu system that (headless) only ever exists conceptually for local's own screen.
-	if (local->close_menus) {
-		local->close_menus = false;
-	}
-	if (local->show_game_over) {
-		local->show_game_over = false;
+	// P1.3f-permadeath-gap. These are one-shot flags consumed by a menu system that (headless)
+	// only ever exists conceptually for a driven player's own screen -- P3.3: every driven player,
+	// not just local, since close_menus/show_game_over can now be set for any of them.
+	for (size_t p = 0; p < playerm->players.size(); ++p) {
+		Avatar* player = playerm->players[p];
+		if (!serverPlayerIsDriven(player->id))
+			continue;
+		if (player->close_menus) {
+			player->close_menus = false;
+		}
+		if (player->show_game_over) {
+			player->show_game_over = false;
+		}
 	}
 
 	// RESPEC. See P1.4c's "Powers reset" note: menu_powers->resetToBasePowers() (which itself
@@ -908,26 +1074,34 @@ static void serverLogic() {
 	// clearActionBarBonusLevels() is already a public, presentation-free PowerBonusState method
 	// (P1.3g). A headless server defers class defaults and skill-tree auto-unlocks forever as a
 	// result -- a real, documented gap, not a silent one (RESPEC is unused by any corpus mod).
-	// See plans/00-ROADMAP.md's P1.3h note. Kind A: respec_powers is a one-shot flag consumed by
-	// this same single-input-driven block, same reasoning as level_up above.
-	if (local->respec_powers) {
-		local->respec_powers = false;
-		EngineSettings::HeroClasses::HeroClass* local_class = eset->hero_classes.getByName(local->stats.character_class);
+	// See plans/00-ROADMAP.md's P1.3h note. P3.3: respec_powers is a one-shot flag consumed for
+	// every driven player, same reasoning as level_up above, not just local.
+	for (size_t p = 0; p < playerm->players.size(); ++p) {
+		Avatar* player = playerm->players[p];
+		if (!serverPlayerIsDriven(player->id))
+			continue;
+		if (!player->respec_powers)
+			continue;
 
-		for (size_t i = 0; i < local_pbs->current_cell.size(); ++i)
-			local_pbs->current_cell[i] = 0;
+		player->respec_powers = false;
+		PowerBonusState* powerbonus = playerm->powerbonuses[p];
+		ActionBarState* actionbar = playerm->actionbars[p];
+		EngineSettings::HeroClasses::HeroClass* player_class = eset->hero_classes.getByName(player->stats.character_class);
 
-		if (local_class && !local->respec_use_engine_defaults) {
-			for (size_t j = 0; j < local_class->powers.size(); j++) {
-				local->stats.powers_list.push_back(local_class->powers[j]);
+		for (size_t i = 0; i < powerbonus->current_cell.size(); ++i)
+			powerbonus->current_cell[i] = 0;
+
+		if (player_class && !player->respec_use_engine_defaults) {
+			for (size_t j = 0; j < player_class->powers.size(); j++) {
+				player->stats.powers_list.push_back(player_class->powers[j]);
 			}
 		}
-		local_pbs->clearActionBarBonusLevels();
+		powerbonus->clearActionBarBonusLevels();
 
-		for (unsigned i = 0; i < local_ab->slots_count; ++i)
-			local_ab->clearSlot(i);
-		if (local_class && !local->respec_use_engine_defaults) {
-			local_ab->set(local_class->hotkeys, ActionBarState::SET_SKIP_EMPTY);
+		for (unsigned i = 0; i < actionbar->slots_count; ++i)
+			actionbar->clearSlot(i);
+		if (player_class && !player->respec_use_engine_defaults) {
+			actionbar->set(player_class->hotkeys, ActionBarState::SET_SKIP_EMPTY);
 		}
 	}
 
@@ -956,84 +1130,101 @@ static void serverLogic() {
 	// unconditionally, which is NULL here; its only output otherwise feeds a widget nothing else
 	// reads (QuestLog.cpp/MenuLog.cpp/GameStatePlay.cpp only).
 
-	// Kind A: checkTransform() reads player_locks, built from *inpt* above -- same single-input
-	// reasoning as this whole block.
-	local->checkTransform(player_locks);
+	// checkTransform()/setPowers/revertPowers/respawn: one-shot, per-player, simulation-state-driven
+	// (not literally input-driven -- checkTransform() only takes 'locks' for the click-arbitration
+	// transform()/untransform() may need). P3.3: every driven player, not just local. local reuses
+	// player_locks, the exact object its own logic() call wrote into earlier this tick (checkTransform
+	// consuming a DIFFERENT PlayerInputLocks would silently drop whatever Avatar::logic() itself set
+	// there) -- every other driven player gets a fresh, discarded-after-use default, same reasoning
+	// as the command+logic() loop above.
+	for (size_t p = 0; p < playerm->players.size(); ++p) {
+		Avatar* player = playerm->players[p];
+		if (!serverPlayerIsDriven(player->id))
+			continue;
 
-	// change hero powers on transformation. Kind A: setPowers/revertPowers/respawn are one-shot
-	// flags consumed by this same single-input-driven block.
-	if (local->setPowers) {
-		local->setPowers = false;
-		// save ActionBar state and lock slots from removing/replacing power
-		for (int i = 0; i < MenuActionBar::SLOT_MAX; i++) {
-			local_ab->hotkeys_temp[i] = local_ab->hotkeys[i];
-			local_ab->hotkeys[i] = 0;
-		}
-		int count = MenuActionBar::SLOT_MAIN1;
-		// put creature powers on action bar
-		for (size_t i = 0; i < local->charmed_stats->powers_ai.size(); i++) {
-			if (powers->isValid(local->charmed_stats->powers_ai[i].id) && powers->powers[local->charmed_stats->powers_ai[i].id]->beacon != true) {
-				local_ab->hotkeys[count] = local->charmed_stats->powers_ai[i].id;
-				local_ab->locked[count] = true;
-				count++;
-				if (count == MenuActionBar::SLOT_MAX)
-					count = 0;
-				else if (count == MenuActionBar::SLOT_MAIN1)
-					// we've filled the actionbar, stop adding powers to it
-					break;
+		PlayerInventory* inventory = playerm->inventories[p];
+		ActionBarState* actionbar = playerm->actionbars[p];
+		PowerBonusState* powerbonus = playerm->powerbonuses[p];
+		bool is_local = (player->id == playerm->local_id);
+		PlayerInputLocks net_locks;
+		PlayerInputLocks& locks = is_local ? player_locks : net_locks;
+
+		player->checkTransform(locks);
+
+		// change hero powers on transformation.
+		if (player->setPowers) {
+			player->setPowers = false;
+			// save ActionBar state and lock slots from removing/replacing power
+			for (int i = 0; i < MenuActionBar::SLOT_MAX; i++) {
+				actionbar->hotkeys_temp[i] = actionbar->hotkeys[i];
+				actionbar->hotkeys[i] = 0;
 			}
+			int count = MenuActionBar::SLOT_MAIN1;
+			// put creature powers on action bar
+			for (size_t i = 0; i < player->charmed_stats->powers_ai.size(); i++) {
+				if (powers->isValid(player->charmed_stats->powers_ai[i].id) && powers->powers[player->charmed_stats->powers_ai[i].id]->beacon != true) {
+					actionbar->hotkeys[count] = player->charmed_stats->powers_ai[i].id;
+					actionbar->locked[count] = true;
+					count++;
+					if (count == MenuActionBar::SLOT_MAX)
+						count = 0;
+					else if (count == MenuActionBar::SLOT_MAIN1)
+						// we've filled the actionbar, stop adding powers to it
+						break;
+				}
+			}
+			if (player->stats.manual_untransform && powers->isValid(player->untransform_power)) {
+				actionbar->hotkeys[count] = player->untransform_power;
+				actionbar->locked[count] = true;
+			}
+			else if (player->stats.manual_untransform && player->untransform_power == 0)
+				Utils::logError("main_server: Untransform power not found, you can't untransform manually");
+
+			actionbar->updated = true;
+
+			// reapply equipment if the transformation allows it
+			if (player->stats.transform_with_equipment)
+				inventory->applyEquipment();
 		}
-		if (local->stats.manual_untransform && powers->isValid(local->untransform_power)) {
-			local_ab->hotkeys[count] = local->untransform_power;
-			local_ab->locked[count] = true;
-		}
-		else if (local->stats.manual_untransform && local->untransform_power == 0)
-			Utils::logError("main_server: Untransform power not found, you can't untransform manually");
+		// revert hero powers
+		if (player->revertPowers) {
+			player->revertPowers = false;
 
-		local_ab->updated = true;
+			// restore ActionBar state
+			for (int i = 0; i < MenuActionBar::SLOT_MAX; i++) {
+				actionbar->hotkeys[i] = actionbar->hotkeys_temp[i];
+				actionbar->locked[i] = false;
+			}
 
-		// reapply equipment if the transformation allows it
-		if (local->stats.transform_with_equipment)
-			local_inv->applyEquipment();
-	}
-	// revert hero powers
-	if (local->revertPowers) {
-		local->revertPowers = false;
+			actionbar->updated = true;
 
-		// restore ActionBar state
-		for (int i = 0; i < MenuActionBar::SLOT_MAX; i++) {
-			local_ab->hotkeys[i] = local_ab->hotkeys_temp[i];
-			local_ab->locked[i] = false;
+			// also reapply equipment here, to account for items that give bonuses to base stats
+			inventory->applyEquipment();
 		}
 
-		local_ab->updated = true;
+		// when the hero (re)spawns, reapply equipment & passive effects
+		if (player->respawn) {
+			player->stats.alive = true;
+			player->stats.corpse = false;
+			player->stats.cur_state = StatBlock::ENTITY_STANCE;
+			inventory->applyEquipment();
+			// Mirrors GameStatePlay.cpp's respawn block setting menu->inv->changed_equipment = true
+			// right before its own checkEquipmentChange() call.
+			server_equipment_changed[player->id] = true;
+			serverCheckEquipmentChange(player, inventory, actionbar);
+			player->stats.hp = player->stats.get(Stats::HP_MAX);
+			player->stats.logic();
+			player->stats.recalc();
 
-		// also reapply equipment here, to account for items that give bonuses to base stats
-		local_inv->applyEquipment();
-	}
+			// menu_powers->resetToBasePowers()/setUnlockedPowers() substitute -- see this
+			// function's own RESPEC comment above; the same pair applies here.
+			for (size_t i = 0; i < powerbonus->current_cell.size(); ++i)
+				powerbonus->current_cell[i] = 0;
+			powerbonus->clearActionBarBonusLevels();
 
-	// when the hero (re)spawns, reapply equipment & passive effects
-	if (local->respawn) {
-		local->stats.alive = true;
-		local->stats.corpse = false;
-		local->stats.cur_state = StatBlock::ENTITY_STANCE;
-		local_inv->applyEquipment();
-		// Mirrors GameStatePlay.cpp's respawn block setting menu->inv->changed_equipment = true
-		// right before its own checkEquipmentChange() call.
-		server_equipment_changed[local->id] = true;
-		serverCheckEquipmentChange(local, local_inv, local_ab);
-		local->stats.hp = local->stats.get(Stats::HP_MAX);
-		local->stats.logic();
-		local->stats.recalc();
-
-		// menu_powers->resetToBasePowers()/setUnlockedPowers() substitute -- see this
-		// function's own RESPEC comment above; the same pair applies here.
-		for (size_t i = 0; i < local_pbs->current_cell.size(); ++i)
-			local_pbs->current_cell[i] = 0;
-		local_pbs->clearActionBarBonusLevels();
-
-		powers->activatePassives(&local->stats);
-		local->respawn = false;
+			powers->activatePassives(&player->stats);
+			player->respawn = false;
+		}
 	}
 
 	// menu->menus_open cursor block dropped -- no cursor state to set.
@@ -1299,6 +1490,76 @@ static void serverConstructSim(const ServerCmdLineArgs& args) {
 // the player to actually cast anything at run time) -- but it is not a general second playable
 // character, and building one is a materially larger feature (a real per-player replay format)
 // that this plan's file list does not include.
+//
+// P3.3 factors the per-id body out into serverProvisionPlayer() below, reused by the real
+// connect-time path in serverSyncNetworkPlayers() -- the mechanism (clone player 0's template)
+// and its documented limitation (not a real second character, no independent items -- that is
+// P3.5) are unchanged; only WHEN it runs and WHETHER the result is driven by real input changes.
+static Avatar* serverProvisionPlayer(PlayerID id, FPoint spawn_pos) {
+	Avatar* source = playerm->local();
+	PlayerInventory* source_inv = playerm->inventoryFor(playerm->local_id);
+	ActionBarState* source_ab = playerm->actionbarFor(playerm->local_id);
+	if (!source || !source_inv || !source_ab) {
+		Utils::logError("main_server: serverProvisionPlayer requires player 0 (--load-slot) to already be loaded.");
+		return NULL;
+	}
+
+	PlayerID new_id = playerm->create(id);
+	Avatar* new_avatar = playerm->get(new_id);
+	PlayerInventory* new_inv = playerm->inventoryFor(new_id);
+	ActionBarState* new_ab = playerm->actionbarFor(new_id);
+	if (!new_avatar || !new_inv || !new_ab)
+		return NULL;
+
+	// Copy the loaded class/stats state. Does NOT touch power_cooldown_timers/power_cast_timers
+	// (Avatar fields, not StatBlock) -- new_avatar's own constructor already allocated those
+	// correctly-sized for THIS avatar; overwriting stats wholesale leaves them alone since
+	// they live outside the StatBlock being assigned here.
+	new_avatar->stats = source->stats;
+
+	// NOT *new_inv = *source_inv -- ItemStorage (PlayerInventory::inventory[]) owns a raw
+	// `ItemStack* storage` array with no user-defined copy assignment, so a struct-copy here
+	// would shallow-copy that pointer and double-free it the moment either player's inventory
+	// was destroyed. Found by running this directly (SIGABRT, no assertion message, during
+	// PlayerManager::remove() -- see the P2.2 report) rather than through the replay corpus,
+	// which never destructs a second player. Sized/initialized the same way player 0's was in
+	// serverConstructSim() above instead: a properly-owned, empty inventory. A provisioned
+	// player doesn't get player 0's actual items, only a valid, empty one of their own.
+	new_inv->loadEquipmentData();
+	if (new_inv->max_equipment_set > 0)
+		new_inv->active_equipment_set = 1;
+
+	// ActionBarState's only non-vector member is P2.3b's owner back-pointer -- everything
+	// else is a std::vector, so a struct-copy is otherwise safe and gives the provisioned player
+	// the same slot count/lock flags as player 0's (initSlots() alone, without menus/actionbar.txt
+	// unavailable headless, would leave it zero-sized). The struct-copy DOES overwrite owner
+	// with source_ab's own (player 0's) -- restored to new_avatar right after, the same way
+	// PlayerManager::create() wired it originally. Found via --assert-player-wiring reporting
+	// ok=0 for every spawned test player, not by inspection -- see this plan's report.
+	*new_ab = *source_ab;
+	new_ab->owner = new_avatar;
+	for (unsigned s = 0; s < new_ab->hotkeys.size(); ++s)
+		new_ab->hotkeys[s] = 0;
+
+	new_avatar->stats.pos = spawn_pos;
+
+	// SaveLoad::loadGame() (out of scope) is what calls this for player 0 -- see
+	// serverCheckEquipmentChange()'s own comment on why it is load-bearing, not cosmetic:
+	// AnimationManager reference-counts by filename, and skipping this left the clone's
+	// stats.animations ("animations/hero.txt") never increfed, so its destructor's
+	// decreaseCount() had nothing to release -- logErrorDialog() then blocked waiting on a
+	// display that does not exist headless. Found by running this directly rather than
+	// through the replay corpus (see the P2.2 report).
+	new_avatar->loadAnimations();
+	new_avatar->loadSounds();
+	wmap->collider.blockPlayer(new_avatar->stats.pos.x, new_avatar->stats.pos.y, new_id);
+
+	Utils::logInfo("main_server: provisioned player id=%u at (%.1f, %.1f)",
+	               static_cast<unsigned>(new_id), static_cast<double>(new_avatar->stats.pos.x), static_cast<double>(new_avatar->stats.pos.y));
+
+	return new_avatar;
+}
+
 static void serverSpawnTestPlayers(const ServerCmdLineArgs& args) {
 	if (args.spawn_test_players <= 1)
 		return;
@@ -1309,9 +1570,7 @@ static void serverSpawnTestPlayers(const ServerCmdLineArgs& args) {
 	}
 
 	Avatar* source = playerm->local();
-	PlayerInventory* source_inv = playerm->inventoryFor(0);
-	ActionBarState* source_ab = playerm->actionbarFor(0);
-	if (!source || !source_inv || !source_ab) {
+	if (!source) {
 		Utils::logError("main_server: --spawn-test-players requires player 0 (--load-slot) to already be loaded.");
 		Utils::Exit(1);
 	}
@@ -1326,63 +1585,15 @@ static void serverSpawnTestPlayers(const ServerCmdLineArgs& args) {
 	static const int spawn_offset_x[] = {-11, 2, 9, -18, 4, -9, 14};
 	static const int spawn_offset_y[] = {2, 15, -2, 4, 24, 16, -4};
 	for (int i = 1; i < args.spawn_test_players; ++i) {
-		PlayerID new_id = playerm->create(static_cast<PlayerID>(i));
-		Avatar* new_avatar = playerm->get(new_id);
-		PlayerInventory* new_inv = playerm->inventoryFor(new_id);
-		ActionBarState* new_ab = playerm->actionbarFor(new_id);
-		if (!new_avatar || !new_inv || !new_ab)
+		FPoint spawn_pos;
+		spawn_pos.x = spawn_anchor.x + static_cast<float>(spawn_offset_x[i - 1]);
+		spawn_pos.y = spawn_anchor.y + static_cast<float>(spawn_offset_y[i - 1]);
+
+		Avatar* new_avatar = serverProvisionPlayer(static_cast<PlayerID>(i), spawn_pos);
+		if (!new_avatar)
 			continue;
 
-		// Copy the loaded class/stats state. Does NOT touch power_cooldown_timers/power_cast_timers
-		// (Avatar fields, not StatBlock) -- new_avatar's own constructor already allocated those
-		// correctly-sized for THIS avatar; overwriting stats wholesale leaves them alone since
-		// they live outside the StatBlock being assigned here.
-		new_avatar->stats = source->stats;
-
-		// NOT *new_inv = *source_inv -- ItemStorage (PlayerInventory::inventory[]) owns a raw
-		// `ItemStack* storage` array with no user-defined copy assignment, so a struct-copy here
-		// would shallow-copy that pointer and double-free it the moment either player's inventory
-		// was destroyed. Found by running this directly (SIGABRT, no assertion message, during
-		// PlayerManager::remove() -- see the P2.2 report) rather than through the replay corpus,
-		// which never destructs a second player. Sized/initialized the same way player 0's was in
-		// serverConstructSim() above instead: a properly-owned, empty inventory. Test players
-		// don't need player 0's actual items, only a valid one of their own.
-		new_inv->loadEquipmentData();
-		if (new_inv->max_equipment_set > 0)
-			new_inv->active_equipment_set = 1;
-
-		// ActionBarState's only non-vector member is P2.3b's owner back-pointer -- everything
-		// else is a std::vector, so a struct-copy is otherwise safe and gives the test player the
-		// same slot count/lock flags as player 0's (initSlots() alone, without menus/actionbar.txt
-		// unavailable headless, would leave it zero-sized). The struct-copy DOES overwrite owner
-		// with source_ab's own (player 0's) -- restored to new_avatar right after, the same way
-		// PlayerManager::create() wired it originally. Found via --assert-player-wiring reporting
-		// ok=0 for every spawned test player, not by inspection -- see this plan's report.
-		*new_ab = *source_ab;
-		new_ab->owner = new_avatar;
-		for (unsigned s = 0; s < new_ab->hotkeys.size(); ++s)
-			new_ab->hotkeys[s] = 0;
-
-		// Spread test players apart (map tiles) so nearestTo()/nearestAliveTo() has more than one
-		// meaningfully different distance to choose between.
-		new_avatar->stats.pos.x = spawn_anchor.x + static_cast<float>(spawn_offset_x[i - 1]);
-		new_avatar->stats.pos.y = spawn_anchor.y + static_cast<float>(spawn_offset_y[i - 1]);
-
-		// SaveLoad::loadGame() (out of scope) is what calls this for player 0 -- see
-		// serverCheckEquipmentChange()'s own comment on why it is load-bearing, not cosmetic:
-		// AnimationManager reference-counts by filename, and skipping this left the clone's
-		// stats.animations ("animations/hero.txt") never increfed, so its destructor's
-		// decreaseCount() had nothing to release -- logErrorDialog() then blocked waiting on a
-		// display that does not exist headless. Found by running this directly rather than
-		// through the replay corpus (see the P2.2 report).
-		new_avatar->loadAnimations();
-		new_avatar->loadSounds();
-		wmap->collider.blockPlayer(new_avatar->stats.pos.x, new_avatar->stats.pos.y, new_id);
-
-		Utils::logInfo("main_server: spawned test player id=%u at (%.1f, %.1f)",
-		               static_cast<unsigned>(new_id), static_cast<double>(new_avatar->stats.pos.x), static_cast<double>(new_avatar->stats.pos.y));
-
-		last_id = new_id;
+		last_id = new_avatar->id;
 	}
 
 	if (args.test_player_summon != 0 && last_id != 0) {
@@ -1472,6 +1683,15 @@ static void serverDumpAiTargets(unsigned long tick) {
 }
 
 static void serverCleanup() {
+	// P3.3. Before the playerm->remove() loop below -- shutdown() just closes sockets, it doesn't
+	// touch playerm, so ordering here isn't load-bearing the way hazards=NULL is, but there is no
+	// reason to keep sockets open one tick longer than necessary.
+	if (netmgr) {
+		netmgr->shutdown();
+		delete netmgr;
+		netmgr = NULL;
+	}
+
 	// Same deletion order GameStatePlay::~GameStatePlay() uses for the objects both sides
 	// construct; menu/mapr are simply absent from both the construction and this list.
 	delete server_quests;
@@ -1742,7 +1962,14 @@ static void printHelp() {
 	       "--dump-summon-prototypes Prints one line per player per spawn-type power bound to\n"
 	       "                         their known-powers list or action bar, and whether\n"
 	       "                         EntityManager has a loaded prototype for it, then exits\n"
-	       "                         without running the simulation.\n");
+	       "                         without running the simulation.\n"
+	       "--dedicated              Opens a real network host. Player id 0 stays the\n"
+	       "                         --load-slot-loaded local/operator player; connecting clients\n"
+	       "                         are provisioned into ids 1..--max-players-1 and their\n"
+	       "                         PLAYER_COMMAND packets drive their own Avatar for real. See\n"
+	       "                         plans/phase3/P3.3-authoritative-server-tick.md.\n"
+	       "--port=<N>               With --dedicated, the TCP port to listen on. Default 44680.\n"
+	       "--max-players=<N>        With --dedicated, the connection cap, 2-8 (D3). Default 8.\n");
 }
 
 static std::string parseServerArg(const std::string& arg) {
@@ -1842,6 +2069,15 @@ int main(int argc, char *argv[]) {
 		else if (arg == "dump-summon-prototypes") {
 			args.dump_summon_prototypes = true;
 		}
+		else if (arg == "dedicated") {
+			args.dedicated = true;
+		}
+		else if (arg == "port") {
+			args.port = static_cast<unsigned short>(strtoul(parseServerArgValue(arg_full).c_str(), NULL, 10));
+		}
+		else if (arg == "max-players") {
+			args.max_players = static_cast<int>(strtol(parseServerArgValue(arg_full).c_str(), NULL, 10));
+		}
 		else if (arg == "max-fps") {
 			// Accepted so that the sim-rate-vs-render-rate claim can actually be tested: a
 			// server run at 30 and at 144 must produce the same tick count in the same wall
@@ -1897,6 +2133,37 @@ int main(int argc, char *argv[]) {
 	// After the reseed above, not before -- see serverConstructSim()'s own comment for why this
 	// ordering is load-bearing rather than cosmetic.
 	serverConstructSim(args);
+
+	// P3.3. After serverConstructSim() -- player 0 (the reserved local/operator id) must already
+	// exist before any real connection can be accepted, and mods (hashModList's input) are already
+	// loaded by serverInit() above. Before serverSpawnTestPlayers()/serverMainLoop() so nothing can
+	// race a connection in.
+	if (args.dedicated) {
+		if (args.max_players < 2 || args.max_players > 8) {
+			Utils::logError("main_server: --max-players=%d out of range (D3: 2-8).", args.max_players);
+			Utils::Exit(1);
+		}
+		unsigned short port = (args.port != 0) ? args.port : DEFAULT_SERVER_PORT;
+		uint32_t mod_hash = Net::hashModList(mods->mod_list);
+		netmgr = new Net::NetworkManager();
+		if (!netmgr->startHost(port, static_cast<unsigned int>(args.max_players), mod_hash)) {
+			Utils::logError("main_server: --dedicated could not open port %u.", static_cast<unsigned>(port));
+			Utils::Exit(1);
+		}
+		// Id 0 is player 0, the local/operator slot serverConstructSim() just created -- reserve
+		// it so the first real connection can never collide with it. See NetworkManager.cpp's
+		// acceptLoop() comment for why this is a floor, not merely a starting value.
+		netmgr->seedNextPlayerID(1);
+		Utils::logInfo("main_server: --dedicated listening on port %u, max-players=%d.",
+		               static_cast<unsigned>(port), args.max_players);
+		// stdout, not just the log: a test harness driving this server as a subprocess (no
+		// access to ModManager's internal resolution) needs this exact value to send a HELLO the
+		// handshake will accept -- see plans/artifacts/P3.3-net-server-smoke.sh.
+		printf("dedicated mod_hash=0x%08x port=%u\n", static_cast<unsigned>(mod_hash), static_cast<unsigned>(port));
+		fflush(stdout); // stdout is fully buffered under a pipe -- a harness reading this line
+		                 // before the process exits needs it flushed now, not at the next buffer
+		                 // fill or at exit.
+	}
 
 	// P2.2 AC5-AC7 test infrastructure -- after player 0 is fully loaded (serverSpawnTestPlayers()
 	// clones its state), before any tick has run.

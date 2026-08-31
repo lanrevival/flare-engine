@@ -79,6 +79,20 @@ public:
 	// Dequeues the next complete inbound message, if any. Returns false if none are queued.
 	bool popPacket(PlayerID* from, std::string* payload);
 
+	// Host only (peers.empty() otherwise means these queues never gain entries). Dequeues the next
+	// player id whose handshake just completed / whose peer was just removed. A peer that never
+	// completed its handshake never appears in either queue -- see pumpPeer()'s/update()'s own
+	// comments at the two push sites. Returns false if none are queued.
+	bool popConnected(PlayerID* id);
+	bool popDisconnected(PlayerID* id);
+
+	// Host only. Sets the floor below which no accepted peer is ever assigned an id (ids are
+	// otherwise reused after a disconnect -- see acceptLoop()'s own comment). Must be called before
+	// any peer has connected (silently ignored otherwise) -- typically right after startHost()
+	// succeeds, to reserve low ids (e.g. 0) for a player the caller creates itself rather than over
+	// the network.
+	void seedNextPlayerID(PlayerID id);
+
 	// Host only. Queues 'payload' for delivery to peer 'to' / every connected peer. No-op if this
 	// NetworkManager is a client (a client has exactly one peer -- the host -- addressed
 	// implicitly by whatever protocol layer sits above this one).
@@ -125,6 +139,8 @@ private:
 	uint32_t required_mod_hash; // host only: what an incoming HELLO's mod_hash must equal
 	std::vector<Peer> peers;
 	std::deque<std::pair<PlayerID, std::string> > inbound;
+	std::deque<PlayerID> newly_connected;    // host only
+	std::deque<PlayerID> newly_disconnected; // host only
 	PlayerID next_id;
 	bool has_local_id;         // client only
 	PlayerID local_player_id;  // client only, valid iff has_local_id
