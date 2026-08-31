@@ -166,6 +166,9 @@ public:
 	std::string load_slot;
 	std::string load_script;
 	std::string net_connect_target; // "<host>:<port>" -- empty means not a network client. See P3.4b.
+	unsigned short net_host_port; // 0 means not an embedded host. See P3.4c. Mutually exclusive
+	                               // with net_connect_target -- main.cpp refuses both being set.
+	int net_max_players; // only meaningful with net_host_port set. D3: 2-8. See P3.4c.
 
 	// Misc
 	unsigned short view_w;

@@ -445,6 +445,12 @@ int main(int argc, char *argv[]) {
 		else if (arg == "connect") {
 			settings->net_connect_target = parseArgValue(arg_full);
 		}
+		else if (arg == "host") {
+			settings->net_host_port = static_cast<unsigned short>(Parse::toInt(parseArgValue(arg_full)));
+		}
+		else if (arg == "max-players") {
+			settings->net_max_players = Parse::toInt(parseArgValue(arg_full));
+		}
 		else if (arg == "safe-video") {
 			settings->safe_video = true;
 		}
@@ -468,6 +474,9 @@ int main(int argc, char *argv[]) {
 --load-script=<SCRIPT>   Execute's a script upon loading a saved game.\n\
                          The script path is mod-relative.\n\
 --connect=<HOST>:<PORT>  Joins a running dedicated server as a network client.\n\
+--host=<PORT>            Opens an embedded network host on this client, so other\n\
+                         players can connect to --connect=<this machine>:<PORT>.\n\
+--max-players=<N>        With --host, the connection cap, 2-8 (D3). Default 8.\n\
 --safe-video             Launches with the minimum video settings.\n\
 --no-lock-file           Skips the single-instance check, so that more than one copy\n\
                          of Flare can be run at once. Intended for testing.");
@@ -476,6 +485,18 @@ int main(int argc, char *argv[]) {
 		else {
 			Utils::logError("'%s' is not a valid command line option. Try '--help' for a list of valid options.", argv[i]);
 		}
+	}
+
+	// P3.4c: a GameStatePlay is either a network client or an embedded host, never both -- refuse
+	// the combination here rather than letting GameStatePlay::netConnectIfNeeded()/netHostIfNeeded()
+	// silently pick one.
+	if (!done && !settings->net_connect_target.empty() && settings->net_host_port != 0) {
+		Utils::logError("--connect and --host are mutually exclusive.");
+		done = true;
+	}
+	if (!done && settings->net_host_port != 0 && (settings->net_max_players < 2 || settings->net_max_players > 8)) {
+		Utils::logError("--max-players=%d out of range (D3: 2-8).", settings->net_max_players);
+		done = true;
 	}
 
 soft_reset:

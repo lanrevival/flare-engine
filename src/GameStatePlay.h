@@ -32,6 +32,10 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Utils.h"
 
 #include <stdint.h>
+#include <map>
+#include <set>
+
+#include "PlayerCommand.h" // held by value in net_host_cmd below
 
 class ActionBarState;
 class Avatar;
@@ -120,6 +124,26 @@ private:
 
 	Net::NetworkManager* netmgr;
 	bool net_connect_attempted;
+
+	// P3.4c: embedding a NetworkManager HOST directly in this client, so a second player can
+	// connect straight to this machine without a separate --dedicated process. Mutually exclusive
+	// with netConnectIfNeeded() above -- main.cpp refuses --connect and --host together, and
+	// netmgr is shared by both (a GameStatePlay is a client or a host, never both). Unlike P3.4b's
+	// remotePlayerId() offset, connected peers here keep their raw network PlayerID as their
+	// playerm id directly -- this client's own local avatar is always id 0 (playerm->create(0) in
+	// the constructor) and netmgr->seedNextPlayerID(1) in netHostIfNeeded() guarantees no accepted
+	// peer can ever be assigned id 0, so there is no collision to offset around. Mirrors
+	// main_server.cpp's serverSyncNetworkPlayers()/serverLogic()/serverBroadcastSnapshot() --
+	// see plans/phase3/P3.4c-host-embedded-mode.md for exactly what is and isn't ported.
+	void netHostIfNeeded();
+	void netHostSyncPeers();
+	void netHostDrivePeers();
+	void netHostBroadcastSnapshot();
+	Avatar* netHostProvisionPeer(uint8_t id, const FPoint& spawn_pos);
+
+	bool net_host_attempted;
+	std::set<uint8_t> net_host_players;           // ids currently bound to a connected, handshake-complete peer
+	std::map<uint8_t, PlayerCommand> net_host_cmd; // this tick's decoded command per connected peer
 
 	int npc_id;
 
