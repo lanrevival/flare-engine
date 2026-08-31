@@ -442,6 +442,9 @@ int main(int argc, char *argv[]) {
 		else if (arg == "load-script") {
 			settings->load_script = parseArgValue(arg_full);
 		}
+		else if (arg == "connect") {
+			settings->net_connect_target = parseArgValue(arg_full);
+		}
 		else if (arg == "safe-video") {
 			settings->safe_video = true;
 		}
@@ -464,6 +467,7 @@ int main(int argc, char *argv[]) {
 --load-slot=<SLOT>       Loads a save slot by numerical index.\n\
 --load-script=<SCRIPT>   Execute's a script upon loading a saved game.\n\
                          The script path is mod-relative.\n\
+--connect=<HOST>:<PORT>  Joins a running dedicated server as a network client.\n\
 --safe-video             Launches with the minimum video settings.\n\
 --no-lock-file           Skips the single-instance check, so that more than one copy\n\
                          of Flare can be run at once. Intended for testing.");

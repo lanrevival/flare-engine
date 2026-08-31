@@ -68,6 +68,8 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "ModManager.h"
 #include "NPC.h"
 #include "NPCManager.h"
+#include "net/NetProtocol.h"
+#include "net/NetworkManager.h"
 #include "PlayerCommand.h"
 #include "PlayerInventory.h"
 #include "PlayerManager.h"
@@ -85,11 +87,14 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "WidgetLabel.h"
 #include "XPScaling.h"
 
+#include <algorithm>
 #include <cassert>
 
 GameStatePlay::GameStatePlay()
 	: GameState()
 	, enemy(NULL)
+	, netmgr(NULL)
+	, net_connect_attempted(false)
 	, npc_id(-1)
 	, is_first_map_load(true)
 	, player(NULL)
@@ -144,6 +149,133 @@ GameStatePlay::GameStatePlay()
 
 void GameStatePlay::refreshWidgets() {
 	menu->alignAll();
+}
+
+// P3.4b. Connects lazily (called from logic(), not the constructor) because player->stats.name
+// is not guaranteed loaded yet when this object is constructed -- playerm->create(0) alone only
+// allocates a bare Avatar (PlayerManager::create(), PlayerManager.cpp) -- and by the time logic()
+// first runs, whatever loaded the save has already run. No-op once attempted, successfully or not:
+// this plan does not retry a failed/refused connection.
+void GameStatePlay::netConnectIfNeeded() {
+	if (net_connect_attempted || settings->net_connect_target.empty())
+		return;
+	net_connect_attempted = true;
+
+	size_t colon = settings->net_connect_target.find(':');
+	if (colon == std::string::npos) {
+		Utils::logError("GameStatePlay: --connect must be <host>:<port>, got '%s'", settings->net_connect_target.c_str());
+		return;
+	}
+	std::string host = settings->net_connect_target.substr(0, colon);
+	unsigned short port = static_cast<unsigned short>(Parse::toInt(settings->net_connect_target.substr(colon + 1)));
+
+	netmgr = new Net::NetworkManager();
+	if (!netmgr->startClient(host, port, player->stats.name, Net::hashModList(mods->mod_list))) {
+		Utils::logError("GameStatePlay: could not start network client to %s", settings->net_connect_target.c_str());
+		delete netmgr;
+		netmgr = NULL;
+	}
+}
+
+// P3.4b. Pumps the connection (no-op if not connected), applies the latest MSG_PLAYER_SNAPSHOT to
+// every OTHER player it names, and removes any previously-seen remote player the latest snapshot no
+// longer names (P3.4's snapshot is a full dump every tick, not a delta -- absence IS the disconnect
+// signal, the same contract the server side of this relies on). The local avatar (entry.id ==
+// netmgr->localPlayerID()) is deliberately skipped -- see this plan's Why for the reasoning: the
+// local player stays client-simulated, matching D2's "client-authoritative movement" on a LAN.
+void GameStatePlay::netSyncPlayers() {
+	if (!netmgr)
+		return;
+	netmgr->update();
+	if (!netmgr->hasLocalPlayerID())
+		return;
+
+	PlayerID from;
+	std::string payload;
+	Net::MsgPlayerSnapshot snap;
+	bool got_one = false;
+	while (netmgr->popPacket(&from, &payload)) {
+		if (Net::peekMessageType(payload) == Net::MSG_PLAYER_SNAPSHOT && Net::decodePlayerSnapshot(payload, snap))
+			got_one = true;
+		// Any other message type this tick is silently dropped -- nothing else is defined yet.
+	}
+	if (!got_one)
+		return;
+
+	PlayerID local_id = netmgr->localPlayerID();
+	std::vector<PlayerID> seen; // network ids, not playerm ids -- see remotePlayerId()
+	for (size_t i = 0; i < snap.players.size(); ++i) {
+		if (snap.players[i].id == local_id)
+			continue;
+		seen.push_back(snap.players[i].id);
+		netApplySnapshotEntry(snap.players[i]);
+	}
+
+	// A playerm id below REMOTE_PLAYER_ID_BASE is never one this function provisioned (it's always
+	// exactly {0}, this client's own local avatar) -- only ids at or above the base are candidates
+	// for removal here.
+	for (size_t i = 0; i < playerm->players.size(); ++i) {
+		uint8_t id = playerm->players[i]->id;
+		if (id < REMOTE_PLAYER_ID_BASE)
+			continue;
+		uint8_t network_id = static_cast<uint8_t>(id - REMOTE_PLAYER_ID_BASE);
+		if (std::find(seen.begin(), seen.end(), network_id) == seen.end()) {
+			playerm->remove(id);
+			--i; // remove() erases in place; re-check this index
+		}
+	}
+}
+
+// P3.4b. Provisions a placeholder Avatar for a never-before-seen remote player id, mirroring
+// serverProvisionPlayer()'s clone-from-local pattern (main_server.cpp) -- same reasons, same
+// load-bearing calls (loadAnimations()/loadSounds(), not cosmetic -- see that function's own
+// comment on AnimationManager's filename refcounting). Then always writes this tick's fields.
+Avatar* GameStatePlay::netApplySnapshotEntry(const Net::PlayerSnapshotEntry& entry) {
+	uint8_t local_id = remotePlayerId(entry.id);
+	Avatar* av = playerm->get(local_id);
+	if (!av) {
+		PlayerInventory* source_inv = playerm->inventoryFor(playerm->local_id);
+		ActionBarState* source_ab = playerm->actionbarFor(playerm->local_id);
+
+		playerm->create(local_id);
+		av = playerm->get(local_id);
+		PlayerInventory* new_inv = playerm->inventoryFor(local_id);
+		ActionBarState* new_ab = playerm->actionbarFor(local_id);
+		if (!av || !new_inv || !new_ab || !source_inv || !source_ab)
+			return av;
+
+		av->stats = player->stats; // class/sprite/animation-set template -- see main_server.cpp:1545
+		new_inv->loadEquipmentData();
+		*new_ab = *source_ab;
+		new_ab->owner = av;
+		for (unsigned s = 0; s < new_ab->hotkeys.size(); ++s)
+			new_ab->hotkeys[s] = 0;
+
+		av->stats.pos.x = entry.pos_x;
+		av->stats.pos.y = entry.pos_y;
+		av->loadAnimations(); // load-bearing, not cosmetic -- see main_server.cpp:1573-1579
+		av->loadSounds();
+
+		// Deliberately NOT calling wmap->collider.blockPlayer() here (unlike
+		// serverProvisionPlayer()'s D10 call, main_server.cpp:1582): Avatar::logic() is what
+		// unblocks the old cell and blocks the new one on every real move (Avatar.cpp:1007,1137,
+		// 1155), and a remote avatar here never runs its own logic() -- it is driven purely by
+		// snapshot writes below. Blocking once at spawn with no matching per-tick unblock/reblock
+		// as it moves would leave stale blocked cells behind on the map. The (acknowledged) cost:
+		// enemies do not path around a visible remote player in this pass. Revisit once this plan's
+		// snapshot-apply path also updates the collider correctly on every position change.
+	}
+
+	av->stats.pos.x = entry.pos_x;
+	av->stats.pos.y = entry.pos_y;
+	av->stats.direction = entry.direction;
+	av->stats.hp = entry.hp;
+	av->stats.current[Stats::HP_MAX] = entry.hp_max;
+	av->stats.alive = entry.alive;
+	if (!entry.animation.empty())
+		av->setAnimation(entry.animation);
+
+	return av;
 }
 
 /**
@@ -903,6 +1035,9 @@ void GameStatePlay::logic() {
 	PlayerInputLocks player_locks;
 	player_locks.copyFrom(*inpt);
 
+	netConnectIfNeeded();
+	netSyncPlayers();
+
 	if (inpt->window_resized)
 		refreshWidgets();
 
@@ -982,6 +1117,13 @@ void GameStatePlay::logic() {
 			inpt->lock[player_cmd.equip_set_delta > 0 ? Input::EQUIPMENT_SWAP : Input::EQUIPMENT_SWAP_PREV] = true;
 
 		player->logic(player_cmd, player_locks);
+
+		// P3.4b: the local avatar stays client-simulated (see this plan's Why) -- this just also
+		// forwards the same finished command to the host, so OTHER connected clients can see this
+		// player move. player_cmd is fully finished by this point in the tick (nothing above reads
+		// or writes it again), so it is safe to serialize here unmodified.
+		if (netmgr && netmgr->hasLocalPlayerID())
+			netmgr->sendToHost(Net::encodePlayerCommand(player_cmd));
 
 		// update camera -- moved out of Avatar::logic() (P1.4d); the camera has no sim
 		// consequence, only mapr->logic()'s later cam.logic() smoothing step needs the target.
@@ -1219,7 +1361,12 @@ void GameStatePlay::render() {
 	std::vector<Renderable> rens;
 	std::vector<Renderable> rens_dead;
 
-	player->addRenders(rens);
+	// P3.4b: loop over every currently-known player, not just the local one. In single-player
+	// playerm->players has exactly one entry (nothing else calls playerm->create()), so this is
+	// behaviour-identical there; it only renders more once a remote player has been provisioned by
+	// netApplySnapshotEntry().
+	for (size_t p = 0; p < playerm->players.size(); ++p)
+		playerm->players[p]->addRenders(rens);
 
 	entitym->addRenders(rens, rens_dead);
 
@@ -1330,6 +1477,18 @@ GameStatePlay::~GameStatePlay() {
 	delete entitym;
 	delete mapr;
 	delete menu;
+	// P3.4b: free any remote players' Avatar/PlayerInventory/ActionBarState/PowerBonusState before
+	// playerm itself goes away -- PlayerManager::remove() is the only place those get delete'd
+	// (PlayerManager.cpp), so leaving them in playerm->players here would leak them silently.
+	while (playerm->players.size() > 1) {
+		PlayerID id = (playerm->players[0]->id == playerm->local_id) ? playerm->players[1]->id : playerm->players[0]->id;
+		playerm->remove(id);
+	}
+	if (netmgr) {
+		netmgr->shutdown();
+		delete netmgr;
+		netmgr = NULL;
+	}
 	// After delete menu, not before -- pinv/pab must outlive MenuInventory/MenuActionBar, which
 	// bind into them (see the constructor's matching comment). playerm->remove(0) frees pc/pinv/
 	// pab/pbs together and NULLs the four aliases itself (PlayerManager::remove()).

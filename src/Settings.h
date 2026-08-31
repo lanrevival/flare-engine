@@ -165,6 +165,7 @@ public:
 	// Command-line settings
 	std::string load_slot;
 	std::string load_script;
+	std::string net_connect_target; // "<host>:<port>" -- empty means not a network client. See P3.4b.
 
 	// Misc
 	unsigned short view_w;

@@ -31,6 +31,8 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "GameState.h"
 #include "Utils.h"
 
+#include <stdint.h>
+
 class ActionBarState;
 class Avatar;
 class Entity;
@@ -39,6 +41,11 @@ class PlayerInventory;
 class PowerBonusState;
 class QuestLog;
 class WidgetLabel;
+
+namespace Net {
+	class NetworkManager;
+	struct PlayerSnapshotEntry;
+}
 
 class ActionData;
 
@@ -90,6 +97,29 @@ private:
 	void loadTitles();
 	void resetNPC();
 	bool checkPrimaryStat(const std::string& first, const std::string& second);
+
+	// P3.4b: joining a --dedicated server as a network client. See plans/phase3/
+	// P3.4b-client-join-and-remote-rendering.md for the design this mirrors from main_server.cpp.
+	void netConnectIfNeeded();
+	void netSyncPlayers();
+	Avatar* netApplySnapshotEntry(const Net::PlayerSnapshotEntry& entry);
+
+	// This client's own local avatar always occupies playerm id 0 (playerm->create(0) in the
+	// constructor, unrelated to networking). A dedicated server ALWAYS has its own player 0 too
+	// (whatever --load-slot loaded server-side, per main_server.cpp) and broadcasts it in every
+	// snapshot like any other player -- so network PlayerID 0 is not this client's own id, and
+	// reusing network ids directly as playerm ids would let the host's own id-0 entry silently
+	// overwrite this client's own local avatar the moment a snapshot arrived. Remote players are
+	// therefore given playerm ids offset by this base instead -- D3 caps real player counts at 8,
+	// so network ids are always 0..7 and this leaves no possible overlap with playerm id 0.
+	// uint8_t here, not PlayerID, so this header doesn't need to #include "PlayerManager.h" -- the
+	// two are the same type (PlayerManager.h:53), matching this file's existing forward-declare
+	// convention for everything else it only holds pointers/values of.
+	static const uint8_t REMOTE_PLAYER_ID_BASE = 8;
+	uint8_t remotePlayerId(uint8_t network_id) const { return static_cast<uint8_t>(REMOTE_PLAYER_ID_BASE + network_id); }
+
+	Net::NetworkManager* netmgr;
+	bool net_connect_attempted;
 
 	int npc_id;
 
