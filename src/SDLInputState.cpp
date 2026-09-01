@@ -237,6 +237,7 @@ void SDLInputState::initBindings() {
 	setBind(Input::DEVELOPER_CMD_1, InputBind::KEY, SDL_SCANCODE_F6, NULL);
 	setBind(Input::DEVELOPER_CMD_2, InputBind::KEY, SDL_SCANCODE_F7, NULL);
 	setBind(Input::DEVELOPER_CMD_3, InputBind::KEY, SDL_SCANCODE_F8, NULL);
+	setBind(Input::CANCEL_TRAVEL, InputBind::KEY, SDL_SCANCODE_F9, NULL);
 
 	setBind(Input::EQUIPMENT_SWAP, InputBind::KEY, SDL_SCANCODE_TAB, NULL);
 	setBind(Input::EQUIPMENT_SWAP, InputBind::KEY, SDL_SCANCODE_K, NULL);
@@ -951,6 +952,7 @@ void SDLInputState::setCommonStrings() {
 	binding_name[Input::DEVELOPER_CMD_1] = msg->get("Developer Command 1");
 	binding_name[Input::DEVELOPER_CMD_2] = msg->get("Developer Command 2");
 	binding_name[Input::DEVELOPER_CMD_3] = msg->get("Developer Command 3");
+	binding_name[Input::CANCEL_TRAVEL] = msg->get("Cancel Party Travel");
 	binding_name[Input::CTRL] = msg->get("Ctrl");
 	binding_name[Input::SHIFT] = msg->get("Shift");
 	binding_name[Input::ALT] = msg->get("Alt");

@@ -73,11 +73,12 @@ public:
 
 	// Cancel a pending party travel countdown (D23). Any connected player can send this, not just
 	// whoever's trigger started the countdown -- it's the party's decision, not the trigger's.
-	// NOT built from InputState: there is no keybinding for it (see P3.6b's own Out of scope --
-	// adding one is real, separate scope, InputState.h/keybinds.txt, not touched there). A
-	// connected peer's client fills this at its own future UI boundary; until that exists, this
-	// field only ever arrives already-decoded off the wire (see net/NetProtocol.cpp's
-	// encode/decodePlayerCommand), same disclosed-gap shape as respawn's own client-side note.
+	// Built from InputState in PlayerCommandBuilder::build() (Input::CANCEL_TRAVEL), the same
+	// pressing-and-not-locked idiom as move_up/aim_up/etc -- unlike respawn, this needs no menu/UI
+	// lookup, so it lives in build() rather than at GameStatePlay's/main_server's own boundary
+	// (P3.6e). A connected peer's own build() runs on ITS machine and reaches this player's copy
+	// only via the wire (see net/NetProtocol.cpp's encode/decodePlayerCommand) -- that path is
+	// unchanged and remains how a peer other than the one at this keyboard can cancel travel.
 	bool cancel_travel;
 
 	// Which way to step through the character's equipment sets: +1 next, -1 previous, 0 no

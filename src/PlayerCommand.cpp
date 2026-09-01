@@ -107,6 +107,11 @@ void PlayerCommandBuilder::build(PlayerCommand& cmd, const InputState& in, const
 	else
 		cmd.equip_set_delta = 0;
 
+	// Cancel a pending party travel countdown (D23). Unlike respawn, this needs no menu/UI lookup,
+	// so it belongs here with everything else rather than at GameStatePlay's/main_server's own
+	// boundary -- one line wires both callers. See PlayerCommand.h's own comment on the field.
+	cmd.cancel_travel = in.pressing[Input::CANCEL_TRAVEL] && !in.lock[Input::CANCEL_TRAVEL];
+
 	// actions are filled by the caller from menu->act->checkAction(); they are the one part of
 	// player intent the engine already modelled as a command list.
 }

@@ -67,6 +67,7 @@ namespace Input {
 		DEVELOPER_CMD_1,
 		DEVELOPER_CMD_2,
 		DEVELOPER_CMD_3,
+		CANCEL_TRAVEL,
 
 		// non-modifiable
 		CTRL,

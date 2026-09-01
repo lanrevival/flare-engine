@@ -109,6 +109,7 @@ InputState::InputState(void)
 	config_keys[Input::DEVELOPER_CMD_1] = "developer_cmd_1";
 	config_keys[Input::DEVELOPER_CMD_2] = "developer_cmd_2";
 	config_keys[Input::DEVELOPER_CMD_3] = "developer_cmd_3";
+	config_keys[Input::CANCEL_TRAVEL] = "cancel_travel";
 }
 
 InputState::~InputState() {
