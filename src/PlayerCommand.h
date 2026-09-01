@@ -71,6 +71,15 @@ public:
 	// Phase 3 sets this from a network message instead; nothing in Avatar has to change for that.
 	bool respawn;
 
+	// Cancel a pending party travel countdown (D23). Any connected player can send this, not just
+	// whoever's trigger started the countdown -- it's the party's decision, not the trigger's.
+	// NOT built from InputState: there is no keybinding for it (see P3.6b's own Out of scope --
+	// adding one is real, separate scope, InputState.h/keybinds.txt, not touched there). A
+	// connected peer's client fills this at its own future UI boundary; until that exists, this
+	// field only ever arrives already-decoded off the wire (see net/NetProtocol.cpp's
+	// encode/decodePlayerCommand), same disclosed-gap shape as respawn's own client-side note.
+	bool cancel_travel;
+
 	// Which way to step through the character's equipment sets: +1 next, -1 previous, 0 no
 	// change. An int rather than two bools because the two keys are mutually exclusive and
 	// modelling them as separate flags invites a state that means nothing.

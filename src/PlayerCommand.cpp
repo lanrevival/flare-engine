@@ -33,6 +33,7 @@ PlayerCommand::PlayerCommand()
 	, using_mouse(false)
 	, click_consumed_by_ui(false)
 	, respawn(false)
+	, cancel_travel(false)
 	, equip_set_delta(0)
 	, actions() {
 }

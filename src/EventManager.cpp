@@ -999,6 +999,12 @@ bool EventManager::executeEventInternal(Event &ev, bool skip_delay, Avatar* trig
 
 			if (Filesystem::fileExists(mods->locate(ec->s))) {
 				wmap->teleportation = true;
+				// P3.6b: the ONLY call site in the engine that sets this -- see Map.h's own comment
+				// on the field. Marks this as "the world simulation decided this" (a player walked
+				// onto an exit tile, or a dialog chose one), as opposed to an administrative
+				// teleport, so main_server.cpp's serverCheckTeleport() knows a party-travel
+				// countdown may apply.
+				wmap->teleport_from_event = true;
 				wmap->teleport_mapname = ec->s;
 
 				if (ec->data[0].Int == -1 && ec->data[1].Int == -1) {

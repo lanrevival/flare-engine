@@ -192,6 +192,7 @@ std::string encodePlayerCommand(const PlayerCommand& cmd) {
 
 	uint8_t byte3 = 0;
 	if (cmd.respawn) byte3 |= 0x01;
+	if (cmd.cancel_travel) byte3 |= 0x02;
 	writeU8(out, byte3);
 
 	writeFloat(out, cmd.mm_map_target.x);
@@ -243,6 +244,7 @@ bool decodePlayerCommand(const std::string& payload, PlayerCommand& out) {
 	out.click_consumed_by_ui = (byte2 & 0x80) != 0;
 
 	out.respawn = (byte3 & 0x01) != 0;
+	out.cancel_travel = (byte3 & 0x02) != 0;
 
 	if (!readFloat(payload, offset, out.mm_map_target.x) || !readFloat(payload, offset, out.mm_map_target.y))
 		return false;

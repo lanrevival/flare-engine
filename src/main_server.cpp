@@ -487,9 +487,65 @@ static void serverCheckSaveEvent() {
 // established "which players does multi-player code touch" membership test instead of inventing a
 // second one.
 static bool serverPlayerIsDriven(PlayerID id);
+
+// P3.6b: D23's 3-second countdown-with-cancel for a party-wide (event-triggered) intermap travel.
+// See serverCheckTeleport() for the state machine and Map::teleport_from_event's own comment for
+// why only EventManager-triggered travel ever engages this.
+static bool server_travel_countdown_active = false;
+static Timer server_travel_timer;
+static bool server_travel_cancel_requested = false;
+
 static void serverCheckTeleport() {
 	Avatar* local = playerm->local();
 	bool on_load_teleport = false;
+
+	// P3.6b: consume-and-clear teleport_from_event unconditionally, every tick wmap->teleportation
+	// is set at all, so it can never survive stale into a later, unrelated, administrative
+	// teleport (see Map::teleport_from_event's own comment).
+	bool travel_countdown_started_this_tick = false;
+	if (wmap->teleportation) {
+		bool from_event = wmap->teleport_from_event;
+		wmap->teleport_from_event = false;
+
+		// D23's countdown only ever applies when there's an actual party to coordinate with --
+		// single-player (and every existing replay-corpus fixture, which is always exactly one
+		// player) takes neither branch below, and an intermap walk stays exactly as instant as it
+		// always has been. See AC-REPLAY.
+		if (from_event && playerm->players.size() > 1) {
+			if (!server_travel_countdown_active) {
+				server_travel_countdown_active = true;
+				travel_countdown_started_this_tick = true;
+				server_travel_timer.setDuration(3 * Settings::SIM_TICK_HZ);
+
+				std::vector<MessageArg> args;
+				args.push_back(MessageArg(wmap->teleport_mapname));
+				args.push_back(MessageArg(3));
+				if (netmgr)
+					netmgr->broadcast(Net::encodeSystemMessage("Traveling to %s in %d seconds...", args));
+			}
+			// else: a second event trigger while a countdown is already running -- the party is
+			// already committed to leaving via the first one. Dropped, not restarted, not stacked.
+
+			wmap->teleportation = false; // held -- teleport_mapname/teleport_destination/etc are
+			                              // left exactly as EventManager.cpp just set them,
+			                              // untouched, until the countdown ends (or is cancelled,
+			                              // below)
+		}
+	}
+
+	if (server_travel_countdown_active && !travel_countdown_started_this_tick) {
+		if (server_travel_cancel_requested) {
+			server_travel_countdown_active = false;
+			server_travel_cancel_requested = false;
+			wmap->teleport_mapname = "";
+			if (netmgr)
+				netmgr->broadcast(Net::encodeSystemMessage("Party travel cancelled.", std::vector<MessageArg>()));
+		}
+		else if (server_travel_timer.tick()) {
+			server_travel_countdown_active = false;
+			wmap->teleportation = true; // let the unmodified block below run, this same tick
+		}
+	}
 
 	if (wmap->teleportation || local->stats.teleportation) {
 
@@ -602,6 +658,14 @@ static void serverCheckTeleport() {
 				player->stats.pos = dest;
 				player->teleport_camera_lock = true; // self-clears next tick server-side (mapr==NULL, Avatar.cpp:639) -- same one-tick movement settle local already gets
 				player->handleNewMap();
+
+				// P3.6b: tell this peer's own client which map it just landed on and where --
+				// MSG_MAP_SYNC was previously sent only once, at join (P3.5a); this is its second
+				// and only other call site, on completion of a party-wide travel. Closes the gap
+				// MsgMapSync's own comment named: "not a response to later party travel -- P3.6's
+				// job."
+				if (netmgr)
+					netmgr->sendTo(player->id, Net::encodeMapSync(wmap->getFilename(), dest.x, dest.y));
 
 				if (playerm->players.size() > 1)
 					wmap->collider.blockPlayer(dest.x, dest.y, player->id);
@@ -1066,6 +1130,11 @@ static void serverLogic() {
 		// this tick's decoded network packet (or a neutral default -- see serverNetCommandFor()),
 		// and their locks are never copied to/from anything -- remote click-arbitration has no
 		// meaning yet (no presentation layer has reached a remote player).
+		// P3.6b: recomputed fresh every tick, never accumulated -- true only if some driven
+		// player's command THIS tick asks to cancel a pending party travel countdown. See
+		// serverCheckTeleport().
+		server_travel_cancel_requested = false;
+
 		for (size_t p = 0; p < playerm->players.size(); ++p) {
 			Avatar* player = playerm->players[p];
 			if (!serverPlayerIsDriven(player->id))
@@ -1099,6 +1168,12 @@ static void serverLogic() {
 				// encode/decodePlayerCommand), same field, same downstream Avatar::logic() path.
 				cmd = serverNetCommandFor(player->id);
 			}
+
+			// P3.6b: same "arrives already decoded off the wire" story as respawn above --
+			// local has no keybinding for this (see PlayerCommand.h's own comment on the field),
+			// so only a connected peer's command can ever set it.
+			if (cmd.cancel_travel)
+				server_travel_cancel_requested = true;
 
 			if (inventory->applyEquipmentSetDelta(cmd.equip_set_delta)) {
 				if (is_local) {

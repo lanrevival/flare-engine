@@ -284,6 +284,12 @@ public:
 
 	// teleport handling
 	bool teleportation;
+	// P3.6b: one-shot tag -- true only when EventManager.cpp's INTERMAP component (a world-event-
+	// triggered map exit, e.g. walking onto an exit tile) is what set teleportation this tick, as
+	// opposed to an administrative source (respawn, transform-expiry, save/load,
+	// main_server.cpp's serverResetGame). Consumed and unconditionally cleared at the top of every
+	// serverCheckTeleport() call -- see that function's own comment.
+	bool teleport_from_event;
 	FPoint teleport_destination;
 	int teleport_destination_id;
 	std::string teleport_mapname;
