@@ -63,6 +63,12 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "UtilsParsing.h"
 #include "Version.h"
 
+// P4.0. File-local helpers shared between saveExtendedItems()/loadGame() and the new per-character
+// [extended_item] embedding in avatar.txt -- see their own definitions, below saveExtendedItems(),
+// for what each does.
+static void writeExtendedItemFields(std::ofstream& outfile, Item* item);
+static std::string remapExtendedItemIDs(const std::string& csv, const std::map<ItemID, ItemID>& remap);
+
 SaveLoad::SaveLoad()
 	: game_slot(0) {
 }
@@ -147,6 +153,45 @@ void SaveLoad::saveGame(Avatar* avatar, PlayerInventory* inventory, ActionBarSta
 				outfile << ",";
 		}
 		outfile << "\n";
+
+		// P4.0: embed full definitions for every extended (rolled) item this character currently
+		// has equipped or carried, so it survives loading on a machine whose own
+		// extended_items.txt disagrees about what ID X is. MUST be written before
+		// equipped_quantity=/equipped=/carried_quantity=/carried= below -- loadGame() is a single
+		// top-to-bottom FileParser pass with no seeking, so the remap table it builds from these
+		// blocks has to exist before it reaches the lines that need it. Stash is out of scope
+		// (P4.0's own Why: it has no headless equivalent at all today).
+		{
+			std::vector<ItemID> already_written;
+			for (int pass = 0; pass < 2; ++pass) {
+				ItemStorage& storage = (pass == 0) ? inventory->inventory[PlayerInventory::EQUIPMENT] : inventory->inventory[PlayerInventory::CARRIED];
+				for (int i = 0; i < storage.getSlotNumber(); ++i) {
+					ItemID id = storage[i].item;
+					if (!items->isValid(id) || id < eset->loot.extended_items_offset || items->items[id]->parent == 0)
+						continue;
+					if (std::find(already_written.begin(), already_written.end(), id) != already_written.end())
+						continue;
+					already_written.push_back(id);
+
+					Item* item = items->items[id];
+					outfile << "[extended_item]" << std::endl;
+					outfile << "id=" << id << "," << item->parent << std::endl;
+					writeExtendedItemFields(outfile, item);
+					outfile << std::endl;
+				}
+			}
+
+			// FileParser's "current section" only changes on a NEW [...] header (FileParser.cpp:
+			// 158-159) -- it never resets to "no section" on its own. Every field below this point
+			// is a plain, non-sectioned key, exactly like every field above the [extended_item]
+			// blocks, so an explicit sentinel section is required here or every remaining line in
+			// this file (equipped=, spawn=, campaign=, ...) would be misparsed as more
+			// [extended_item] fields. Only emitted when at least one block was written above --
+			// an unmodified save (no extended items) needs no sentinel, since infile.section never
+			// becomes "extended_item" in the first place.
+			if (!already_written.empty())
+				outfile << "[base]" << std::endl;
+		}
 
 		// equipped gear
 		outfile << "equipped_quantity=" << inventory->inventory[PlayerInventory::EQUIPMENT].getQuantities() << "\n";
@@ -343,87 +388,132 @@ void SaveLoad::saveExtendedItems(bool save_storage_items, PlayerInventory* inven
 
 			outfile << "[item]" << std::endl;
 			outfile << "id=" << i << "," << item->parent << std::endl;
-			outfile << "level=" << item->level << std::endl;
-
-			if (item->quality < items->item_qualities.size() && !items->item_qualities[item->quality].name.empty()) {
-				outfile << "quality=" << items->item_qualities[item->quality].id << std::endl;
-			}
-
-			if (item->requires_level.randomized) {
-				outfile << "requires_level=" << item->requires_level.serialize(false) << std::endl;
-			}
-
-			for (size_t j = 0; j < eset->primary_stats.list.size(); ++j) {
-				if (item->requires_stat[j].randomized) {
-					outfile << "requires_stat=" << eset->primary_stats.list[j].id << "," << item->requires_stat[j].serialize(false) << std::endl;
-				}
-			}
-
-			if (item->price.randomized) {
-				outfile << "price=" << item->price.serialize(false) << std::endl;
-			}
-
-			if (item->price_sell.randomized) {
-				outfile << "price=" << item->price_sell.serialize(false) << std::endl;
-			}
-
-			if (item->base_abs.min.randomized) {
-				outfile << "abs_min=" << item->base_abs.min.serialize(false) << std::endl;
-			}
-
-			if (item->base_abs.max.randomized) {
-				outfile << "abs_max=" << item->base_abs.max.serialize(false) << std::endl;
-			}
-
-			for (size_t j = 0; j < eset->damage_types.list.size(); ++j) {
-				if (item->base_dmg[j].min.randomized) {
-					outfile << "dmg_min=" << eset->damage_types.list[j].id << "," << item->base_dmg[j].min.serialize(false) << std::endl;
-				}
-				if (item->base_dmg[j].max.randomized) {
-					outfile << "dmg_max=" << eset->damage_types.list[j].id << "," << item->base_dmg[j].max.serialize(false) << std::endl;
-				}
-			}
-
-			for (size_t j = 0; j < item->bonus.size(); ++j) {
-				BonusData* bonus = &(item->bonus[j]);
-
-				if (!bonus->is_extended)
-					continue;
-
-				if (bonus->power_id > 0)
-					outfile << "bonus_power_level=";
-				else
-					outfile << "bonus=";
-
-				if (bonus->type == BonusData::SPEED)
-					outfile << "speed";
-				else if (bonus->type == BonusData::ATTACK_SPEED)
-					outfile << "attack_speed";
-				else if (bonus->type == BonusData::STAT)
-					outfile << Stats::KEY[bonus->index];
-				else if (bonus->type == BonusData::DAMAGE_MIN)
-					outfile << eset->damage_types.list[bonus->index].min;
-				else if (bonus->type == BonusData::DAMAGE_MAX)
-					outfile << eset->damage_types.list[bonus->index].max;
-				else if (bonus->type == BonusData::RESIST_ELEMENT)
-					outfile << eset->damage_types.list[bonus->index].resist;
-				else if (bonus->type == BonusData::PRIMARY_STAT)
-					outfile << eset->primary_stats.list[bonus->index].id;
-				else if (bonus->type == BonusData::RESOURCE_STAT)
-					outfile << eset->resource_stats.list[bonus->index].ids[bonus->sub_index];
-				else if (bonus->type == BonusData::POWER_LEVEL)
-					outfile << bonus->power_id;
-				else
-					continue;
-
-				outfile << "," << bonus->value.serialize(bonus->is_multiplier);
-
-				outfile << std::endl;
-			}
+			writeExtendedItemFields(outfile, item);
 			outfile << std::endl;
 		}
 	}
 
+}
+
+// Extracted unchanged from saveExtendedItems()'s own per-item body (P4.0), so
+// saves/<prefix>/extended_items.txt and a character's own embedded [extended_item] blocks in
+// avatar.txt (saveGame(), below) can never drift apart on what a field line means. Writes only the
+// field lines -- the caller writes its own "[item]"/"id=..." header first, since the two callers
+// use different section names and the id line's meaning (exact vs. to-be-reallocated) differs.
+static void writeExtendedItemFields(std::ofstream& outfile, Item* item) {
+	outfile << "level=" << item->level << std::endl;
+
+	if (item->quality < items->item_qualities.size() && !items->item_qualities[item->quality].name.empty()) {
+		outfile << "quality=" << items->item_qualities[item->quality].id << std::endl;
+	}
+
+	if (item->requires_level.randomized) {
+		outfile << "requires_level=" << item->requires_level.serialize(false) << std::endl;
+	}
+
+	for (size_t j = 0; j < eset->primary_stats.list.size(); ++j) {
+		if (item->requires_stat[j].randomized) {
+			outfile << "requires_stat=" << eset->primary_stats.list[j].id << "," << item->requires_stat[j].serialize(false) << std::endl;
+		}
+	}
+
+	if (item->price.randomized) {
+		outfile << "price=" << item->price.serialize(false) << std::endl;
+	}
+
+	if (item->price_sell.randomized) {
+		outfile << "price=" << item->price_sell.serialize(false) << std::endl;
+	}
+
+	if (item->base_abs.min.randomized) {
+		outfile << "abs_min=" << item->base_abs.min.serialize(false) << std::endl;
+	}
+
+	if (item->base_abs.max.randomized) {
+		outfile << "abs_max=" << item->base_abs.max.serialize(false) << std::endl;
+	}
+
+	for (size_t j = 0; j < eset->damage_types.list.size(); ++j) {
+		if (item->base_dmg[j].min.randomized) {
+			outfile << "dmg_min=" << eset->damage_types.list[j].id << "," << item->base_dmg[j].min.serialize(false) << std::endl;
+		}
+		if (item->base_dmg[j].max.randomized) {
+			outfile << "dmg_max=" << eset->damage_types.list[j].id << "," << item->base_dmg[j].max.serialize(false) << std::endl;
+		}
+	}
+
+	for (size_t j = 0; j < item->bonus.size(); ++j) {
+		BonusData* bonus = &(item->bonus[j]);
+
+		if (!bonus->is_extended)
+			continue;
+
+		if (bonus->power_id > 0)
+			outfile << "bonus_power_level=";
+		else
+			outfile << "bonus=";
+
+		if (bonus->type == BonusData::SPEED)
+			outfile << "speed";
+		else if (bonus->type == BonusData::ATTACK_SPEED)
+			outfile << "attack_speed";
+		else if (bonus->type == BonusData::STAT)
+			outfile << Stats::KEY[bonus->index];
+		else if (bonus->type == BonusData::DAMAGE_MIN)
+			outfile << eset->damage_types.list[bonus->index].min;
+		else if (bonus->type == BonusData::DAMAGE_MAX)
+			outfile << eset->damage_types.list[bonus->index].max;
+		else if (bonus->type == BonusData::RESIST_ELEMENT)
+			outfile << eset->damage_types.list[bonus->index].resist;
+		else if (bonus->type == BonusData::PRIMARY_STAT)
+			outfile << eset->primary_stats.list[bonus->index].id;
+		else if (bonus->type == BonusData::RESOURCE_STAT)
+			outfile << eset->resource_stats.list[bonus->index].ids[bonus->sub_index];
+		else if (bonus->type == BonusData::POWER_LEVEL)
+			outfile << bonus->power_id;
+		else
+			continue;
+
+		outfile << "," << bonus->value.serialize(bonus->is_multiplier);
+
+		outfile << std::endl;
+	}
+}
+
+// P4.0. Rewrites a saved equipped=/carried= CSV of raw item IDs so any ID this character's own
+// [extended_item] blocks were just reallocated (see loadGame() below) points at the new,
+// locally-safe ID instead of the one recorded on whatever machine originally rolled it. Empty map
+// -> returns csv unchanged, byte-for-byte: every save written before this plan, and every ID that
+// isn't an extended item this character owns, is completely untouched.
+static std::string remapExtendedItemIDs(const std::string& csv, const std::map<ItemID, ItemID>& remap) {
+	if (remap.empty())
+		return csv;
+
+	std::stringstream result;
+	std::string remaining = csv;
+	bool first = true;
+
+	while (true) {
+		size_t comma = remaining.find(',');
+		std::string tok = (comma == std::string::npos) ? remaining : remaining.substr(0, comma);
+
+		if (!first)
+			result << ",";
+		first = false;
+
+		ItemID id = Parse::toItemID(tok);
+		std::map<ItemID, ItemID>::const_iterator it = remap.find(id);
+		if (it != remap.end())
+			result << it->second;
+		else
+			result << tok;
+
+		if (comma == std::string::npos)
+			break;
+		remaining = remaining.substr(comma + 1);
+	}
+
+	return result.str();
 }
 
 /**
@@ -446,6 +536,13 @@ void SaveLoad::loadGame(Avatar* avatar, PlayerInventory* inventory, ActionBarSta
 	size_t stash_tab = 0;
 	Version save_version(VersionInfo::MIN);
 
+	// P4.0: old_id -> newly-reallocated-id for every [extended_item] block this save embeds.
+	// Populated as those blocks are parsed (below); consumed when equipped=/carried= are reached,
+	// which is safe only because saveGame() always writes them earlier in the file than
+	// equipped=/carried= -- see that function's own comment on the ordering.
+	std::map<ItemID, ItemID> extended_item_remap;
+	Item* current_extended_item = NULL;
+
 	FileParser infile;
 	std::vector<PowerID> hotkeys(MenuActionBar::SLOT_MAX, -1);
 
@@ -454,6 +551,25 @@ void SaveLoad::loadGame(Avatar* avatar, PlayerInventory* inventory, ActionBarSta
 
 	if (infile.open(ss.str(), !FileParser::MOD_FILE, FileParser::ERROR_NORMAL)) {
 		while (infile.next()) {
+			if (infile.section == "extended_item") {
+				if (infile.key == "id") {
+					ItemID old_id = Parse::toItemID(Parse::popFirstString(infile.val));
+					ItemID parent_id = items->verifyID(Parse::toItemID(Parse::popFirstString(infile.val)), &infile, !ItemManager::VERIFY_ALLOW_ZERO, !ItemManager::VERIFY_ALLOCATE);
+
+					if (parent_id != 0) {
+						ItemID new_id = items->allocateExtendedItem(0, parent_id);
+						extended_item_remap[old_id] = new_id;
+						current_extended_item = items->items[new_id];
+					}
+					else {
+						current_extended_item = NULL;
+					}
+				}
+				else if (current_extended_item) {
+					items->readExtendedItemField(current_extended_item, infile);
+				}
+				continue;
+			}
 			if (infile.key == "name") avatar->stats.name = infile.val;
 			else if (infile.key == "permadeath") {
 				avatar->stats.permadeath = Parse::toBool(infile.val);
@@ -489,7 +605,7 @@ void SaveLoad::loadGame(Avatar* avatar, PlayerInventory* inventory, ActionBarSta
 				currency = Parse::toInt(infile.val);
 			}
 			else if (infile.key == "equipped") {
-				inventory->inventory[PlayerInventory::EQUIPMENT].setItems(infile.val);
+				inventory->inventory[PlayerInventory::EQUIPMENT].setItems(remapExtendedItemIDs(infile.val, extended_item_remap));
 				inventory->inventory[PlayerInventory::EQUIPMENT].setForeign(false);
 			}
 			else if (infile.key == "equipped_quantity") {
@@ -508,7 +624,7 @@ void SaveLoad::loadGame(Avatar* avatar, PlayerInventory* inventory, ActionBarSta
 					inventory->active_equipment_set = set;
 			}
 			else if (infile.key == "carried") {
-				inventory->inventory[PlayerInventory::CARRIED].setItems(infile.val);
+				inventory->inventory[PlayerInventory::CARRIED].setItems(remapExtendedItemIDs(infile.val, extended_item_remap));
 				inventory->inventory[PlayerInventory::CARRIED].setForeign(false);
 			}
 			else if (infile.key == "carried_quantity") {
@@ -577,6 +693,14 @@ void SaveLoad::loadGame(Avatar* avatar, PlayerInventory* inventory, ActionBarSta
 		}
 
 		infile.close();
+
+		// P4.0: finalize every freshly-reallocated extended item, same as loadExtendedItems() does
+		// for its own items -- level-scaled stats depend on fields that arrive across several
+		// lines, so this can't run until the whole file (and thus every field for every item) has
+		// been read.
+		for (std::map<ItemID, ItemID>::iterator it = extended_item_remap.begin(); it != extended_item_remap.end(); ++it) {
+			items->items[it->second]->updateLevelScaling();
+		}
 	}
 	else Utils::logError("SaveLoad: Unable to open %s!", ss.str().c_str());
 

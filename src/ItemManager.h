@@ -335,7 +335,6 @@ private:
 	void getTooltipInputHint(TooltipData& tip, ItemStack stack, int context);
 
 	ItemRandomizerDef* loadRandomizerDef(const::std::string& filename);
-	ItemID allocateExtendedItem(ItemID item_id, ItemID parent_id);
 
 	std::vector<ItemRandomizerDef*> randomizer_defs;
 
@@ -373,6 +372,14 @@ public:
 	ItemID verifyID(ItemID item_id, FileParser* infile, bool allow_zero, bool allocate);
 	ItemID getExtendedItem(ItemID item_id);
 	void getExtendedStacks(ItemID item_id, unsigned quantity, std::vector<ItemStack>& stacks);
+	ItemID allocateExtendedItem(ItemID item_id, ItemID parent_id);
+
+	// Applies one already-read key=value pair (level, quality, requires_level, requires_stat,
+	// price, price_sell, abs_min, abs_max, dmg_min, dmg_max, bonus, bonus_power_level) to item.
+	// Shared by loadExtendedItems() (the machine-local saves/<prefix>/extended_items.txt path) and
+	// SaveLoad's per-character [extended_item] blocks in avatar.txt (P4.0) -- one field format,
+	// two callers, so the two save locations can never drift apart on what a line means.
+	void readExtendedItemField(Item* item, FileParser& infile);
 
 	std::vector<Item*> items;
 	std::vector<ItemType> item_types;

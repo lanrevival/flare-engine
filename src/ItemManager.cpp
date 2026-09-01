@@ -2122,79 +2122,7 @@ void ItemManager::loadExtendedItems(const std::string& filename) {
 		}
 		if (id_line) continue;
 
-		if (infile.key == "level") {
-			item->level = Parse::toInt(infile.val);
-		}
-		else if (infile.key == "quality") {
-			item->quality = getItemQualityIndexByString(infile.val);
-		}
-		else if (infile.key == "requires_level") {
-			item->requires_level.parse(infile.val);
-
-			// scaled values on extended items are flagged as randomized so they will be serialized when saving
-			item->requires_level.randomized = true;
-		}
-		else if (infile.key == "requires_stat") {
-			std::string stat_id = Parse::popFirstString(infile.val);
-			size_t req_stat_index = eset->primary_stats.getIndexByID(stat_id);
-
-			if (req_stat_index < eset->primary_stats.list.size()) {
-				item->requires_stat[req_stat_index].parse(infile.val);
-				item->requires_stat[req_stat_index].randomized = true;
-			}
-		}
-		else if (infile.key == "price") {
-			item->price.parse(infile.val);
-			item->price.randomized = true;
-		}
-		else if (infile.key == "price_sell") {
-			item->price_sell.parse(infile.val);
-			item->price_sell.randomized = true;
-		}
-		else if (infile.key == "abs_min") {
-			item->base_abs.min.parse(infile.val);
-			item->base_abs.min.randomized = true;
-		}
-		else if (infile.key == "abs_max") {
-			item->base_abs.max.parse(infile.val);
-			item->base_abs.max.randomized = true;
-		}
-		else if (infile.key == "dmg_min") {
-			std::string dmg_id = Parse::popFirstString(infile.val);
-
-			for (size_t i = 0; i < eset->damage_types.list.size(); ++i) {
-				if (dmg_id == eset->damage_types.list[i].id) {
-					item->base_dmg[i].min.parse(infile.val);
-					item->base_dmg[i].min.randomized = true;
-					break;
-				}
-			}
-		}
-		else if (infile.key == "dmg_max") {
-			std::string dmg_id = Parse::popFirstString(infile.val);
-
-			for (size_t i = 0; i < eset->damage_types.list.size(); ++i) {
-				if (dmg_id == eset->damage_types.list[i].id) {
-					item->base_dmg[i].max.parse(infile.val);
-					item->base_dmg[i].max.randomized = true;
-					break;
-				}
-			}
-		}
-		else if (infile.key == "bonus") {
-			BonusData bdata;
-			bdata.is_extended = true;
-			parseBonus(bdata, infile);
-			item->bonus.push_back(bdata);
-		}
-		else if (infile.key == "bonus_power_level") {
-			BonusData bdata;
-			bdata.is_extended = true;
-			bdata.type = BonusData::POWER_LEVEL;
-			bdata.power_id = Parse::toPowerID(Parse::popFirstString(infile.val));
-			bdata.value.parse(infile.val);
-			item->bonus.push_back(bdata);
-		}
+		readExtendedItemField(item, infile);
 	}
 	infile.close();
 
@@ -2215,6 +2143,85 @@ void ItemManager::loadExtendedItems(const std::string& filename) {
 		extended_item_count = count_allocated;
 
 	Utils::logInfo("ItemManager: Extended Item IDs = %zu reserved / %zu allocated / %zu empty / %zu bytes used", extended_item_count, count_allocated, extended_item_count-count_allocated, (sizeof(Item*) * extended_item_count) + (sizeof(Item) * count_allocated));
+}
+
+// Extracted unchanged from loadExtendedItems()'s own field-parsing chain (P4.0), so
+// saves/<prefix>/extended_items.txt and a character's own embedded [extended_item] blocks in
+// avatar.txt (SaveLoad.cpp) can never drift apart on what a field line means.
+void ItemManager::readExtendedItemField(Item* item, FileParser& infile) {
+	if (infile.key == "level") {
+		item->level = Parse::toInt(infile.val);
+	}
+	else if (infile.key == "quality") {
+		item->quality = getItemQualityIndexByString(infile.val);
+	}
+	else if (infile.key == "requires_level") {
+		item->requires_level.parse(infile.val);
+
+		// scaled values on extended items are flagged as randomized so they will be serialized when saving
+		item->requires_level.randomized = true;
+	}
+	else if (infile.key == "requires_stat") {
+		std::string stat_id = Parse::popFirstString(infile.val);
+		size_t req_stat_index = eset->primary_stats.getIndexByID(stat_id);
+
+		if (req_stat_index < eset->primary_stats.list.size()) {
+			item->requires_stat[req_stat_index].parse(infile.val);
+			item->requires_stat[req_stat_index].randomized = true;
+		}
+	}
+	else if (infile.key == "price") {
+		item->price.parse(infile.val);
+		item->price.randomized = true;
+	}
+	else if (infile.key == "price_sell") {
+		item->price_sell.parse(infile.val);
+		item->price_sell.randomized = true;
+	}
+	else if (infile.key == "abs_min") {
+		item->base_abs.min.parse(infile.val);
+		item->base_abs.min.randomized = true;
+	}
+	else if (infile.key == "abs_max") {
+		item->base_abs.max.parse(infile.val);
+		item->base_abs.max.randomized = true;
+	}
+	else if (infile.key == "dmg_min") {
+		std::string dmg_id = Parse::popFirstString(infile.val);
+
+		for (size_t i = 0; i < eset->damage_types.list.size(); ++i) {
+			if (dmg_id == eset->damage_types.list[i].id) {
+				item->base_dmg[i].min.parse(infile.val);
+				item->base_dmg[i].min.randomized = true;
+				break;
+			}
+		}
+	}
+	else if (infile.key == "dmg_max") {
+		std::string dmg_id = Parse::popFirstString(infile.val);
+
+		for (size_t i = 0; i < eset->damage_types.list.size(); ++i) {
+			if (dmg_id == eset->damage_types.list[i].id) {
+				item->base_dmg[i].max.parse(infile.val);
+				item->base_dmg[i].max.randomized = true;
+				break;
+			}
+		}
+	}
+	else if (infile.key == "bonus") {
+		BonusData bdata;
+		bdata.is_extended = true;
+		parseBonus(bdata, infile);
+		item->bonus.push_back(bdata);
+	}
+	else if (infile.key == "bonus_power_level") {
+		BonusData bdata;
+		bdata.is_extended = true;
+		bdata.type = BonusData::POWER_LEVEL;
+		bdata.power_id = Parse::toPowerID(Parse::popFirstString(infile.val));
+		bdata.value.parse(infile.val);
+		item->bonus.push_back(bdata);
+	}
 }
 
 void ItemManager::getExtendedStacks(ItemID item_id, unsigned quantity, std::vector<ItemStack>& stacks) {
