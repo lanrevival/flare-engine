@@ -705,6 +705,43 @@ static void serverCheckTeleport() {
 		}
 	}
 
+	// P3.6d: a non-local player's own PERSONAL teleport (stats.teleportation, e.g. a blink power).
+	// Always intramap -- StatBlock has no teleport_mapname field, matching the outline's own
+	// "Intramap: blink power... None [coordination needed]" row, so no countdown, no map load, no
+	// wmap involvement at all, just a per-player position correction. PowerManager::buff() already
+	// sets this correctly for whichever player's own StatBlock cast the power (the
+	// player->action_queue = cmd.actions line above is what makes that activation reachable at all
+	// for a connected peer); this loop is purely the consumption side, mirroring P3.6a's own
+	// party-repositioning loop's shape.
+	for (size_t p = 0; p < playerm->players.size(); ++p) {
+		Avatar* player = playerm->players[p];
+		if (player->id == local->id || !serverPlayerIsDriven(player->id) || !player->stats.teleportation)
+			continue;
+
+		if (playerm->players.size() > 1)
+			wmap->collider.unblockPlayer(player->stats.pos.x, player->stats.pos.y, player->id);
+		else
+			wmap->collider.unblock(player->stats.pos.x, player->stats.pos.y);
+
+		player->stats.pos.x = player->stats.teleport_destination.x;
+		player->stats.pos.y = player->stats.teleport_destination.y;
+		player->teleport_camera_lock = true; // self-clears next tick server-side (mapr==NULL,
+		                                      // Avatar.cpp:639) -- same settle P3.6a's own loop uses
+
+		if (wmap->collider.isOutsideMap(player->stats.pos.x, player->stats.pos.y)) {
+			Utils::logError("main_server: Personal teleport position for player %u is outside of map bounds.", static_cast<unsigned>(player->id));
+			player->stats.pos.x = 0.5f;
+			player->stats.pos.y = 0.5f;
+		}
+
+		if (playerm->players.size() > 1)
+			wmap->collider.blockPlayer(player->stats.pos.x, player->stats.pos.y, player->id);
+		else
+			wmap->collider.block(player->stats.pos.x, player->stats.pos.y, !MapCollision::IS_ALLY);
+
+		player->stats.teleportation = false;
+	}
+
 	if (!on_load_teleport && wmap->teleport_mapname.empty())
 		wmap->teleportation = false;
 }
@@ -1184,6 +1221,15 @@ static void serverLogic() {
 				// unequip drag would.
 				server_equipment_changed[player->id] = true;
 			}
+
+			// P3.6d: mirrors the local-only write two branches above (cmd.actions =
+			// player->action_queue, for the wire) in the opposite direction -- Avatar::logic()'s own
+			// power-processing loop (Avatar.cpp:654) reads action_queue, never cmd.actions directly,
+			// so without this a connected peer's own queued power activations (decoded correctly off
+			// the wire) were silently discarded. For local this is a true no-op: action_queue already
+			// equals cmd.actions from the assignment two branches above, unchanged in between -- see
+			// AC-REPLAY.
+			player->action_queue = cmd.actions;
 
 			player->logic(cmd, locks);
 		}
