@@ -1,0 +1,7 @@
+# P3.7's tests/run-net.sh: both headless clients run this same script against one dedicated
+# server. Move right for a bit, stay connected well past the server's own (shorter) --max-ticks
+# so the server's --dump-players exit dump -- which only fires at THIS process's own exit, not
+# mid-session -- catches both guests still connected, then disconnect.
+5 press right
+60 release right
+400 disconnect

@@ -227,6 +227,7 @@ Set (FLARE_HEADERS
 	./src/RenderDevice.h
 	./src/Replay.h
 	./src/Rng.h
+	./src/ScriptedInputState.h
 	./src/SDLInputState.h
 	./src/SDLSoftwareRenderDevice.h
 	./src/SDLSoundManager.h

@@ -34,9 +34,12 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "InputState.h"
 #include "MessageEngine.h"
 #include "ModManager.h"
+#include "NullInputState.h"
+#include "NullRenderDevice.h"
 #include "RenderDevice.h"
 #include "Rng.h"
 #include "SaveLoad.h"
+#include "ScriptedInputState.h"
 #include "SDLFontEngine.h"
 #include "Settings.h"
 #include "SharedResources.h"
@@ -48,6 +51,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "UtilsFileSystem.h"
 #include "UtilsParsing.h"
 #include "Version.h"
+#include "WorldHash.h"
 
 GameSwitcher *gswitch;
 
@@ -103,8 +107,17 @@ static void init(const CmdLineArgs& cmd_line_args) {
 	Utils::logInfo("main: PATH_USER = '%s'", settings->path_user.c_str());
 	Utils::logInfo("main: PATH_DATA = '%s'", settings->path_data.c_str());
 
-	// SDL Inits
-	if ( SDL_Init (SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) < 0 ) {
+	// SDL Inits. P3.7: --headless opens no video/audio/controller subsystem at all, the same as
+	// flare-server's own serverInit() (main_server.cpp) -- SDL_INIT_TIMER is enough for
+	// SDL_GetPerformanceCounter()/SDL_Delay(), both used unconditionally by mainLoop() below.
+	if (settings->headless) {
+		if ( SDL_Init (SDL_INIT_TIMER) < 0 ) {
+			Utils::logError("main: Could not initialize SDL: %s", SDL_GetError());
+			Utils::logErrorDialog("main: Could not initialize SDL: %s", SDL_GetError());
+			Utils::Exit(1);
+		}
+	}
+	else if ( SDL_Init (SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) < 0 ) {
 		Utils::logError("main: Could not initialize SDL: %s", SDL_GetError());
 		Utils::logErrorDialog("main: Could not initialize SDL: %s", SDL_GetError());
 		Utils::Exit(1);
@@ -129,6 +142,10 @@ static void init(const CmdLineArgs& cmd_line_args) {
 	}
 
 	settings->loadSettings();
+	// Same reasoning as flare-server's serverInit(): off at the source as well as at the device,
+	// so nothing even tries to decode.
+	if (settings->headless)
+		settings->audio = false;
 	settings->logSettings();
 
 	// Two explicit random streams. sim_rng is reproducible and belongs to the simulation;
@@ -154,7 +171,15 @@ static void init(const CmdLineArgs& cmd_line_args) {
 	eset = new EngineSettings();
 	eset->load();
 
-	inpt = getInputManager();
+	// P3.7: --headless drives input from a script (if given) or nothing at all, never SDLInputState
+	// -- getInputManager(bool)'s own headless branch only chooses NullInputState, with no branch for
+	// a scripted source, so construct directly here rather than growing that factory's signature for
+	// this one caller.
+	if (settings->headless)
+		inpt = settings->script_path.empty() ? static_cast<InputState*>(new NullInputState())
+		                                      : static_cast<InputState*>(new ScriptedInputState(settings->script_path));
+	else
+		inpt = getInputManager();
 	icons = NULL;
 
 	Stats::init();
@@ -162,8 +187,13 @@ static void init(const CmdLineArgs& cmd_line_args) {
 	// platform-specific default screen size
 	platform.setScreenSize();
 
-	// Create render Device and Rendering Context.
-	if (settings->safe_video)
+	// Create render Device and Rendering Context. P3.7: --headless always takes the null render
+	// device -- "null" is deliberately absent from createRenderDeviceList() (DeviceList.cpp) so a
+	// player can never select it from the video options menu, but it is reachable by name here the
+	// same way flare-server reaches it by direct construction.
+	if (settings->headless)
+		render_device = getRenderDevice("null");
+	else if (settings->safe_video)
 		render_device = getRenderDevice(settings->render_device_name);
 	else if (platform.default_renderer != "")
 		render_device = getRenderDevice(platform.default_renderer);
@@ -183,7 +213,7 @@ static void init(const CmdLineArgs& cmd_line_args) {
 	// reset the reload_graphics flag
 	render_device->reloadGraphics();
 
-	snd = getSoundManager();
+	snd = getSoundManager(settings->headless);
 
 	tooltipm = new TooltipManager();
 
@@ -200,6 +230,12 @@ static const int MAX_CATCHUP_TICKS = 5;
 
 static void mainLoop () {
 	bool done = false;
+
+	// P3.7. Counts real gswitch->logic() calls, same placement server-side's total_ticks occupies
+	// (main_server.cpp's serverMainLoop()) -- meaningful only headless (see the two uses below),
+	// but harmless and cheap to maintain unconditionally.
+	unsigned long total_ticks = 0;
+	ScriptedInputState* scripted_input = settings->headless ? dynamic_cast<ScriptedInputState*>(inpt) : NULL;
 
 	// Two different rates, deliberately. The simulation step is fixed and shared so that every
 	// peer agrees on what tick N means; the render frame limit is a user preference and
@@ -245,12 +281,31 @@ static void mainLoop () {
 			if (inpt->window_minimized && !inpt->window_restored && !inpt->done)
 				break;
 
+			// P3.7. Applies this tick's scripted press/release/disconnect entries before
+			// gswitch->logic() reads them via PlayerCommandBuilder::build() deep inside
+			// GameStatePlay::logic() -- same idiom as the replay-driven input below on the server.
+			if (scripted_input)
+				scripted_input->driveTick(total_ticks + 1);
+
 			gswitch->logic();
 			inpt->resetScroll();
+
+			++total_ticks;
+
+			// Per-tick digests make a divergence bisectable, same reasoning and format as
+			// main_server.cpp's own hash_every block -- kept directly comparable line-for-line.
+			if (settings->headless && settings->hash_replicated && settings->hash_every > 0
+			    && total_ticks % settings->hash_every == 0) {
+				printf("tick %lu %s\n", total_ticks,
+				       WorldHash::toString(WorldHash::computeReplicated(total_ticks)).c_str());
+			}
 
 			// Engine done means the user escapes the main game menu.
 			// Input done means the user closes the window.
 			done = gswitch->done || inpt->done;
+
+			if (settings->max_ticks > 0 && total_ticks >= settings->max_ticks)
+				done = true;
 
 			// Same reason as main_server.cpp: 'done' does not end the catch-up loop, so
 			// without this the client keeps simulating after the game has said stop.
@@ -457,6 +512,21 @@ int main(int argc, char *argv[]) {
 		else if (arg == "no-lock-file") {
 			settings->no_lock_file = true;
 		}
+		else if (arg == "headless") {
+			settings->headless = true;
+		}
+		else if (arg == "max-ticks") {
+			settings->max_ticks = strtoul(parseArgValue(arg_full).c_str(), NULL, 10);
+		}
+		else if (arg == "script") {
+			settings->script_path = parseArgValue(arg_full);
+		}
+		else if (arg == "hash-replicated") {
+			settings->hash_replicated = true;
+		}
+		else if (arg == "hash-every") {
+			settings->hash_every = strtoul(parseArgValue(arg_full).c_str(), NULL, 10);
+		}
 		else if (arg == "help") {
 			Utils::logInfo("Command line options:\n\
 --help                   Prints this message.\n\
@@ -479,7 +549,14 @@ int main(int argc, char *argv[]) {
 --max-players=<N>        With --host, the connection cap, 2-8 (D3). Default 8.\n\
 --safe-video             Launches with the minimum video settings.\n\
 --no-lock-file           Skips the single-instance check, so that more than one copy\n\
-                         of Flare can be run at once. Intended for testing.");
+                         of Flare can be run at once. Intended for testing.\n\
+--headless               Runs with no window, GPU, or audio device -- for scripted/CI use.\n\
+--max-ticks=<N>          With --headless, exits cleanly after N simulation ticks.\n\
+--script=<FILE>          With --headless, drives input from this script instead of\n\
+                         hardware. Requires --headless.\n\
+--hash-replicated        With --headless, print a periodic digest of only the fields\n\
+                         the network already replicates (see --hash-every).\n\
+--hash-every=<N>         With --headless, prints a world digest every N ticks.");
 			done = true;
 		}
 		else {
@@ -492,6 +569,13 @@ int main(int argc, char *argv[]) {
 	// silently pick one.
 	if (!done && !settings->net_connect_target.empty() && settings->net_host_port != 0) {
 		Utils::logError("--connect and --host are mutually exclusive.");
+		done = true;
+	}
+	// P3.7: a scripted run with a live SDL input device would silently ignore the script's key
+	// state on the very next SDL_PumpEvents()/inpt->handle() -- refuse at startup rather than run
+	// a session whose input nobody is actually driving.
+	if (!done && !settings->script_path.empty() && !settings->headless) {
+		Utils::logError("--script requires --headless.");
 		done = true;
 	}
 	if (!done && settings->net_host_port != 0 && (settings->net_max_players < 2 || settings->net_max_players > 8)) {

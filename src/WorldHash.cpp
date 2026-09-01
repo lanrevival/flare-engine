@@ -17,6 +17,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 #include "WorldHash.h"
 
+#include "Animation.h"
 #include "Avatar.h"
 #include "CampaignManager.h"
 #include "Entity.h"
@@ -32,6 +33,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "PlayerInventory.h"
 #include "SharedGameResources.h"
 #include "StatBlock.h"
+#include "Stats.h"
 #include "Utils.h"
 
 #include <cstdio>
@@ -224,6 +226,34 @@ uint64_t WorldHash::compute(unsigned long tick) {
 			h = mixU64(h, static_cast<uint64_t>(it->first));
 			h = mixI32(h, it->second.first ? 1 : 0);
 		}
+	}
+
+	h = mixI32(h, TAG_END);
+	return h;
+}
+
+// P3.7. Field set mirrors Net::PlayerSnapshotEntry exactly (net/NetProtocol.h) and the
+// construction in serverBroadcastSnapshot() (main_server.cpp) / GameStatePlay.cpp's own snapshot
+// build -- so a value that diverges here is, by construction, a value that would also diverge on
+// the wire. Deliberately excludes mp/xp/currency (not in PlayerSnapshotEntry today) and every
+// other section compute() covers -- see WorldHash.h's doc comment on this function for why.
+uint64_t WorldHash::computeReplicated(unsigned long tick) {
+	uint64_t h = init();
+
+	h = mixI32(h, TAG_HEADER);
+	h = mixU64(h, static_cast<uint64_t>(tick));
+
+	h = mixI32(h, TAG_PLAYER);
+	for (size_t p = 0; p < playerm->players.size(); ++p) {
+		Avatar* av = playerm->players[p];
+		h = mixU64(h, static_cast<uint64_t>(av->id));
+		h = mixFloat(h, av->stats.pos.x);
+		h = mixFloat(h, av->stats.pos.y);
+		h = mixU64(h, static_cast<uint64_t>(av->stats.direction));
+		h = mixString(h, av->activeAnimation ? av->activeAnimation->getName() : std::string());
+		h = mixFloat(h, av->stats.hp);
+		h = mixFloat(h, av->stats.get(Stats::HP_MAX));
+		h = mixI32(h, av->stats.alive ? 1 : 0);
 	}
 
 	h = mixI32(h, TAG_END);

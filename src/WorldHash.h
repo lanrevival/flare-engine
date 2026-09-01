@@ -54,6 +54,15 @@ public:
 	 * then reconverge still show a difference at the tick where they parted. */
 	static uint64_t compute(unsigned long tick);
 
+	/** Digest of only the fields the network already replicates: PlayerSnapshotEntry's set
+	 * (id, pos, direction, animation, hp, hp_max, alive) for every player, nothing else. P3.7.
+	 * Entities/hazards/loot/inventory/campaign are not wire-replicated yet (P3.9-P3.12), so
+	 * compute() cannot be compared between a client and server process before then -- this can,
+	 * once the two processes stop independently simulating (P3.8, D27). Before that, two
+	 * processes fed the same scripted input can still disagree here by a tick or two of network
+	 * latency; this is infrastructure for P3.8 onward, not an equality guarantee on its own. */
+	static uint64_t computeReplicated(unsigned long tick);
+
 	/** "0x%016llx" -- the form printed by --hash and stored in golden files. */
 	static std::string toString(uint64_t h);
 

@@ -460,6 +460,48 @@ jobs:
       - name: Run replays
         run: ./tests/run-replays.sh /tmp/flaredata
 
+  # P3.7. Same runner matrix and mod-tree assembly as 'replays' above -- deliberately not
+  # factored out into a shared step list, since GitHub Actions has no such mechanism short of a
+  # separate reusable workflow file, which would be more indirection than four repeated steps
+  # justify.
+  run-net:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-24.04, ubuntu-24.04-arm ]
+        compiler: [ { cc: gcc, cxx: g++ }, { cc: clang, cxx: clang++ } ]
+    env:
+      FLARE_GAME_COMMIT: 1ef2b59c649f9a853ee59081f3cac6ef53c60348
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get clean -qq
+          sudo apt-get update -qq
+          sudo apt-get install -qq g++ libegl1-mesa-dev libgles2-mesa-dev libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev
+
+      - name: Fetch game data
+        run: |
+          git clone --no-checkout https://github.com/lanrevival/flare-game.git ../flare-game
+          git -C ../flare-game checkout "$FLARE_GAME_COMMIT"
+
+      - name: Assemble a combined mods tree
+        run: |
+          mkdir -p /tmp/flaredata/mods
+          ln -s "$GITHUB_WORKSPACE/mods/default" /tmp/flaredata/mods/default
+          for d in ../flare-game/mods/*/; do ln -s "$(cd "$d" && pwd)" "/tmp/flaredata/mods/$(basename "$d")"; done
+
+      - name: Build client and server
+        env:
+          CC: ${{ matrix.compiler.cc }}
+          CXX: ${{ matrix.compiler.cxx }}
+        run: cmake . && make -j4 flare flare-server
+
+      - name: Run net harness
+        run: ./tests/run-net.sh /tmp/flaredata
+
   cppcheck:
     runs-on: ubuntu-24.04
     steps:

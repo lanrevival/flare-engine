@@ -174,6 +174,7 @@ class ServerCmdLineArgs {
 public:
 	ServerCmdLineArgs()
 		: mod_list(), load_slot(), data_path(), max_ticks(0), hash_every(0), hash_at_exit(false)
+		, hash_replicated(false)
 		, sim_seed(RNG_DEFAULT_SIM_SEED), record_path(), replay_path(), dump_players(false)
 		, assert_player_wiring(false), spawn_test_players(0), test_player_summon(0)
 		, dump_ai_targets(false), dump_summon_prototypes(false), dump_damage_events(false), kill_player(-1)
@@ -184,6 +185,10 @@ public:
 	unsigned long max_ticks;
 	unsigned long hash_every;
 	bool hash_at_exit;
+	// P3.7: WorldHash::computeReplicated() instead of compute() for --hash-every's periodic print
+	// -- so a headless flare client's own --hash-every output is directly comparable, line for
+	// line, to this process's. Does not affect --hash (hash_at_exit), which stays the full digest.
+	bool hash_replicated;
 	uint64_t sim_seed;
 	std::string record_path;
 	std::string replay_path;
@@ -1975,6 +1980,7 @@ static const int MAX_CATCHUP_TICKS = 5;
 static const unsigned long TRAJECTORY_SAMPLE_TICKS = 30;
 
 static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_every,
+                                    bool hash_replicated,
                                     uint64_t* trajectory, unsigned long* last_event_tick,
                                     unsigned long* died_tick, bool dump_ai_targets) {
 	bool done = false;
@@ -2072,8 +2078,8 @@ static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_
 			// Per-tick digests make a divergence bisectable: diff two runs and the first
 			// differing line is the exact tick they parted.
 			if (hash_every > 0 && total_ticks % hash_every == 0) {
-				printf("tick %lu %s\n", total_ticks,
-				       WorldHash::toString(WorldHash::compute(total_ticks)).c_str());
+				uint64_t h = hash_replicated ? WorldHash::computeReplicated(total_ticks) : WorldHash::compute(total_ticks);
+				printf("tick %lu %s\n", total_ticks, WorldHash::toString(h).c_str());
 			}
 
 			if (total_ticks % TRAJECTORY_SAMPLE_TICKS == 0)
@@ -2133,6 +2139,9 @@ static void printHelp() {
 	       "--replay=<FILE>          Replays input from FILE. Refuses a version or mod mismatch.\n"
 	       "--hash                   Prints a digest of world state at exit.\n"
 	       "--hash-every=<N>         Prints a digest every N ticks, for bisecting a divergence.\n"
+	       "--hash-replicated        With --hash-every, digest only the fields the network\n"
+	       "                         already replicates -- comparable to a headless flare\n"
+	       "                         client's own --hash-replicated output. P3.7.\n"
 	       "--dump-players           Prints one line per player right after construction, then\n"
 	       "                         runs normally. P2.1 diagnostic -- see PlayerManager.h.\n"
 	       "--assert-player-wiring   Checks every player's PlayerInventory/ActionBarState/\n"
@@ -2244,6 +2253,9 @@ int main(int argc, char *argv[]) {
 		}
 		else if (arg == "hash-every") {
 			args.hash_every = strtoul(parseServerArgValue(arg_full).c_str(), NULL, 10);
+		}
+		else if (arg == "hash-replicated") {
+			args.hash_replicated = true;
 		}
 		else if (arg == "dump-players") {
 			args.dump_players = true;
@@ -2421,7 +2433,7 @@ int main(int argc, char *argv[]) {
 	uint64_t trajectory = WorldHash::init();
 	unsigned long last_event_tick = 0;
 	unsigned long died_tick = 0;
-	unsigned long ticks = serverMainLoop(args.max_ticks, args.hash_every, &trajectory,
+	unsigned long ticks = serverMainLoop(args.max_ticks, args.hash_every, args.hash_replicated, &trajectory,
 	                                     &last_event_tick, &died_tick, args.dump_ai_targets);
 
 	replay->finish();

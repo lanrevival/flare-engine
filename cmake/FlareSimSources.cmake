@@ -113,6 +113,7 @@ Set (FLARE_PRESENTATION_SOURCES
 	./src/QuestLog.cpp
 	./src/RenderDevice.cpp
 	./src/Replay.cpp
+	./src/ScriptedInputState.cpp
 	./src/SDLFontEngine.cpp
 	./src/SDLHardwareRenderDevice.cpp
 	./src/SDLInputState.cpp

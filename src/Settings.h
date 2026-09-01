@@ -170,6 +170,19 @@ public:
 	                               // with net_connect_target -- main.cpp refuses both being set.
 	int net_max_players; // only meaningful with net_host_port set. D3: 2-8. See P3.4c.
 
+	// P3.7: reuses the existing 'headless' field below (originally "true only for flare-server",
+	// from the P0.2a/P1.4b era when main_server.cpp still drove GameSwitcher/GameStatePlay
+	// headlessly -- see GameSwitcher.cpp:68's intro-cutscene skip and GameStatePlay.cpp's
+	// drainSimEvents()/isPaused() checks, both still live and both exactly what a headless flare
+	// client needs, just unreachable from flare-server since P1.4c excluded those two files from
+	// its link entirely). --headless now sets it for flare too. Mirrors ServerCmdLineArgs' other
+	// field names in main_server.cpp deliberately, since tests/run-net.sh compares both processes'
+	// output.
+	unsigned long max_ticks; // 0 = unbounded. See main.cpp's mainLoop().
+	std::string script_path; // --script=<file>; empty with --headless means NullInputState, not scripted.
+	bool hash_replicated; // --hash-replicated: WorldHash::computeReplicated() instead of compute().
+	unsigned long hash_every; // 0 = never print. See main.cpp's mainLoop().
+
 	// Misc
 	unsigned short view_w;
 	unsigned short view_h;
