@@ -352,6 +352,11 @@ Avatar* GameStatePlay::netHostProvisionPeer(uint8_t id, const FPoint& spawn_pos)
 	new_avatar->loadSounds();
 	mapr->collider.blockPlayer(new_avatar->stats.pos.x, new_avatar->stats.pos.y, id);
 
+	// P3.4d: this peer's own step-FX are never loaded above -- only loadAnimations()/loadSounds()
+	// are. Matches server_equipment_changed[8]'s own initial-true default: the first
+	// netHostCheckEquipmentChange() pass after provisioning is what actually loads them.
+	net_host_equip_changed.insert(id);
+
 	Utils::logInfo("GameStatePlay: provisioned connected peer id=%u at (%.1f, %.1f)",
 	               static_cast<unsigned>(id), static_cast<double>(new_avatar->stats.pos.x), static_cast<double>(new_avatar->stats.pos.y));
 
@@ -416,11 +421,13 @@ void GameStatePlay::netHostSyncPeers() {
 // second real player on this client's own screen for whom the previous two-phase split was ever
 // load-bearing.
 //
-// Deliberately NOT ported here: checkLoot()/checkTitle()/PlayerInventory::applyDeathPenalty()/
-// checkEquipmentChange()/checkUsedItems() generalised per peer. Unlike main_server.cpp, which
-// inherited these already generalised from Phase 2 (P2.3b), GameStatePlay.cpp's versions are still
-// hardcoded to the local player/menu today -- giving them a peer-aware form is real, separate work,
-// not an oversight. See this plan's Out of scope for what that leaves broken.
+// P3.4d added the kind-C generalisation this comment used to say was missing: loot auto-pickup and
+// title-earning are called inline in the loop below (netHostCheckLoot()/netHostCheckTitle(), right
+// before peer->logic(), matching checkLoot()/checkTitle()'s own tick position relative to
+// player->logic()); death penalty, equipment-change reload, and used-item consumption are their own
+// separate calls elsewhere in logic() (netHostCheckDeathPenalty()/netHostCheckEquipmentChange()/
+// netHostCheckUsedItems()), matching those three's own tick positions too. See
+// plans/phase3/P3.4d-host-peer-kind-c.md.
 void GameStatePlay::netHostDrivePeers() {
 	for (std::set<uint8_t>::const_iterator it = net_host_players.begin(); it != net_host_players.end(); ++it) {
 		uint8_t id = *it;
@@ -444,12 +451,22 @@ void GameStatePlay::netHostDrivePeers() {
 			cmd = cmd_it->second;
 		// else: neutral/idle default -- D2, the host never waits a tick on a slow peer.
 
-		inventory->applyEquipmentSetDelta(cmd.equip_set_delta);
+		// P3.4d: mirrors main_server.cpp's own equip_set_delta trigger site -- see
+		// net_host_equip_changed's own comment for why a set-insert is enough here (unlike
+		// serverLogic()'s respawn block, this function runs entirely before the tail block that
+		// consumes it).
+		if (inventory->applyEquipmentSetDelta(cmd.equip_set_delta))
+			net_host_equip_changed.insert(id);
 
 		// Never populated from anything real -- remote click-arbitration has no meaning on this
 		// client's screen, same reasoning as netApplySnapshotEntry() (P3.4b). Reused for both calls
 		// below: neither is ever given real values to arbitrate either way.
 		PlayerInputLocks peer_locks;
+
+		// P3.4d: kind C, same tick position checkLoot()/checkTitle() occupy relative to
+		// player->logic() in logic() itself -- see each function's own comment.
+		netHostCheckLoot(peer, inventory);
+		netHostCheckTitle(peer);
 
 		peer->logic(cmd, peer_locks);
 
@@ -530,6 +547,10 @@ void GameStatePlay::netHostDrivePeers() {
 			peer->stats.corpse = false;
 			peer->stats.cur_state = StatBlock::ENTITY_STANCE;
 			inventory->applyEquipment();
+			// P3.4d: mirrors main_server.cpp's respawn block setting server_equipment_changed[id] =
+			// true right before its own (inline) serverCheckEquipmentChange() call -- see
+			// net_host_equip_changed's own comment for why a plain set-insert is enough here instead.
+			net_host_equip_changed.insert(id);
 			peer->stats.hp = peer->stats.get(Stats::HP_MAX);
 			peer->stats.logic();
 			peer->stats.recalc();
@@ -568,6 +589,198 @@ void GameStatePlay::netHostBroadcastSnapshot() {
 		entries.push_back(entry);
 	}
 	netmgr->broadcast(Net::encodePlayerSnapshot(entries));
+}
+
+// P3.4d. Kind C: no input dependency, so every connected peer's own inventory applies its own
+// death penalty too, not just local's -- mirrors main_server.cpp's own unconditional loop over
+// every playerm->inventories entry. Called right after the local player's own
+// player_inventory->applyDeathPenalty() call in logic(), same unconditional (not gated by
+// isPaused()) position, for the same ordering reason that call's own comment gives: must run
+// before checkLoot()/peer->logic().
+void GameStatePlay::netHostCheckDeathPenalty() {
+	for (std::set<uint8_t>::const_iterator it = net_host_players.begin(); it != net_host_players.end(); ++it) {
+		PlayerInventory* peer_inv = playerm->inventoryFor(*it);
+		if (peer_inv)
+			peer_inv->applyDeathPenalty();
+	}
+}
+
+// P3.4d. Kind C, auto-pickup only -- mirrors serverCheckLoot() exactly, not
+// GameStatePlay::checkLoot(): that function's manual click-pickup branch is
+// inpt->mouse/mapr->cam.pos-driven, meaningless for a peer with no camera on this screen, the same
+// reasoning main_server.cpp's own comment gives for dropping it there. Called inline from
+// netHostDrivePeers()'s own per-peer loop, immediately before peer->logic() -- the same tick
+// position checkLoot() occupies relative to player->logic() in logic() itself.
+void GameStatePlay::netHostCheckLoot(Avatar* peer, PlayerInventory* inv) {
+	if (!peer->stats.alive)
+		return;
+
+	ItemStack pickup = loot->checkAutoPickup(peer->stats.pos);
+	if (!pickup.empty()) {
+		inv->add(pickup, PlayerInventory::CARRIED, ItemStorage::NO_SLOT, PlayerInventory::ADD_PLAY_SOUND, PlayerInventory::ADD_AUTO_EQUIP);
+		if (items->isValid(pickup.item)) {
+			StatusID pickup_status = camp->registerStatus(items->items[pickup.item]->pickup_status);
+			camp->setStatus(pickup_status);
+		}
+		pickup.clear();
+	}
+}
+
+// P3.4d. Ported unchanged from checkPrimaryStat(), reading the given peer's own stats (a
+// parameter) instead of the player member -- mirrors serverCheckPrimaryStat() exactly. See
+// netHostCheckTitle()'s own comment for why this is a duplicate rather than a shared, parameterised
+// checkPrimaryStat().
+bool GameStatePlay::netHostCheckPrimaryStat(const StatBlock& stats, const std::string& first, const std::string& second) {
+	int high = 0;
+	size_t high_index = eset->primary_stats.list.size();
+	size_t low_index = eset->primary_stats.list.size();
+
+	for (size_t i = 0; i < eset->primary_stats.list.size(); ++i) {
+		int stat = stats.get_primary(i);
+		if (stat > high) {
+			if (high_index != eset->primary_stats.list.size()) {
+				low_index = high_index;
+			}
+			high = stat;
+			high_index = i;
+		}
+		else if (stat == high && low_index == eset->primary_stats.list.size()) {
+			low_index = i;
+		}
+		else if (low_index == eset->primary_stats.list.size() || (low_index < eset->primary_stats.list.size() && stat > stats.get_primary(low_index))) {
+			low_index = i;
+		}
+	}
+
+	if (high_index != eset->primary_stats.list.size() && first != eset->primary_stats.list[high_index].id)
+		return false;
+
+	if (!second.empty()) {
+		if (low_index != eset->primary_stats.list.size() && second != eset->primary_stats.list[low_index].id)
+			return false;
+	}
+	else if (stats.get_primary(high_index) == stats.get_primary(low_index)) {
+		// titles that require a single stat are ignored if two stats are equal
+		return false;
+	}
+
+	return true;
+}
+
+// P3.4d. Kind C, ported from checkTitle() parameterised by peer -- mirrors serverCheckTitle(Avatar*)
+// exactly. Reuses the existing titles vector directly: title definitions are shared game data, not
+// per-player. Duplicated rather than parameterising checkTitle()/checkPrimaryStat() themselves --
+// see plans/phase3/P3.4d-host-peer-kind-c.md's Notes for the executor. Called inline from
+// netHostDrivePeers()'s own per-peer loop, immediately before peer->logic(), matching checkTitle()'s
+// own tick position relative to player->logic() in logic() itself.
+void GameStatePlay::netHostCheckTitle(Avatar* peer) {
+	if (!peer->stats.check_title || titles.empty())
+		return;
+
+	int title_id = -1;
+
+	for (unsigned i = 0; i < titles.size(); i++) {
+		if (titles[i].title.empty())
+			continue;
+
+		if (titles[i].level > 0 && peer->stats.level < titles[i].level)
+			continue;
+		if (titles[i].power > 0 && std::find(peer->stats.powers_list.begin(), peer->stats.powers_list.end(), titles[i].power) == peer->stats.powers_list.end())
+			continue;
+		if (!titles[i].primary_stat_1.empty() && !netHostCheckPrimaryStat(peer->stats, titles[i].primary_stat_1, titles[i].primary_stat_2))
+			continue;
+
+		bool status_failed = false;
+		for (size_t j = 0; j < titles[i].requires_status.size(); ++j) {
+			if (!camp->checkStatus(titles[i].requires_status[j])) {
+				status_failed = true;
+				break;
+			}
+		}
+		for (size_t j = 0; j < titles[i].requires_not_status.size(); ++j) {
+			if (camp->checkStatus(titles[i].requires_not_status[j])) {
+				status_failed = true;
+				break;
+			}
+		}
+
+		if (status_failed)
+			continue;
+
+		title_id = static_cast<int>(i);
+		break;
+	}
+
+	if (title_id != -1) peer->stats.character_subclass = titles[static_cast<size_t>(title_id)].title;
+	peer->stats.check_title = false;
+	peer->stats.refresh_stats = true;
+}
+
+// P3.4d. Peer-scoped substitute for checkEquipmentChange()'s menu->inv->changed_equipment --
+// mirrors main_server.cpp's server_equipment_changed[8] array/serverCheckEquipmentChange() exactly,
+// as a set instead (see net_host_equip_changed's own comment). Trigger sites: netHostProvisionPeer()
+// (initial load -- matches the array's initial-true default, so this peer's own step-FX, which
+// netHostProvisionPeer() never loads, gets loaded once), and netHostDrivePeers()'s own
+// applyEquipmentSetDelta() and respawn blocks. Called once from logic()'s own "whether paused or
+// not" tail block, right after the existing local checkEquipmentChange() call -- unlike
+// main_server.cpp's respawn block (which must call serverCheckEquipmentChange() inline, because its
+// own tail loop already ran earlier in serverLogic()'s tick), netHostDrivePeers() runs entirely
+// before this tail block, so inserting into the set from its respawn block is enough; this call
+// picks it up the same tick.
+void GameStatePlay::netHostCheckEquipmentChange() {
+	for (std::set<uint8_t>::iterator it = net_host_equip_changed.begin(); it != net_host_equip_changed.end(); ) {
+		uint8_t id = *it;
+		Avatar* peer = playerm->get(id);
+		PlayerInventory* peer_inv = playerm->inventoryFor(id);
+		ActionBarState* peer_ab = playerm->actionbarFor(id);
+
+		if (peer && peer_inv && peer_ab) {
+			peer_ab->updated = true;
+			peer->loadAnimations();
+
+			if (peer->feet_index != -1) {
+				ItemID feet_id = peer_inv->inventory[PlayerInventory::EQUIPMENT][peer->feet_index].item;
+				if (items->isValid(feet_id))
+					peer->loadStepFX(items->items[feet_id]->stepfx);
+			}
+		}
+
+		net_host_equip_changed.erase(it++);
+	}
+}
+
+// P3.4d. Mirrors main_server.cpp's serverInventoryForCaster() -- resolved by StatBlock* pointer
+// identity only, never dereferenced, since this function is what knows a StatBlock* maps to a
+// PlayerID via playerm. Returns NULL for the local player's own caster (checkUsedItems() already
+// handles that one) and for a caster that no longer matches any connected peer.
+PlayerInventory* GameStatePlay::netHostInventoryForCaster(StatBlock* caster) {
+	for (std::set<uint8_t>::const_iterator it = net_host_players.begin(); it != net_host_players.end(); ++it) {
+		Avatar* peer = playerm->get(*it);
+		if (peer && &peer->stats == caster)
+			return playerm->inventoryFor(*it);
+	}
+	return NULL;
+}
+
+// P3.4d. Fixes the disclosed correctness bug named in P3.4c's own Status note: mirrors
+// main_server.cpp's serverCheckUsedItems() almost unchanged. checkUsedItems() (local, above) now
+// only consumes entries whose caster is player->stats -- see the caster guard added there -- so the
+// two functions never double-consume the same entry. Both must run, in either order, before
+// powers->clearUsedItems(), which is why that call moved to logic()'s own tail call site instead of
+// staying inside checkUsedItems()'s own body.
+void GameStatePlay::netHostCheckUsedItems() {
+	for (unsigned i = 0; i < powers->used_items.size(); i++) {
+		PlayerInventory* inventory = netHostInventoryForCaster(powers->used_items_caster[i]);
+		if (inventory)
+			inventory->remove(powers->used_items[i], 1);
+	}
+	for (unsigned i = 0; i < powers->used_equipped_items.size(); i++) {
+		PlayerInventory* inventory = netHostInventoryForCaster(powers->used_equipped_items_caster[i]);
+		if (inventory) {
+			inventory->inventory[PlayerInventory::EQUIPMENT].remove(powers->used_equipped_items[i], 1);
+			inventory->applyEquipment();
+		}
+	}
 }
 
 /**
@@ -1108,6 +1321,13 @@ void GameStatePlay::checkLootDrop() {
  */
 void GameStatePlay::checkUsedItems() {
 	for (unsigned i=0; i<powers->used_items.size(); i++) {
+		// P3.4d: skip an entry caused by a connected peer's own item use -- see
+		// netHostCheckUsedItems()'s own comment. PowerManager.cpp's payPowerCost() only ever tags a
+		// caster when src_stats->hero is true, and before P3.4c the local player was the only
+		// possible hero caster, so this guard is a provable no-op everywhere the replay corpus
+		// reaches (see plans/phase3/P3.4d-host-peer-kind-c.md's Steps).
+		if (powers->used_items_caster[i] != &player->stats)
+			continue;
 		// Deliberately still routed through MenuInventory's wrapper here, not PlayerInventory
 		// directly -- it keeps the activated_item/activated_slot special case (P1.3d-4b-3), which
 		// is what makes a right-click activation consume the exact carried slot the player clicked
@@ -1116,10 +1336,14 @@ void GameStatePlay::checkUsedItems() {
 		menu->inv->remove(powers->used_items[i], 1);
 	}
 	for (unsigned i=0; i<powers->used_equipped_items.size(); i++) {
+		if (powers->used_equipped_items_caster[i] != &player->stats)
+			continue;
 		player_inventory->inventory[PlayerInventory::EQUIPMENT].remove(powers->used_equipped_items[i], 1);
 		player_inventory->applyEquipment();
 	}
-	powers->clearUsedItems();
+	// P3.4d: powers->clearUsedItems() moved to logic()'s own tail call site, after
+	// netHostCheckUsedItems() also runs -- clearing here would wipe a connected peer's own entries
+	// before that function ever saw them.
 }
 
 /**
@@ -1346,6 +1570,10 @@ void GameStatePlay::logic() {
 	// and every golden had to stay put to prove it.
 	player_inventory->applyDeathPenalty();
 
+	// P3.4d: kind C, same unconditional position as the local call just above -- see
+	// netHostCheckDeathPenalty()'s own comment.
+	netHostCheckDeathPenalty();
+
 	// check menus first (top layer gets mouse click priority)
 	menu->logic();
 
@@ -1496,6 +1724,12 @@ void GameStatePlay::logic() {
 	checkBook();
 	checkEquipmentChange();
 	checkUsedItems();
+	// P3.4d: kind C, same "whether paused or not" tail position as the two local calls just above.
+	// netHostCheckUsedItems() must run before clearUsedItems() below, same as checkUsedItems() --
+	// see clearUsedItems()'s own new call site comment.
+	netHostCheckEquipmentChange();
+	netHostCheckUsedItems();
+	powers->clearUsedItems();
 	checkStash();
 	checkSaveEvent();
 	checkNotifications();

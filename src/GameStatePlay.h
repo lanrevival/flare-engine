@@ -44,6 +44,7 @@ class MenuManager;
 class PlayerInventory;
 class PowerBonusState;
 class QuestLog;
+class StatBlock;
 class WidgetLabel;
 
 namespace Net {
@@ -144,6 +145,30 @@ private:
 	bool net_host_attempted;
 	std::set<uint8_t> net_host_players;           // ids currently bound to a connected, handshake-complete peer
 	std::map<uint8_t, PlayerCommand> net_host_cmd; // this tick's decoded command per connected peer
+
+	// P3.4d: kind-C generalisation for connected peers -- loot auto-pickup, title-earning, death
+	// penalty, equipment-change notification, used-item consumption. Deliberately separate
+	// functions from checkLoot()/checkTitle()/checkPrimaryStat()/checkEquipmentChange()/
+	// checkUsedItems() above, parameterised by peer instead of sharing those -- mirrors
+	// main_server.cpp's own precedent of never sharing these with GameStatePlay.cpp either
+	// (serverCheckLoot()/serverCheckTitle()/serverCheckPrimaryStat()/serverCheckEquipmentChange()/
+	// serverCheckUsedItems() are separate functions there too), so this plan's diff never touches a
+	// line any prior plan's replay-corpus verification already depends on. See
+	// plans/phase3/P3.4d-host-peer-kind-c.md.
+	void netHostCheckDeathPenalty();
+	void netHostCheckLoot(Avatar* peer, PlayerInventory* inv);
+	bool netHostCheckPrimaryStat(const StatBlock& stats, const std::string& first, const std::string& second);
+	void netHostCheckTitle(Avatar* peer);
+	void netHostCheckEquipmentChange();
+	void netHostCheckUsedItems();
+	PlayerInventory* netHostInventoryForCaster(StatBlock* caster);
+
+	// Peer-scoped substitute for menu->inv->changed_equipment (peers have no MenuInventory on this
+	// screen) -- presence of an id means "netHostCheckEquipmentChange() has a reload pending for
+	// it". Mirrors main_server.cpp's server_equipment_changed[8] array, as a set instead, matching
+	// this file's existing net_host_players/net_host_cmd style. See netHostCheckEquipmentChange()'s
+	// own comment for its two trigger sites.
+	std::set<uint8_t> net_host_equip_changed;
 
 	int npc_id;
 
