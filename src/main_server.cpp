@@ -481,6 +481,12 @@ static void serverCheckSaveEvent() {
 // on the one shared Map -- true per-player teleport (two players stepping on two different
 // teleporters independently) needs per-player map-instancing, which does not exist yet
 // (Phase 3+). Bound explicitly to playerm->local() until it does.
+//
+// P3.6a: forward-declared here (real definition is further down, alongside serverLogic()'s own
+// per-player loops that already use it) so this function's own new party-wide loop can reuse the
+// established "which players does multi-player code touch" membership test instead of inventing a
+// second one.
+static bool serverPlayerIsDriven(PlayerID id);
 static void serverCheckTeleport() {
 	Avatar* local = playerm->local();
 	bool on_load_teleport = false;
@@ -568,6 +574,40 @@ static void serverCheckTeleport() {
 			// enemies and npcs should be initialized AFTER on_load events execute
 			entitym->handleNewMap();
 			npcs->handleNewMap();
+
+			// P3.6a: every OTHER currently driven player travels along too (D12 -- one map is loaded
+			// at a time, the party travels together). Purely additive: local's own handling above and
+			// below this loop is untouched line-for-line, so a single-player run
+			// (playerm->players.size() == 1, the only case the replay corpus can exercise) takes this
+			// loop zero times and is byte-for-byte unaffected -- see AC-REPLAY.
+			//
+			// Deliberately NOT handled here: a non-local player's own PERSONAL teleport
+			// (player->stats.teleportation, e.g. a blink power) -- serverCheckTeleport() has only ever
+			// read local->stats.teleportation for that, unchanged by this plan; only the SHARED
+			// wmap->teleportation intermap case is generalised. See P3.6a's own Why/Out of scope.
+			for (size_t p = 0; p < playerm->players.size(); ++p) {
+				Avatar* player = playerm->players[p];
+				if (player->id == local->id || !serverPlayerIsDriven(player->id))
+					continue;
+
+				// Scatter around local's own (already-computed, a few lines above) landing spot
+				// rather than stacking everyone on the exact same tile -- same idiom already used a
+				// few lines above this function for ally-repositioning on an intramap move.
+				FPoint dest = wmap->collider.getRandomNeighbor(Point(local->stats.pos), 1, MapCollision::MOVE_NORMAL, MapCollision::COLLIDE_TYPE_ALL_ENTITIES);
+				if (wmap->collider.isOutsideMap(dest.x, dest.y)) {
+					Utils::logError("main_server: Party-travel position for player %u is outside of map bounds.", static_cast<unsigned>(player->id));
+					dest.x = 0.5f;
+					dest.y = 0.5f;
+				}
+				player->stats.pos = dest;
+				player->teleport_camera_lock = true; // self-clears next tick server-side (mapr==NULL, Avatar.cpp:639) -- same one-tick movement settle local already gets
+				player->handleNewMap();
+
+				if (playerm->players.size() > 1)
+					wmap->collider.blockPlayer(dest.x, dest.y, player->id);
+				else
+					wmap->collider.block(dest.x, dest.y, !MapCollision::IS_ALLY);
+			}
 
 			// return to title (permadeath) OR auto-save
 			if (local->stats.permadeath && local->stats.cur_state == StatBlock::ENTITY_DEAD) {
