@@ -282,6 +282,46 @@ void EntityManager::handleNewMap () {
 	anim->cleanUp();
 }
 
+// P3.5a. See this file's own header comment (EntityManager.h) for why this is not just another call
+// to handleNewMap(): that function unconditionally deletes every non-NPC, non-living-ally entity and
+// only repopulates from wmap->enemies -- a queue already drained by the map's own first load -- so a
+// second call mid-session would delete every live enemy and spawn nothing back. This does only the
+// prototype-loading loops handleNewMap() also has (EntityManager.cpp's own powers_list/action-bar
+// loops above), scoped to one player instead of every player -- every other currently-provisioned
+// player was already covered by the last real handleNewMap() call.
+void EntityManager::preloadSummonPrototypesForPlayer(PlayerID id) {
+	Avatar* av = playerm->get(id);
+	if (av) {
+		std::vector<PowerID>& powers_list = av->stats.powers_list;
+		for (size_t i = 0; i < powers_list.size(); i++) {
+			PowerID power_index = powers_list[i];
+			if (powers->isValid(power_index)) {
+				const std::string& spawn_type = powers->powers[power_index]->spawn_type;
+				if (!spawn_type.empty() && spawn_type != "untransform") {
+					std::vector<Enemy_Level> spawn_enemies = enemyg->getEnemiesInCategory(spawn_type);
+					for (size_t j = 0; j < spawn_enemies.size(); j++)
+						loadEntityPrototype(spawn_enemies[j].type);
+				}
+			}
+		}
+	}
+
+	ActionBarState* actionbar = playerm->actionbarFor(id);
+	if (actionbar) {
+		for (size_t i = 0; i < actionbar->hotkeys.size(); i++) {
+			PowerID power_index = actionbar->hotkeys[i];
+			if (power_index != 0) {
+				const std::string& spawn_type = powers->powers[power_index]->spawn_type;
+				if (!spawn_type.empty() && spawn_type != "untransform") {
+					std::vector<Enemy_Level> spawn_enemies = enemyg->getEnemiesInCategory(spawn_type);
+					for (size_t j = 0; j < spawn_enemies.size(); j++)
+						loadEntityPrototype(spawn_enemies[j].type);
+				}
+			}
+		}
+	}
+}
+
 /**
  * Powers can cause new entities to spawn
  * Check PowerManager for any new queued entities

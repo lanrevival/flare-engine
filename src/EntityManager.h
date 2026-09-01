@@ -27,6 +27,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #define ENTITY_MANAGER_H
 
 #include "CommonIncludes.h"
+#include "PlayerManager.h" // PlayerID
 #include "Utils.h"
 
 class Animation;
@@ -53,6 +54,15 @@ public:
 	bool hasLoadedPrototype(const std::string& type_id) const;
 
 	void handleNewMap();
+
+	// P3.5a. Loads prototypes for one player's own summon powers (powers_list + action-bar hotkeys)
+	// without handleNewMap()'s map-transition side effects (entity wipe/respawn, wmap->enemies/
+	// ally-queue draining) -- those are not safe to re-run mid-session with live enemies on the map.
+	// Called once, right after provisioning a newly-connected peer server/host-side: that peer's own
+	// powers were never walked by any handleNewMap() call, since the server/host's own map was
+	// already loaded before this peer connected. See plans/phase3/P3.5a-join-map-sync.md.
+	void preloadSummonPrototypesForPlayer(PlayerID id);
+
 	void handleSpawn();
 	bool checkPartyMembers();
 	void logic();

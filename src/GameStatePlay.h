@@ -50,6 +50,7 @@ class WidgetLabel;
 namespace Net {
 	class NetworkManager;
 	struct PlayerSnapshotEntry;
+	struct MsgMapSync;
 }
 
 class ActionData;
@@ -108,6 +109,10 @@ private:
 	void netConnectIfNeeded();
 	void netSyncPlayers();
 	Avatar* netApplySnapshotEntry(const Net::PlayerSnapshotEntry& entry);
+
+	// P3.5a. Applies the one MSG_MAP_SYNC this client will ever receive -- see
+	// plans/phase3/P3.5a-join-map-sync.md.
+	void netApplyMapSync(const Net::MsgMapSync& sync);
 
 	// This client's own local avatar always occupies playerm id 0 (playerm->create(0) in the
 	// constructor, unrelated to networking). A dedicated server ALWAYS has its own player 0 too

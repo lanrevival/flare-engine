@@ -845,8 +845,16 @@ static void serverSyncNetworkPlayers() {
 		FPoint spawn_pos = playerm->local()->stats.pos;
 		if (wmap->teleportation)
 			spawn_pos = wmap->teleport_destination;
-		if (serverProvisionPlayer(id, spawn_pos))
+		if (serverProvisionPlayer(id, spawn_pos)) {
 			server_net_players.insert(id);
+			// P3.5a: this peer's own summon powers were never walked by any handleNewMap() call --
+			// the server's own map was already loaded before this peer connected. See
+			// plans/phase3/P3.5a-join-map-sync.md.
+			entitym->preloadSummonPrototypesForPlayer(id);
+			// Tells this peer's own client which map to load and where its own local avatar
+			// belongs on it -- sent exactly once, right here, never again this session.
+			netmgr->sendTo(id, Net::encodeMapSync(wmap->getFilename(), spawn_pos.x, spawn_pos.y));
+		}
 		// else: logged by serverProvisionPlayer() itself. The peer stays connected but bound to no
 		// player -- its packets simply decode into server_net_cmd and are never read by anything,
 		// since serverPlayerIsDriven() only ever consults server_net_players.

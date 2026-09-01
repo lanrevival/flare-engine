@@ -196,11 +196,22 @@ void GameStatePlay::netSyncPlayers() {
 	std::string payload;
 	Net::MsgPlayerSnapshot snap;
 	bool got_one = false;
+	// P3.5a: MSG_MAP_SYNC is sent exactly once, right when this client's own peer is provisioned --
+	// decoded here alongside MSG_PLAYER_SNAPSHOT since both arrive through the same popPacket() loop.
+	Net::MsgMapSync map_sync;
+	bool got_map_sync = false;
 	while (netmgr->popPacket(&from, &payload)) {
-		if (Net::peekMessageType(payload) == Net::MSG_PLAYER_SNAPSHOT && Net::decodePlayerSnapshot(payload, snap))
+		uint8_t type = Net::peekMessageType(payload);
+		if (type == Net::MSG_PLAYER_SNAPSHOT && Net::decodePlayerSnapshot(payload, snap))
 			got_one = true;
+		else if (type == Net::MSG_MAP_SYNC && Net::decodeMapSync(payload, map_sync))
+			got_map_sync = true;
 		// Any other message type this tick is silently dropped -- nothing else is defined yet.
 	}
+	// Handled before the got_one early return below -- MSG_MAP_SYNC can arrive on a tick with no
+	// accompanying MSG_PLAYER_SNAPSHOT if the two frames land in separate TCP reads.
+	if (got_map_sync)
+		netApplyMapSync(map_sync);
 	if (!got_one)
 		return;
 
@@ -278,6 +289,24 @@ Avatar* GameStatePlay::netApplySnapshotEntry(const Net::PlayerSnapshotEntry& ent
 		av->setAnimation(entry.animation);
 
 	return av;
+}
+
+// P3.5a. Routes through the exact same intermap-teleport machinery checkTeleport() already runs for
+// a normal in-game teleport (portal, waypoint, ...), so a joining client's own map load reuses
+// already-proven code rather than a second, parallel map-load path. checkTeleport() runs later in
+// this same logic() call (see logic()'s own call order: netSyncPlayers() then checkTeleport()), so
+// setting these fields here is enough for the load to happen before this tick ends. checkTeleport()'s
+// own map-load branch calls entitym->handleNewMap(), which is what preloads this client's own
+// summon-power prototypes into its own simulation -- no separate preload call is needed here, unlike
+// the server/host side (see EntityManager::preloadSummonPrototypesForPlayer()'s own comment for why
+// that side needs a narrower call instead of just reusing handleNewMap()).
+void GameStatePlay::netApplyMapSync(const Net::MsgMapSync& sync) {
+	mapr->teleportation = true;
+	mapr->teleport_mapname = sync.map_filename;
+	mapr->teleport_destination.x = sync.spawn_x;
+	mapr->teleport_destination.y = sync.spawn_y;
+	mapr->teleport_destination_id = 0;
+	mapr->force_spawn_pos = false;
 }
 
 // P3.4c. Opens netmgr as a HOST -- mutually exclusive with netConnectIfNeeded() above; main.cpp
@@ -386,8 +415,13 @@ void GameStatePlay::netHostSyncPeers() {
 		FPoint spawn_pos = player->stats.pos;
 		if (mapr->teleportation)
 			spawn_pos = mapr->teleport_destination;
-		if (netHostProvisionPeer(id, spawn_pos))
+		if (netHostProvisionPeer(id, spawn_pos)) {
 			net_host_players.insert(id);
+			// P3.5a: mirrors serverSyncNetworkPlayers()'s own two additions -- see
+			// plans/phase3/P3.5a-join-map-sync.md.
+			entitym->preloadSummonPrototypesForPlayer(id);
+			netmgr->sendTo(id, Net::encodeMapSync(mapr->getFilename(), spawn_pos.x, spawn_pos.y));
+		}
 		// else: logged by netHostProvisionPeer() itself. The peer stays connected but bound to no
 		// player -- its packets simply decode into net_host_cmd and are never read by anything,
 		// since netHostDrivePeers() only ever consults net_host_players.

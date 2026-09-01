@@ -378,6 +378,25 @@ bool decodePlayerSnapshot(const std::string& payload, MsgPlayerSnapshot& out) {
 	return true;
 }
 
+std::string encodeMapSync(const std::string& map_filename, float spawn_x, float spawn_y) {
+	std::string out;
+	writeU8(out, static_cast<uint8_t>(MSG_MAP_SYNC));
+	writeString(out, map_filename);
+	writeFloat(out, spawn_x);
+	writeFloat(out, spawn_y);
+	return out;
+}
+
+bool decodeMapSync(const std::string& payload, MsgMapSync& out) {
+	size_t offset = 0;
+	uint8_t type;
+	if (!readU8(payload, offset, type) || type != MSG_MAP_SYNC)
+		return false;
+	return readString(payload, offset, out.map_filename)
+	    && readFloat(payload, offset, out.spawn_x)
+	    && readFloat(payload, offset, out.spawn_y);
+}
+
 uint8_t peekMessageType(const std::string& payload) {
 	if (payload.empty())
 		return 0;
@@ -432,6 +451,13 @@ std::string debugDump(const std::string& payload) {
 				return "<truncated:PLAYER_SNAPSHOT>";
 			snprintf(header, sizeof(header), "PLAYER_SNAPSHOT players=%u", static_cast<unsigned>(m.players.size()));
 			return std::string(header);
+		}
+		case MSG_MAP_SYNC: {
+			MsgMapSync m;
+			if (!decodeMapSync(payload, m))
+				return "<truncated:MAP_SYNC>";
+			snprintf(header, sizeof(header), "MAP_SYNC spawn=(%.1f,%.1f) map=\"", static_cast<double>(m.spawn_x), static_cast<double>(m.spawn_y));
+			return std::string(header) + m.map_filename + "\"";
 		}
 		default:
 			return payload.empty() ? "<empty>" : "<unknown>";

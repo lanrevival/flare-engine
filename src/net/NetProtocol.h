@@ -56,7 +56,8 @@ enum MessageType {
 	MSG_REFUSED = 3,
 	MSG_PLAYER_COMMAND = 4,
 	MSG_SYSTEM_MESSAGE = 5,
-	MSG_PLAYER_SNAPSHOT = 6
+	MSG_PLAYER_SNAPSHOT = 6,
+	MSG_MAP_SYNC = 7
 };
 
 enum RefusalReason {
@@ -104,6 +105,15 @@ struct MsgPlayerSnapshot {
 	std::vector<PlayerSnapshotEntry> players;
 };
 
+// P3.5a. Sent exactly once per peer, right after that peer is provisioned server/host-side -- not a
+// recurring sync and not a response to later party travel (P3.6's job). spawn_x/spawn_y are always
+// a concrete position (the same spawn_pos serverProvisionPlayer()/netHostProvisionPeer() already
+// computed for that same player id), never a sentinel.
+struct MsgMapSync {
+	std::string map_filename;
+	float spawn_x, spawn_y;
+};
+
 std::string encodeHello(const std::string& display_name, uint32_t mod_hash);
 bool decodeHello(const std::string& payload, MsgHello& out);
 
@@ -121,6 +131,9 @@ bool decodeSystemMessage(const std::string& payload, MsgSystemMessage& out);
 
 std::string encodePlayerSnapshot(const std::vector<PlayerSnapshotEntry>& players);
 bool decodePlayerSnapshot(const std::string& payload, MsgPlayerSnapshot& out);
+
+std::string encodeMapSync(const std::string& map_filename, float spawn_x, float spawn_y);
+bool decodeMapSync(const std::string& payload, MsgMapSync& out);
 
 // Reads just the message-type byte, without decoding anything else -- callers switch on this
 // before picking a decode*(). Returns 0 (not a valid MessageType) if payload is empty.
