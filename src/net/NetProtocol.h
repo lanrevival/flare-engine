@@ -57,7 +57,9 @@ enum MessageType {
 	MSG_PLAYER_COMMAND = 4,
 	MSG_SYSTEM_MESSAGE = 5,
 	MSG_PLAYER_SNAPSHOT = 6,
-	MSG_MAP_SYNC = 7
+	MSG_MAP_SYNC = 7,
+	MSG_ENTITY_SPAWN = 8,
+	MSG_ENTITY_SNAPSHOT = 9
 };
 
 enum RefusalReason {
@@ -114,6 +116,52 @@ struct MsgMapSync {
 	float spawn_x, spawn_y;
 };
 
+// P3.9. Sent once per entity per client -- on join, for everything already alive, and again the
+// tick any later entity is created -- never a recurring sync for an already-announced id (see
+// main_server.cpp's own server_announced_entities set). name/lifeform/speed are deliberately NOT
+// included: all three are static per type_filename, loaded by StatBlock::load() inside
+// EntityManager::loadEntityPrototype(), and the mod_hash handshake already guarantees a client
+// loads the identical prototype file -- sending them would just be re-stating what loading the
+// same file already produces. level IS sent because D15 party-average scaling makes it genuinely
+// instance-specific, not derivable from type_filename alone. hero_ally/enemy_ally are sent so a
+// mirror client's own handleNewMap() delete loop (EntityManager.cpp) can tell a persistent ally
+// apart from an ordinary enemy the same way the server does -- see
+// plans/phase3/P3.9-entity-replication.md's Why for what breaks without this.
+struct EntitySpawnEntry {
+	uint32_t net_id;
+	std::string type_filename;
+	float pos_x, pos_y;
+	uint8_t direction;
+	int level;
+	bool hero_ally;
+	bool enemy_ally;
+};
+
+struct MsgEntitySpawn {
+	std::vector<EntitySpawnEntry> entities;
+};
+
+// P3.9. Per-tick full dump of every replicated (non-NPC) entity's mutable state -- same "full
+// dump every tick, absence is despawn" contract as MsgPlayerSnapshot, same reasoning (D27: no
+// deltas). cur_state (StatBlock::ENTITY_* enum) is included even though 'animation' is too,
+// because EntityManager::entityFocus()/getNearestEntity() -- both already called unconditionally
+// from GameStatePlay's ungated UI code, not gated by is_mirror -- switch on cur_state directly
+// (ENTITY_DEAD/ENTITY_CRITDEAD), and that isn't reliably recoverable from an animation name alone.
+struct EntitySnapshotEntry {
+	uint32_t net_id;
+	float pos_x, pos_y;
+	uint8_t direction;
+	uint8_t cur_state;
+	std::string animation;
+	float hp, hp_max;
+	bool alive;
+	bool corpse;
+};
+
+struct MsgEntitySnapshot {
+	std::vector<EntitySnapshotEntry> entities;
+};
+
 std::string encodeHello(const std::string& display_name, uint32_t mod_hash);
 bool decodeHello(const std::string& payload, MsgHello& out);
 
@@ -134,6 +182,12 @@ bool decodePlayerSnapshot(const std::string& payload, MsgPlayerSnapshot& out);
 
 std::string encodeMapSync(const std::string& map_filename, float spawn_x, float spawn_y);
 bool decodeMapSync(const std::string& payload, MsgMapSync& out);
+
+std::string encodeEntitySpawn(const std::vector<EntitySpawnEntry>& entities);
+bool decodeEntitySpawn(const std::string& payload, MsgEntitySpawn& out);
+
+std::string encodeEntitySnapshot(const std::vector<EntitySnapshotEntry>& entities);
+bool decodeEntitySnapshot(const std::string& payload, MsgEntitySnapshot& out);
 
 // Reads just the message-type byte, without decoding anything else -- callers switch on this
 // before picking a decode*(). Returns 0 (not a valid MessageType) if payload is empty.

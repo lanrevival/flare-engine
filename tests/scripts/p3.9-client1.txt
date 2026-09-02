@@ -1,0 +1,14 @@
+# P3.9's tests/run-net.sh scenario 4 (entity replication). Uses save slot 2 (make-fixture.sh's
+# combat fixture: Brute kit, actionbar slot 10 = MAIN1 = Swing, spawn 58,69 sits inside the goblin
+# group's own spawn box at abandoned_mines.txt location=54,62,6,12 -- the same fixture the
+# single-player replay corpus's own melee.rec already proves produces real kills within 600 ticks).
+# Deliberately DIFFERENT from p3.9-client2.txt -- two players fighting the same group, not one
+# script run twice. MAIN1 is released at tick 500 (comfortable margin past melee.rec's own 600-tick
+# proof, this fixture has two players' worth of extra damage) and the client disconnects late
+# (3550, matching every other scenario's convention) rather than shortly after combat: the digest
+# comparison needs a long QUIET tail, not just the fight itself -- see this file's own scenario 4
+# comment in tests/run-net.sh for why a script that disconnects right after combat ends never
+# produces a meaningful sample count under the tolerant-match threshold.
+5 press main1
+500 release main1
+3550 disconnect

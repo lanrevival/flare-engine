@@ -73,11 +73,38 @@ public:
 	Entity *entityFocus(const Point& mouse, const FPoint& cam, bool alive_only);
 	Entity* getNearestEntity(const FPoint& pos, bool get_corpse, float *saved_distance, float max_range);
 
+	// P3.9. The single choke point for adding to 'entities' -- assigns net_id only when the entity
+	// doesn't already have one (net_id == 0, the field's existing sentinel), so an entity that
+	// survives a map transition (handleNewMap()'s persistent-ally re-insertion) keeps its identity
+	// instead of being treated as newly spawned. See plans/phase3/P3.9-entity-replication.md's Why.
+	Entity* addEntity(Entity* e);
+
+	// P3.9. Linear scan -- 'entities' is small (same cost class as entityFocus()/getNearestEntity(),
+	// both already O(entities) scans). Returns NULL if no entity with this net_id exists.
+	Entity* getEntityByNetId(uint32_t net_id) const;
+
 	// vars
 	std::vector<Entity*> entities;
 
 	bool player_blocked;
 	Timer player_blocked_timer;
+
+	// P3.9. Set once by GameStatePlay::logic() at the same point 'is_mirror' is computed. When
+	// true, handleNewMap() is a complete no-op (see its own comment) -- a mirror's 'entities' is
+	// populated and depopulated exclusively by GameStatePlay::netApplyEntitySpawn()/
+	// netApplyEntitySnapshot(). This has to be all-or-nothing, not just "don't create": checkTeleport()
+	// calls handleNewMap() again for this client's own join-time MSG_MAP_SYNC, which lands AFTER
+	// that same tick's entity spawn burst has already been applied -- an earlier version of this
+	// plan only gated entity creation, and handleNewMap()'s own unconditional delete-existing-
+	// entities loop silently deleted every just-replicated entity the instant it arrived, with no
+	// way to recover (the server's per-peer announced-set never re-sends an id once sent). Found by
+	// running a real --connect session, not by reading the code. handleSpawn() needs no equivalent
+	// check: it is only ever reached through logic(), which GameStatePlay already skips entirely on
+	// a mirror.
+	bool mirror_mode;
+
+	// P3.9. Monotonic, session-unique, 1-based (0 stays addEntity()'s "unassigned" sentinel).
+	uint32_t next_net_id;
 
 	static const bool GET_CORPSE = true;
 	static const bool IS_ALIVE = true;

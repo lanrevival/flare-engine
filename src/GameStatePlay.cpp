@@ -200,18 +200,34 @@ void GameStatePlay::netSyncPlayers() {
 	// decoded here alongside MSG_PLAYER_SNAPSHOT since both arrive through the same popPacket() loop.
 	Net::MsgMapSync map_sync;
 	bool got_map_sync = false;
+	// P3.9: MSG_ENTITY_SPAWN/MSG_ENTITY_SNAPSHOT, same "decoded here, applied below" shape.
+	Net::MsgEntitySpawn entity_spawn;
+	bool got_entity_spawn = false;
+	Net::MsgEntitySnapshot entity_snap;
+	bool got_entity_snapshot = false;
 	while (netmgr->popPacket(&from, &payload)) {
 		uint8_t type = Net::peekMessageType(payload);
 		if (type == Net::MSG_PLAYER_SNAPSHOT && Net::decodePlayerSnapshot(payload, snap))
 			got_one = true;
 		else if (type == Net::MSG_MAP_SYNC && Net::decodeMapSync(payload, map_sync))
 			got_map_sync = true;
+		else if (type == Net::MSG_ENTITY_SPAWN && Net::decodeEntitySpawn(payload, entity_spawn))
+			got_entity_spawn = true;
+		else if (type == Net::MSG_ENTITY_SNAPSHOT && Net::decodeEntitySnapshot(payload, entity_snap))
+			got_entity_snapshot = true;
 		// Any other message type this tick is silently dropped -- nothing else is defined yet.
 	}
-	// Handled before the got_one early return below -- MSG_MAP_SYNC can arrive on a tick with no
-	// accompanying MSG_PLAYER_SNAPSHOT if the two frames land in separate TCP reads.
+	// Handled before the got_one early return below -- MSG_MAP_SYNC/MSG_ENTITY_* can arrive on a
+	// tick with no accompanying MSG_PLAYER_SNAPSHOT if the frames land in separate TCP reads.
+	// Spawn is applied before snapshot: a snapshot entry for a net_id this tick's own spawn just
+	// introduced must find it already created -- see netApplyEntitySnapshot()'s own comment on the
+	// one-tick tolerance for the case where it doesn't.
 	if (got_map_sync)
 		netApplyMapSync(map_sync);
+	if (got_entity_spawn)
+		netApplyEntitySpawn(entity_spawn);
+	if (got_entity_snapshot)
+		netApplyEntitySnapshot(entity_snap);
 	if (!got_one)
 		return;
 
@@ -327,6 +343,72 @@ void GameStatePlay::netApplyMapSync(const Net::MsgMapSync& sync) {
 	mapr->teleport_destination.y = sync.spawn_y;
 	mapr->teleport_destination_id = 0;
 	mapr->force_spawn_pos = false;
+}
+
+// P3.9. entitym->getEntityPrototype(entry.type_filename) is the exact same call
+// EntityManager::handleNewMap()'s own "load new entities" loop makes -- it loads animations/sounds
+// as a side effect of the prototype load (EntityManager::loadEntityPrototype()), so no separate
+// loadAnimations()/loadSounds() call is needed here, unlike EntityManager::handleSpawn()'s raw
+// `new Entity()` construction path. net_id is never assigned locally (entitym->next_net_id is a
+// server/single-player-only counter, untouched on a mirror) -- it always comes off the wire, so
+// this pushes directly onto entitym->entities rather than going through addEntity().
+void GameStatePlay::netApplyEntitySpawn(const Net::MsgEntitySpawn& spawn) {
+	for (size_t i = 0; i < spawn.entities.size(); ++i) {
+		const Net::EntitySpawnEntry& entry = spawn.entities[i];
+		if (entitym->getEntityByNetId(entry.net_id))
+			continue; // already known -- a defensive no-op against a duplicate announce
+
+		Entity* e = entitym->getEntityPrototype(entry.type_filename);
+		e->net_id = entry.net_id;
+		e->stats.pos.x = entry.pos_x;
+		e->stats.pos.y = entry.pos_y;
+		e->stats.direction = entry.direction;
+		e->stats.level = entry.level;
+		e->stats.hero_ally = entry.hero_ally;
+		e->stats.enemy_ally = entry.enemy_ally;
+		e->stats.recalc();
+		entitym->entities.push_back(e);
+	}
+}
+
+// P3.9. Full per-tick dump, same "absence is despawn" contract netSyncPlayers() already applies to
+// players. A snapshot entry naming a net_id with no matching entity yet is silently skipped -- the
+// same one-tick spawn/snapshot race class P3.8's own residual movement-boundary ticks already
+// established as tolerated, not chased. NPCs (stats.npc) are excluded from the despawn scan
+// defensively: this plan never creates one, but nothing here should ever delete one either.
+void GameStatePlay::netApplyEntitySnapshot(const Net::MsgEntitySnapshot& snapshot) {
+	std::vector<uint32_t> seen;
+	for (size_t i = 0; i < snapshot.entities.size(); ++i) {
+		const Net::EntitySnapshotEntry& entry = snapshot.entities[i];
+		seen.push_back(entry.net_id);
+
+		Entity* e = entitym->getEntityByNetId(entry.net_id);
+		if (!e)
+			continue;
+
+		e->stats.pos.x = entry.pos_x;
+		e->stats.pos.y = entry.pos_y;
+		e->stats.direction = entry.direction;
+		e->stats.cur_state = entry.cur_state;
+		if (!entry.animation.empty())
+			e->setAnimation(entry.animation);
+		e->stats.hp = entry.hp;
+		e->stats.current[Stats::HP_MAX] = entry.hp_max;
+		e->stats.alive = entry.alive;
+		e->stats.corpse = entry.corpse;
+	}
+
+	for (size_t i = 0; i < entitym->entities.size(); ++i) {
+		Entity* e = entitym->entities[i];
+		if (!e || e->stats.npc)
+			continue;
+		if (std::find(seen.begin(), seen.end(), e->net_id) == seen.end()) {
+			e->unloadSounds(); // matches EntityManager::handleNewMap()'s own delete loop
+			delete e;
+			entitym->entities.erase(entitym->entities.begin() + i);
+			--i; // erase() shifts everything after it down; re-check this index
+		}
+	}
 }
 
 // P3.8b. This is a C++98 codebase (CMakeLists.txt: -std=c++98), so no std::to_string -- matches
@@ -1209,6 +1291,10 @@ void GameStatePlay::logic() {
 		// avatar's own sim, or objects entitym/hazards/loot/npcs own) -- see P3.8's own Why for
 		// which nearby-looking calls are deliberately NOT gated.
 		bool is_mirror = netmgr && netmgr->hasLocalPlayerID();
+		// P3.9: gates handleNewMap()'s own local entity instantiation -- see EntityManager.h's own
+		// comment. Cheap and tick-idempotent to set unconditionally, matching this codebase's
+		// existing pattern for other per-tick flag threading (e.g. Settings::headless).
+		entitym->mirror_mode = is_mirror;
 
 		if (!second_timer.isEnd())
 			second_timer.tick();

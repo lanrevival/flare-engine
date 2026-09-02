@@ -36,8 +36,10 @@ FLARE.  If not, see http://www.gnu.org/licenses/
  * WORSE than not sorting: two runs that spawn the same entities in a different order are already
  * desynced, and sorting would hide exactly that.
  *
- * (An earlier plan said to sort by Entity::net_id. No such field exists -- it belonged to an
- * abandoned prototype, not this tree.)
+ * (An earlier version of this comment said "sort by Entity::net_id -- no such field exists".
+ * Wrong: it exists (Entity.h), it was simply unused until P3.9, which is also the first thing to
+ * sort by it -- see computeReplicated()'s own comment for why cross-process hashing needs that
+ * where compute() itself, single-process only, still does not.)
  *
  * FLOATS ARE HASHED BY BIT PATTERN, never formatted as text: printing at 6 significant figures
  * silently equates values that differ, which is the one thing this must never do. NaN is
@@ -55,18 +57,31 @@ public:
 	static uint64_t compute(unsigned long tick);
 
 	/** Digest of only the fields the network already replicates: PlayerSnapshotEntry's set
-	 * (id, pos, direction, animation, hp, hp_max, alive) for every player, nothing else. P3.7.
-	 * Entities/hazards/loot/inventory/campaign are not wire-replicated yet (P3.9-P3.12), so
-	 * compute() cannot be compared between a client and server process before then -- this can,
-	 * once the two processes stop independently simulating (P3.8, D27). Before that, two
-	 * processes fed the same scripted input can still disagree here by a tick or two of network
-	 * latency; this is infrastructure for P3.8 onward, not an equality guarantee on its own.
+	 * (id, pos, direction, animation, hp, hp_max, alive) for every player, plus (P3.9)
+	 * EntitySnapshotEntry's set (net_id, pos, direction, cur_state, animation, hp, hp_max, alive,
+	 * corpse) for every non-NPC entity. Hazards/loot/inventory/campaign are not wire-replicated yet
+	 * (P3.10-P3.12), so compute() still cannot be compared between a client and server process --
+	 * this can, once the two processes stop independently simulating (P3.8, D27) and the entity set
+	 * itself stops being independently spawned per process (P3.9). Before that, two processes fed
+	 * the same scripted input can still disagree here by a tick or two of network latency; this is
+	 * infrastructure for P3.8 onward, not an equality guarantee on its own.
 	 *
 	 * P3.8b: exclude_id, when >= 0, skips the player whose Avatar::id equals it -- used only by
 	 * main_server.cpp's own --no-local-player runs, to leave the --load-slot clone template
 	 * (never a real network player then) out of the digest a client's own computeReplicated() is
 	 * compared against. -1 (the default) excludes nothing, matching every call site before this
-	 * parameter existed. */
+	 * parameter existed. Entities are unaffected by exclude_id -- it is keyed on Avatar::id, which
+	 * has no entity equivalent.
+	 *
+	 * P3.9: both the player and entity sections are sorted by their own net id
+	 * (Avatar::player_net_id, Entity::net_id) rather than trusted to arrive in matching container
+	 * order across processes -- P3.8 found the player case breaks silently otherwise (a client's
+	 * own avatar is always playerm index 0 regardless of network id, so raw container order never
+	 * agreed between a server and a client). Entities carry the same cross-process risk in
+	 * principle (a joining client's catch-up spawn burst), so this applies the same fix
+	 * pre-emptively rather than waiting to rediscover it. compute() itself (single-process only,
+	 * used by the replay corpus) is untouched and keeps its own "container order, deliberately
+	 * unsorted" contract -- see this file's own class comment. */
 	static uint64_t computeReplicated(unsigned long tick, int exclude_id = -1);
 
 	/** "0x%016llx" -- the form printed by --hash and stored in golden files. */

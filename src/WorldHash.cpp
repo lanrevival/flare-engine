@@ -232,11 +232,12 @@ uint64_t WorldHash::compute(unsigned long tick) {
 	return h;
 }
 
-// P3.7. Field set mirrors Net::PlayerSnapshotEntry exactly (net/NetProtocol.h) and the
+// P3.7 (players), P3.9 (entities, appended below the player section). Field set mirrors
+// Net::PlayerSnapshotEntry/Net::EntitySnapshotEntry exactly (net/NetProtocol.h) and the
 // construction in serverBroadcastSnapshot() (main_server.cpp) / GameStatePlay.cpp's own snapshot
 // build -- so a value that diverges here is, by construction, a value that would also diverge on
-// the wire. Deliberately excludes mp/xp/currency (not in PlayerSnapshotEntry today) and every
-// other section compute() covers -- see WorldHash.h's doc comment on this function for why.
+// the wire. Deliberately excludes mp/xp/currency (not in PlayerSnapshotEntry today) and hazards/
+// loot/inventory/campaign entirely -- see WorldHash.h's doc comment on this function for why.
 uint64_t WorldHash::computeReplicated(unsigned long tick, int exclude_id) {
 	uint64_t h = init();
 
@@ -280,6 +281,44 @@ uint64_t WorldHash::computeReplicated(unsigned long tick, int exclude_id) {
 		h = mixFloat(h, av->stats.hp);
 		h = mixFloat(h, av->stats.get(Stats::HP_MAX));
 		h = mixI32(h, av->stats.alive ? 1 : 0);
+	}
+
+	// P3.9. Field set mirrors Net::EntitySnapshotEntry exactly (net/NetProtocol.h). Sorted by
+	// net_id for the same cross-process reason the player section above is -- see this function's
+	// own header comment and WorldHash.h's doc comment. NPCs (stats.npc) are excluded: they are not
+	// wire-replicated yet (P3.11c), same exclusion EntityManager::handleNewMap()'s own delete loop
+	// already applies to entities.
+	h = mixI32(h, TAG_ENTITIES);
+	if (entitym) {
+		std::vector<Entity*> entities_by_net_id;
+		for (size_t i = 0; i < entitym->entities.size(); ++i) {
+			Entity* e = entitym->entities[i];
+			if (!e || e->stats.npc)
+				continue;
+			entities_by_net_id.push_back(e);
+		}
+		for (size_t i = 1; i < entities_by_net_id.size(); ++i) {
+			Entity* key = entities_by_net_id[i];
+			size_t j = i;
+			while (j > 0 && entities_by_net_id[j - 1]->net_id > key->net_id) {
+				entities_by_net_id[j] = entities_by_net_id[j - 1];
+				--j;
+			}
+			entities_by_net_id[j] = key;
+		}
+		for (size_t p = 0; p < entities_by_net_id.size(); ++p) {
+			Entity* e = entities_by_net_id[p];
+			h = mixU64(h, static_cast<uint64_t>(e->net_id));
+			h = mixFloat(h, e->stats.pos.x);
+			h = mixFloat(h, e->stats.pos.y);
+			h = mixU64(h, static_cast<uint64_t>(e->stats.direction));
+			h = mixI32(h, e->stats.cur_state);
+			h = mixString(h, e->activeAnimation ? e->activeAnimation->getName() : std::string());
+			h = mixFloat(h, e->stats.hp);
+			h = mixFloat(h, e->stats.get(Stats::HP_MAX));
+			h = mixI32(h, e->stats.alive ? 1 : 0);
+			h = mixI32(h, e->stats.corpse ? 1 : 0);
+		}
 	}
 
 	h = mixI32(h, TAG_END);

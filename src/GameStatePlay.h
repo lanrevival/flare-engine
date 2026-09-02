@@ -49,6 +49,8 @@ namespace Net {
 	class NetworkManager;
 	struct PlayerSnapshotEntry;
 	struct MsgMapSync;
+	struct MsgEntitySpawn;
+	struct MsgEntitySnapshot;
 }
 
 class ActionData;
@@ -117,6 +119,17 @@ private:
 	// P3.5a. Applies the one MSG_MAP_SYNC this client will ever receive -- see
 	// plans/phase3/P3.5a-join-map-sync.md.
 	void netApplyMapSync(const Net::MsgMapSync& sync);
+
+	// P3.9. Creates a mirrored Entity for any not-yet-seen net_id (idempotent -- skips one already
+	// present, defensive against a re-announce). Never assigns a net_id itself: entitym's own
+	// next_net_id counter is server/single-player-only, an entity id here always comes off the
+	// wire. See plans/phase3/P3.9-entity-replication.md.
+	void netApplyEntitySpawn(const Net::MsgEntitySpawn& spawn);
+
+	// P3.9. Full per-tick dump, same "absence is despawn" contract as netSyncPlayers()'s own player
+	// handling -- writes every named entity's mutable fields, then deletes any non-NPC entity in
+	// entitym->entities NOT named this tick.
+	void netApplyEntitySnapshot(const Net::MsgEntitySnapshot& snapshot);
 
 	// This client's own local avatar always occupies playerm id 0 (playerm->create(0) in the
 	// constructor, unrelated to networking). A dedicated server ALWAYS has its own player 0 too

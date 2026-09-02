@@ -955,6 +955,16 @@ static Avatar* serverProvisionPlayer(PlayerID id, FPoint spawn_pos);
 static std::set<PlayerID> server_net_players;
 static std::map<PlayerID, PlayerCommand> server_net_cmd;
 
+// P3.9. Every non-NPC net_id announced to EACH connected peer via MSG_ENTITY_SPAWN, keyed by
+// PlayerID -- per-peer, not global: a peer that joins after an entity already exists (the common
+// case -- entitym->handleNewMap() spawns a map's entities once, at load, long before most peers
+// connect) still needs its own one-time catch-up spawn burst for every entity already alive, the
+// same way MSG_MAP_SYNC is "sent once per peer", not "sent once per session". A global set would
+// silently skip that burst for every peer after the first (a real bug this plan's own scenario 3
+// test caught: the guest, joining after the host, never received any entity at all). Entry erased
+// on disconnect (serverSyncNetworkPlayers() above) so a rejoining peer gets a fresh full burst.
+static std::map<PlayerID, std::set<uint32_t> > server_announced_entities;
+
 // True for playerm->local_id (this machine's own keyboard) and for any id currently bound to a
 // connected peer. Every other player -- e.g. a --spawn-test-players clone nothing has bound to a
 // real connection -- stays exactly as inert as it always has been (see serverSpawnTestPlayers()'s
@@ -987,6 +997,7 @@ static void serverSyncNetworkPlayers() {
 	PlayerID id;
 	while (netmgr->popDisconnected(&id)) {
 		server_net_players.erase(id);
+		server_announced_entities.erase(id); // P3.9: see that map's own comment
 		// D26 (P2.5 step 5): frees any in-flight Hazard/summons this player owned. get() guards
 		// against a disconnect racing a provisioning failure (serverProvisionPlayer() returned
 		// NULL for this id -- see popConnected() below), which would otherwise call remove() on an
@@ -1031,15 +1042,16 @@ static void serverSyncNetworkPlayers() {
 	}
 }
 
-// P3.4. --dedicated only (netmgr is NULL otherwise, and this is a no-op). Called once per tick,
-// right after serverLogic() has advanced the simulation, so every field read here is this tick's
-// settled server-computed state -- not last tick's. playerm->players already holds exactly the
-// players worth broadcasting (local id 0 plus every id serverSyncNetworkPlayers() currently keeps
-// provisioned), sorted by id.
+// P3.4 (players), P3.9 (entities, appended). --dedicated only (netmgr is NULL otherwise, and this
+// is a no-op). Called once per tick, right after serverLogic() has advanced the simulation, so
+// every field read here is this tick's settled server-computed state -- not last tick's.
+// playerm->players already holds exactly the players worth broadcasting (local id 0 plus every id
+// serverSyncNetworkPlayers() currently keeps provisioned), sorted by id.
 //
 // P3.8b: no_local_player skips id 0 entirely -- it is the --load-slot clone template
 // (serverProvisionPlayer()), never a real network player, when --no-local-player was passed. See
-// plans/phase3/P3.8b-host-becomes-a-child-process.md's Why.
+// plans/phase3/P3.8b-host-becomes-a-child-process.md's Why. Entities are unaffected by
+// no_local_player -- it is a player-only concept.
 static void serverBroadcastSnapshot(bool no_local_player) {
 	if (!netmgr)
 		return;
@@ -1061,6 +1073,79 @@ static void serverBroadcastSnapshot(bool no_local_player) {
 		entries.push_back(entry);
 	}
 	netmgr->broadcast(Net::encodePlayerSnapshot(entries));
+
+	// P3.9. NPCs (stats.npc) are excluded -- not wire-replicated yet, see P3.11c -- same exclusion
+	// WorldHash::computeReplicated() and EntityManager::handleNewMap()'s own delete loop apply.
+	std::set<uint32_t> live_ids;
+	std::vector<Net::EntitySnapshotEntry> snapshot_entries;
+	for (size_t i = 0; i < entitym->entities.size(); ++i) {
+		Entity* e = entitym->entities[i];
+		if (!e || e->stats.npc)
+			continue;
+
+		live_ids.insert(e->net_id);
+
+		Net::EntitySnapshotEntry snap;
+		snap.net_id = e->net_id;
+		snap.pos_x = e->stats.pos.x;
+		snap.pos_y = e->stats.pos.y;
+		snap.direction = e->stats.direction;
+		snap.cur_state = static_cast<uint8_t>(e->stats.cur_state);
+		snap.animation = e->activeAnimation ? e->activeAnimation->getName() : std::string();
+		snap.hp = e->stats.hp;
+		snap.hp_max = e->stats.get(Stats::HP_MAX);
+		snap.alive = e->stats.alive;
+		snap.corpse = e->stats.corpse;
+		snapshot_entries.push_back(snap);
+	}
+
+	// P3.9. Per-peer catch-up burst: each connected peer gets a spawn message for every live
+	// entity IT hasn't been told about yet, not just entities newly created this tick -- see
+	// server_announced_entities' own comment for why a global "ever announced" set breaks a peer
+	// that joins after another entity already exists (the common case). Spawn is sent (sendTo, not
+	// broadcast -- each peer's own catch-up set differs) before the snapshot broadcast below, so a
+	// snapshot entry naming a net_id always finds it already created on the receiving end.
+	for (std::set<PlayerID>::const_iterator peer_it = server_net_players.begin(); peer_it != server_net_players.end(); ++peer_it) {
+		PlayerID peer = *peer_it;
+		std::set<uint32_t>& announced = server_announced_entities[peer];
+
+		std::vector<Net::EntitySpawnEntry> new_spawns;
+		for (size_t i = 0; i < entitym->entities.size(); ++i) {
+			Entity* e = entitym->entities[i];
+			if (!e || e->stats.npc)
+				continue;
+			if (announced.find(e->net_id) != announced.end())
+				continue;
+
+			Net::EntitySpawnEntry spawn;
+			spawn.net_id = e->net_id;
+			spawn.type_filename = e->type_filename;
+			spawn.pos_x = e->stats.pos.x;
+			spawn.pos_y = e->stats.pos.y;
+			spawn.direction = e->stats.direction;
+			spawn.level = e->stats.level;
+			spawn.hero_ally = e->stats.hero_ally;
+			spawn.enemy_ally = e->stats.enemy_ally;
+			new_spawns.push_back(spawn);
+			announced.insert(e->net_id);
+		}
+
+		// Drop any previously-announced id this peer no longer needs to hear about again -- see
+		// server_announced_entities' own comment. Two passes (collect then erase) to avoid
+		// invalidating 'announced'-s own iterator.
+		std::vector<uint32_t> stale;
+		for (std::set<uint32_t>::const_iterator id_it = announced.begin(); id_it != announced.end(); ++id_it) {
+			if (live_ids.find(*id_it) == live_ids.end())
+				stale.push_back(*id_it);
+		}
+		for (size_t i = 0; i < stale.size(); ++i)
+			announced.erase(stale[i]);
+
+		if (!new_spawns.empty())
+			netmgr->sendTo(peer, Net::encodeEntitySpawn(new_spawns));
+	}
+
+	netmgr->broadcast(Net::encodeEntitySnapshot(snapshot_entries));
 }
 
 // The tick-order-preserving port of GameStatePlay::logic(), replacing gswitch->logic(). See

@@ -1,0 +1,7 @@
+# P3.9's tests/run-net.sh scenario 4 (entity replication). Same fixture as p3.9-client1.txt (see
+# that file's own comment) -- a second player joining the same fight. Starts its own MAIN1 press a
+# few ticks later and disconnects a few ticks after client1 so a same-tick coincidence can't hide
+# an ordering bug, same precedent as every prior distinctly-scripted client pair in this file.
+15 press main1
+500 release main1
+3560 disconnect

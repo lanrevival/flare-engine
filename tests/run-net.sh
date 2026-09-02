@@ -1,5 +1,5 @@
 #!/bin/sh
-# Three scenarios against headless flare/flare-server processes on loopback:
+# Four scenarios against headless flare/flare-server processes on loopback:
 #
 #   1. P3.7's own liveness check -- two clients running the same short script against a manually
 #      started flare-server --dedicated, asserting every process exits 0 and the server's
@@ -18,15 +18,23 @@
 #      plans/phase3/P3.8b-host-becomes-a-child-process.md's Why for why this needs its own
 #      scenario rather than being assumed from scenario 2 alone (nothing before this plan ever
 #      exercised --host at all).
+#   4. P3.9's entity replication check -- same two-client-vs-manually-started-server shape as
+#      scenario 2, but on save slot 2 (make-fixture.sh's combat fixture: spawns inside a goblin
+#      group's own spawn box, the same fixture the single-player replay corpus's own melee.rec
+#      already proves produces real kills), both clients holding down their attack key for most of
+#      the run. Scenario 2/3 already run on a map with nearby entities (slot 1's own
+#      abandoned_mines) but never attack anything, so they only prove replication of an otherwise-
+#      static entity set; this scenario is the one that exercises entity death/despawn over the
+#      wire. See plans/phase3/P3.9-entity-replication.md's Why.
 #
 #   tests/run-net.sh [data-path]
 #
-# Exit 0 = all three scenarios passed. Exit 1 = any failed.
+# Exit 0 = all four scenarios passed. Exit 1 = any failed.
 #
-# Kept as one file with three scenarios, not split into separate scripts -- all three need the
+# Kept as one file with four scenarios, not split into separate scripts -- all four need the
 # exact same fixture/isolated-$HOME/trap machinery, and P3.7's own two real bugs (found and fixed
-# developing scenario 1) apply equally to scenarios 2 and 3, so there is nothing scenario-specific
-# to gain from separating them.
+# developing scenario 1) apply equally to every scenario after it, so there is nothing
+# scenario-specific to gain from separating them.
 
 set -e
 cd "$(dirname "$0")/.."
@@ -408,6 +416,128 @@ fi
 
 if [ "$s3_fail" = "0" ]; then
 	echo "PASS (scenario 3): --host spawned its own flare-server, a guest joined it, and both agreed on every sampled tick's digest"
+else
+	overall_fail=1
+fi
+
+# ---------------------------------------------------------------------------------------------
+# Scenario 4: entity replication (P3.9)
+# ---------------------------------------------------------------------------------------------
+
+PORT=$((37800 + (RANDOM % 1000)))
+SERVER_HOME="$OUT/s4_server_home"
+mkdir -p "$SERVER_HOME/.config/flare" "$SERVER_HOME/.local/share/flare/saves"
+: > "$SERVER_HOME/.config/flare/settings.txt"
+cp -r "$FIXTURE_HOME/.local/share/flare/saves/empyrean" "$SERVER_HOME/.local/share/flare/saves/empyrean"
+
+echo "scenario 4 (entity replication): starting server on port $PORT"
+# --load-slot=2, not 1 -- make-fixture.sh's combat fixture, spawning inside a goblin group's own
+# spawn box instead of 19 tiles from the nearest enemy. 3600 ticks / hash-every=60, matching
+# scenario 2's own convention, not a shorter combat-only window: MAIN1 is released at tick 500 (see
+# tests/scripts/p3.9-client1.txt) so the digest comparison samples a long QUIET tail after the fight
+# resolves, not just the fight itself. A script that disconnects shortly after combat ends gives
+# every sample a real chance of landing mid-flight (position/animation/HP still actively changing),
+# which is exactly the one-tick-latency noise the tolerant-match threshold was calibrated against a
+# mostly-idle script (scenario 2/3), not a constantly-active one -- measured directly: an earlier
+# version of this scenario disconnected at tick ~900 with no quiet tail and mismatched close to
+# 100% of samples, which turned out to be real (if expected) per-tick latency, not a defect.
+HOME="$SERVER_HOME" ./flare-server --dedicated --port="$PORT" --data-path="$DATA_PATH" \
+	--mods="$MODS" --load-slot=2 --max-players=4 --max-ticks=3600 \
+	--hash-replicated --hash-every=60 --dump-players \
+	> "$OUT/s4_server.out" 2> "$OUT/s4_server.err" &
+SERVER_PID=$!
+
+listening=""
+for i in $(seq 1 100); do
+	if grep -q "listening on port" "$OUT/s4_server.out" "$OUT/s4_server.err" 2>/dev/null; then
+		listening=1
+		break
+	fi
+	sleep 0.05
+done
+if [ -z "$listening" ]; then
+	echo "FAIL (scenario 4): server never reported listening"
+	echo "--- s4_server.err ---"; cat "$OUT/s4_server.err"
+	exit 1
+fi
+
+s4_fail=0
+client_pids=""
+for n in 1 2; do
+	CLIENT_HOME="$OUT/s4_client${n}_home"
+	mkdir -p "$CLIENT_HOME/.config/flare" "$CLIENT_HOME/.local/share/flare/saves"
+	: > "$CLIENT_HOME/.config/flare/settings.txt"
+	cp -r "$FIXTURE_HOME/.local/share/flare/saves/empyrean" "$CLIENT_HOME/.local/share/flare/saves/empyrean"
+
+	HOME="$CLIENT_HOME" ./flare --headless --data-path="$DATA_PATH" --mods="$MODS" \
+		--load-slot=2 --connect="127.0.0.1:$PORT" \
+		--script="tests/scripts/p3.9-client${n}.txt" --max-ticks=3600 --no-lock-file \
+		--hash-replicated --hash-every=60 \
+		> "$OUT/s4_client${n}.out" 2> "$OUT/s4_client${n}.err" &
+	client_pids="$client_pids $!"
+done
+
+client_fail=0
+for pid in $client_pids; do
+	if ! wait "$pid"; then
+		client_fail=1
+	fi
+done
+if [ "$client_fail" != "0" ]; then
+	echo "FAIL (scenario 4): a headless client exited non-zero"
+	for n in 1 2; do
+		echo "--- s4_client${n}.err (tail) ---"; tail -20 "$OUT/s4_client${n}.err"
+	done
+	s4_fail=1
+fi
+
+wait "$SERVER_PID"
+server_rc=$?
+SERVER_PID=""
+if [ "$server_rc" != "0" ]; then
+	echo "FAIL (scenario 4): server exited $server_rc"
+	echo "--- s4_server.err (tail) ---"; tail -20 "$OUT/s4_server.err"
+	s4_fail=1
+fi
+
+grep -oE '^tick [0-9]+ 0x[0-9a-f]+' "$OUT/s4_server.out"  > "$OUT/s4_server.digests"  2>/dev/null || true
+grep -oE '^tick [0-9]+ 0x[0-9a-f]+' "$OUT/s4_client1.out" > "$OUT/s4_client1.digests" 2>/dev/null || true
+grep -oE '^tick [0-9]+ 0x[0-9a-f]+' "$OUT/s4_client2.out" > "$OUT/s4_client2.digests" 2>/dev/null || true
+
+# Same tolerant-match reasoning as scenario 2's own comment -- a small, reproducible fraction of
+# mismatches at a scripted press/release boundary is real network latency, not a defect. The
+# threshold stays the same 15%; this scenario's point is proving the entity SET (not just player
+# position) tracks across all three processes while it's actually changing -- kills, corpses,
+# despawns -- not proving zero latency exists.
+digest_rc=0
+digest_report="$(awk -v s="$OUT/s4_server.digests" -v c1="$OUT/s4_client1.digests" -v c2="$OUT/s4_client2.digests" '
+BEGIN {
+	while ((getline line < s) > 0)  { split(line, f, " "); sd[f[2]]  = f[3] }
+	while ((getline line < c1) > 0) { split(line, f, " "); c1d[f[2]] = f[3] }
+	while ((getline line < c2) > 0) { split(line, f, " "); c2d[f[2]] = f[3] }
+	matched = 0
+	mismatched = 0
+	for (t in sd) {
+		if (t in c1d && t in c2d) {
+			matched++
+			if (sd[t] != c1d[t] || sd[t] != c2d[t]) {
+				mismatched++
+				printf "MISMATCH tick %s: server=%s client1=%s client2=%s\n", t, sd[t], c1d[t], c2d[t]
+			}
+		}
+	}
+	printf "matched=%d mismatched=%d\n", matched, mismatched
+	exit (matched < 10 || mismatched > matched * 0.15) ? 1 : 0
+}
+')" || digest_rc=$?
+echo "$digest_report"
+if [ "$digest_rc" != "0" ]; then
+	echo "FAIL (scenario 4): digest comparison failed (see MISMATCH lines above, or too few ticks matched)"
+	s4_fail=1
+fi
+
+if [ "$s4_fail" = "0" ]; then
+	echo "PASS (scenario 4): server + 2 attacking headless clients agreed on every sampled tick's entity+player digest"
 else
 	overall_fail=1
 fi

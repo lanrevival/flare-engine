@@ -62,13 +62,31 @@ static Avatar* playerForSummoner(StatBlock* summoner) {
 EntityManager::EntityManager()
 	: entities()
 	, player_blocked(false)
-	, player_blocked_timer(Settings::SIM_TICK_HZ / 6) {
+	, player_blocked_timer(Settings::SIM_TICK_HZ / 6)
+	, mirror_mode(false)
+	, next_net_id(1) {
 	handleNewMap();
 }
 
 Entity *EntityManager::getEntityPrototype(const std::string& type_id) {
 	Entity* e = new Entity(prototypes.at(loadEntityPrototype(type_id)));
 	return e;
+}
+
+// P3.9. See EntityManager.h's own comment.
+Entity* EntityManager::addEntity(Entity* e) {
+	if (e->net_id == 0)
+		e->net_id = next_net_id++;
+	entities.push_back(e);
+	return e;
+}
+
+Entity* EntityManager::getEntityByNetId(uint32_t net_id) const {
+	for (size_t i = 0; i < entities.size(); ++i) {
+		if (entities[i]->net_id == net_id)
+			return entities[i];
+	}
+	return NULL;
 }
 
 bool EntityManager::hasLoadedPrototype(const std::string& type_id) const {
@@ -133,6 +151,19 @@ size_t EntityManager::loadEntityPrototype(const std::string& type_id) {
  * The map will have loaded Entity blocks into an array; retrieve the entities and init them
  */
 void EntityManager::handleNewMap () {
+	// P3.9. A mirror's own entity lifecycle is 100% externally driven by replication
+	// (GameStatePlay::netApplyEntitySpawn()/netApplyEntitySnapshot()) -- this function must not
+	// touch 'entities' at all once mirror_mode is set, not just skip creating new ones. Found by
+	// running a real --connect session: this function's own "delete existing entities" loop at the
+	// top runs unconditionally, and checkTeleport() calls it again for THIS client's own join-time
+	// MSG_MAP_SYNC (a real message even though the client already loaded this same map locally at
+	// startup) -- which lands AFTER netSyncPlayers() has already applied that same tick's entity
+	// spawn burst (see logic()'s own call order), so without this guard every replicated entity was
+	// deleted the instant it arrived, and never came back: the server's per-peer announced-set
+	// already marks those ids as sent and never re-sends them. See
+	// plans/phase3/P3.9-entity-replication.md's Status note for the full account.
+	if (mirror_mode)
+		return;
 
 	Map_Enemy me;
 	std::queue<Entity *> allies;
@@ -196,7 +227,7 @@ void EntityManager::handleNewMap () {
 		// apply Effects and set HP to max HP
 		e->stats.recalc();
 
-		entities.push_back(e);
+		addEntity(e);
 
 		wmap->collider.block(me.pos.x, me.pos.y, !MapCollision::IS_ALLY);
 	}
@@ -224,7 +255,11 @@ void EntityManager::handleNewMap () {
 		e->stats.pos = spawn_pos;
 		if (owner) e->stats.direction = owner->stats.direction;
 
-		entities.push_back(e);
+		// P3.9. 'e' already has a net_id (it survived from before entities.clear() above, it is not
+		// a fresh instantiation), so addEntity() is a no-op passthrough here -- this whole function
+		// never runs on a mirror at all (see the mirror_mode guard at the top), so this path is
+		// server/single-player only.
+		addEntity(e);
 
 		wmap->collider.block(e->stats.pos.x, e->stats.pos.y, MapCollision::IS_ALLY);
 	}
@@ -434,7 +469,9 @@ void EntityManager::handleSpawn() {
 			}
 		}
 
-		entities.push_back(e);
+		// P3.9. No mirror_mode check needed here -- handleSpawn() is only ever reached through
+		// logic() (below), which GameStatePlay already skips entirely on a mirror.
+		addEntity(e);
 
 		wmap->collider.block(e->stats.pos.x, e->stats.pos.y, e->stats.hero_ally);
 	}

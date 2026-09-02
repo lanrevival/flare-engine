@@ -399,6 +399,110 @@ bool decodeMapSync(const std::string& payload, MsgMapSync& out) {
 	    && readFloat(payload, offset, out.spawn_y);
 }
 
+std::string encodeEntitySpawn(const std::vector<EntitySpawnEntry>& entities) {
+	std::string out;
+	writeU8(out, static_cast<uint8_t>(MSG_ENTITY_SPAWN));
+	writeU16(out, static_cast<uint16_t>(entities.size()));
+	for (size_t i = 0; i < entities.size(); ++i) {
+		const EntitySpawnEntry& e = entities[i];
+		writeU32(out, e.net_id);
+		writeString(out, e.type_filename);
+		writeFloat(out, e.pos_x);
+		writeFloat(out, e.pos_y);
+		writeU8(out, e.direction);
+		writeU32(out, static_cast<uint32_t>(e.level));
+		writeU8(out, e.hero_ally ? 1 : 0);
+		writeU8(out, e.enemy_ally ? 1 : 0);
+	}
+	return out;
+}
+
+bool decodeEntitySpawn(const std::string& payload, MsgEntitySpawn& out) {
+	size_t offset = 0;
+	uint8_t type;
+	if (!readU8(payload, offset, type) || type != MSG_ENTITY_SPAWN)
+		return false;
+
+	uint16_t count;
+	if (!readU16(payload, offset, count))
+		return false;
+
+	out.entities.clear();
+	for (uint16_t i = 0; i < count; ++i) {
+		EntitySpawnEntry e;
+		uint32_t level32;
+		uint8_t hero_byte, enemy_byte;
+		if (!readU32(payload, offset, e.net_id)
+		    || !readString(payload, offset, e.type_filename)
+		    || !readFloat(payload, offset, e.pos_x)
+		    || !readFloat(payload, offset, e.pos_y)
+		    || !readU8(payload, offset, e.direction)
+		    || !readU32(payload, offset, level32)
+		    || !readU8(payload, offset, hero_byte)
+		    || !readU8(payload, offset, enemy_byte))
+			return false;
+		e.level = static_cast<int>(level32);
+		e.hero_ally = hero_byte != 0;
+		e.enemy_ally = enemy_byte != 0;
+		out.entities.push_back(e);
+	}
+
+	return true;
+}
+
+std::string encodeEntitySnapshot(const std::vector<EntitySnapshotEntry>& entities) {
+	std::string out;
+	writeU8(out, static_cast<uint8_t>(MSG_ENTITY_SNAPSHOT));
+	writeU16(out, static_cast<uint16_t>(entities.size()));
+	for (size_t i = 0; i < entities.size(); ++i) {
+		const EntitySnapshotEntry& e = entities[i];
+		writeU32(out, e.net_id);
+		writeFloat(out, e.pos_x);
+		writeFloat(out, e.pos_y);
+		writeU8(out, e.direction);
+		writeU8(out, e.cur_state);
+		writeString(out, e.animation);
+		writeFloat(out, e.hp);
+		writeFloat(out, e.hp_max);
+		writeU8(out, e.alive ? 1 : 0);
+		writeU8(out, e.corpse ? 1 : 0);
+	}
+	return out;
+}
+
+bool decodeEntitySnapshot(const std::string& payload, MsgEntitySnapshot& out) {
+	size_t offset = 0;
+	uint8_t type;
+	if (!readU8(payload, offset, type) || type != MSG_ENTITY_SNAPSHOT)
+		return false;
+
+	uint16_t count;
+	if (!readU16(payload, offset, count))
+		return false;
+
+	out.entities.clear();
+	for (uint16_t i = 0; i < count; ++i) {
+		EntitySnapshotEntry e;
+		uint8_t alive_byte, corpse_byte;
+		if (!readU32(payload, offset, e.net_id)
+		    || !readFloat(payload, offset, e.pos_x)
+		    || !readFloat(payload, offset, e.pos_y)
+		    || !readU8(payload, offset, e.direction)
+		    || !readU8(payload, offset, e.cur_state)
+		    || !readString(payload, offset, e.animation)
+		    || !readFloat(payload, offset, e.hp)
+		    || !readFloat(payload, offset, e.hp_max)
+		    || !readU8(payload, offset, alive_byte)
+		    || !readU8(payload, offset, corpse_byte))
+			return false;
+		e.alive = alive_byte != 0;
+		e.corpse = corpse_byte != 0;
+		out.entities.push_back(e);
+	}
+
+	return true;
+}
+
 uint8_t peekMessageType(const std::string& payload) {
 	if (payload.empty())
 		return 0;
@@ -460,6 +564,20 @@ std::string debugDump(const std::string& payload) {
 				return "<truncated:MAP_SYNC>";
 			snprintf(header, sizeof(header), "MAP_SYNC spawn=(%.1f,%.1f) map=\"", static_cast<double>(m.spawn_x), static_cast<double>(m.spawn_y));
 			return std::string(header) + m.map_filename + "\"";
+		}
+		case MSG_ENTITY_SPAWN: {
+			MsgEntitySpawn m;
+			if (!decodeEntitySpawn(payload, m))
+				return "<truncated:ENTITY_SPAWN>";
+			snprintf(header, sizeof(header), "ENTITY_SPAWN entities=%u", static_cast<unsigned>(m.entities.size()));
+			return std::string(header);
+		}
+		case MSG_ENTITY_SNAPSHOT: {
+			MsgEntitySnapshot m;
+			if (!decodeEntitySnapshot(payload, m))
+				return "<truncated:ENTITY_SNAPSHOT>";
+			snprintf(header, sizeof(header), "ENTITY_SNAPSHOT entities=%u", static_cast<unsigned>(m.entities.size()));
+			return std::string(header);
 		}
 		default:
 			return payload.empty() ? "<empty>" : "<unknown>";
