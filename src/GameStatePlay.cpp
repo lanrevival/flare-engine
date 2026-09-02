@@ -218,8 +218,16 @@ void GameStatePlay::netSyncPlayers() {
 	PlayerID local_id = netmgr->localPlayerID();
 	std::vector<PlayerID> seen; // network ids, not playerm ids -- see remotePlayerId()
 	for (size_t i = 0; i < snap.players.size(); ++i) {
-		if (snap.players[i].id == local_id)
+		if (snap.players[i].id == local_id) {
+			// P3.8: this client's own avatar is a mirror too now -- apply the same fields directly
+			// onto playerm id 0 (`player`, already exists, no create-if-needed and no
+			// remotePlayerId() offset, unlike a never-before-seen remote). This function only ever
+			// runs once netmgr->hasLocalPlayerID() is true (early return above), i.e. only for a
+			// fully-joined --connect client -- never for --host or single-player, so no extra guard
+			// is needed here.
+			netApplySnapshotFields(player, snap.players[i]);
 			continue;
+		}
 		seen.push_back(snap.players[i].id);
 		netApplySnapshotEntry(snap.players[i]);
 	}
@@ -279,6 +287,20 @@ Avatar* GameStatePlay::netApplySnapshotEntry(const Net::PlayerSnapshotEntry& ent
 		// snapshot-apply path also updates the collider correctly on every position change.
 	}
 
+	netApplySnapshotFields(av, entry);
+
+	return av;
+}
+
+// P3.8. The field-write half of netApplySnapshotEntry() above, factored out so netSyncPlayers() can
+// apply it directly to this client's own already-existing avatar too (no create-if-needed branch
+// needed for playerm id 0). Deliberately no local prediction/interpolation (D27) -- positions land
+// exactly as the server sent them, same as every other mirrored player since P3.4b.
+void GameStatePlay::netApplySnapshotFields(Avatar* av, const Net::PlayerSnapshotEntry& entry) {
+	// P3.8: entry.id is always the network id, whether this is the local avatar's own entry
+	// (netSyncPlayers()'s local_id branch) or a remote's -- see Avatar::player_net_id's own comment
+	// for why this can't just be av->id.
+	av->player_net_id = entry.id;
 	av->stats.pos.x = entry.pos_x;
 	av->stats.pos.y = entry.pos_y;
 	av->stats.direction = entry.direction;
@@ -287,8 +309,6 @@ Avatar* GameStatePlay::netApplySnapshotEntry(const Net::PlayerSnapshotEntry& ent
 	av->stats.alive = entry.alive;
 	if (!entry.animation.empty())
 		av->setAnimation(entry.animation);
-
-	return av;
 }
 
 // P3.5a. Routes through the exact same intermap-teleport machinery checkTeleport() already runs for
@@ -1612,6 +1632,12 @@ void GameStatePlay::logic() {
 	menu->logic();
 
 	if (!isPaused()) {
+		// P3.8: true only for a fully-joined --connect client (has_local_id is never set for
+		// --host or single-player -- see NetworkManager.cpp). Gates every call below that mutates
+		// shared world state (this avatar's own sim, or objects entitym/hazards/loot/npcs own) --
+		// see this plan's Why for which nearby-looking calls are deliberately NOT gated.
+		bool is_mirror = netmgr && netmgr->hasLocalPlayerID();
+
 		if (!second_timer.isEnd())
 			second_timer.tick();
 		else {
@@ -1620,7 +1646,7 @@ void GameStatePlay::logic() {
 		}
 
 		// these actions only occur when the game isn't paused
-		if (player->stats.alive) checkLoot();
+		if (player->stats.alive && !is_mirror) checkLoot();
 		checkEnemyFocus();
 		checkNPCFocus();
 		if (player->stats.alive) {
@@ -1672,10 +1698,22 @@ void GameStatePlay::logic() {
 		if (menu->inv->applyEquipmentSetDelta(player_cmd.equip_set_delta))
 			inpt->lock[player_cmd.equip_set_delta > 0 ? Input::EQUIPMENT_SWAP : Input::EQUIPMENT_SWAP_PREV] = true;
 
-		player->logic(player_cmd, player_locks);
+		if (!is_mirror) {
+			player->logic(player_cmd, player_locks);
+		}
+		else {
+			// P3.8: this client's own avatar is a pure mirror now -- its fields come from the
+			// server's snapshot (netSyncPlayers(), see that function's own updated comment), not
+			// from running player->logic() against local input. Avatar::logic() is what normally
+			// clears action_queue every tick (Avatar.cpp:704) after MenuActionBar::checkAction()
+			// (above) appends this tick's clicks/hotkeys into it; do that ourselves so it does not
+			// grow unboundedly with nothing left to drain it.
+			player->action_queue.clear();
+		}
 
-		// P3.4b: the local avatar stays client-simulated (see this plan's Why) -- this just also
-		// forwards the same finished command to the host, so OTHER connected clients can see this
+		// P3.4b/P3.8: forwards the finished command to the host either way -- on a mirror this is
+		// now the ONLY thing that determines what happens next; on a still-self-simulating --host
+		// avatar (not this plan's concern, see Why) it also lets other connected clients see this
 		// player move. player_cmd is fully finished by this point in the tick (nothing above reads
 		// or writes it again), so it is safe to serialize here unmodified.
 		if (netmgr && netmgr->hasLocalPlayerID())
@@ -1696,10 +1734,15 @@ void GameStatePlay::logic() {
 		// Stats::STEALTH directly (via PlayerManager::nearestAliveTo()), so there's no longer a
 		// single hero value to transfer onto EntityManager here.
 
-		entitym->logic();
-		hazards->logic();
-		loot->logic();
-		npcs->logic();
+		// P3.8: none of these are wire-replicated yet (P3.9/P3.10) -- a connected client running
+		// them locally is exactly the "two people fight two different sets of monsters" bug D27
+		// exists to close, not a useful stand-in until the real replication lands. See Out of scope.
+		if (!is_mirror) {
+			entitym->logic();
+			hazards->logic();
+			loot->logic();
+			npcs->logic();
+		}
 
 		comb->logic(mapr->cam.pos);
 	}

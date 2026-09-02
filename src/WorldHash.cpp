@@ -244,9 +244,25 @@ uint64_t WorldHash::computeReplicated(unsigned long tick) {
 	h = mixU64(h, static_cast<uint64_t>(tick));
 
 	h = mixI32(h, TAG_PLAYER);
-	for (size_t p = 0; p < playerm->players.size(); ++p) {
-		Avatar* av = playerm->players[p];
-		h = mixU64(h, static_cast<uint64_t>(av->id));
+	// Sorted by player_net_id, not iterated in playerm->players' own order: that order is
+	// construction order, which differs by process (a client's own avatar is always playerm index
+	// 0 regardless of its network id; a server's is index 0 only because network id 0 happens to be
+	// what it always is). player_net_id -- not av->id -- is what's actually comparable across
+	// processes; see Avatar::player_net_id's own comment. Small (<=8 per D3), so a plain
+	// insertion-sorted copy is simplest.
+	std::vector<Avatar*> by_net_id(playerm->players.begin(), playerm->players.end());
+	for (size_t i = 1; i < by_net_id.size(); ++i) {
+		Avatar* key = by_net_id[i];
+		size_t j = i;
+		while (j > 0 && by_net_id[j - 1]->player_net_id > key->player_net_id) {
+			by_net_id[j] = by_net_id[j - 1];
+			--j;
+		}
+		by_net_id[j] = key;
+	}
+	for (size_t p = 0; p < by_net_id.size(); ++p) {
+		Avatar* av = by_net_id[p];
+		h = mixU64(h, static_cast<uint64_t>(av->player_net_id));
 		h = mixFloat(h, av->stats.pos.x);
 		h = mixFloat(h, av->stats.pos.y);
 		h = mixU64(h, static_cast<uint64_t>(av->stats.direction));

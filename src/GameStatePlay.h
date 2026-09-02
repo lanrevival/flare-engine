@@ -110,6 +110,12 @@ private:
 	void netSyncPlayers();
 	Avatar* netApplySnapshotEntry(const Net::PlayerSnapshotEntry& entry);
 
+	// P3.8. The six-field write netApplySnapshotEntry() already did for a freshly-created remote,
+	// factored out so netSyncPlayers() can apply the exact same fields onto this client's own
+	// avatar (playerm id 0, already exists -- no create-if-needed branch needed) once it too stops
+	// self-simulating. See netSyncPlayers()'s own updated comment.
+	void netApplySnapshotFields(Avatar* av, const Net::PlayerSnapshotEntry& entry);
+
 	// P3.5a. Applies the one MSG_MAP_SYNC this client will ever receive -- see
 	// plans/phase3/P3.5a-join-map-sync.md.
 	void netApplyMapSync(const Net::MsgMapSync& sync);

@@ -1,0 +1,7 @@
+# P3.8's tests/run-net.sh digest-equality scenario. Deliberately DIFFERENT from
+# p3.8-client1.txt -- see that file's own comment for why.
+5 press left
+90 release left
+200 press down
+280 release down
+3560 disconnect

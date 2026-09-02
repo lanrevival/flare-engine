@@ -171,6 +171,20 @@ public:
 	// carry no id of their own and rely entirely on staying aligned with players by index.
 	PlayerID id;
 
+	// P3.8. The PlayerID this avatar is known as ON THE WIRE -- NOT the same thing as `id` above
+	// once GameStatePlay's REMOTE_PLAYER_ID_BASE offset enters the picture. On a server, the two
+	// always agree (main_server.cpp never offsets: `id` IS the network id). On a --connect client
+	// they diverge: this client's own avatar keeps playerm `id` 0 but its network id is whatever
+	// the server assigned it (netmgr->localPlayerID()), and every mirrored remote's playerm `id` is
+	// offset by REMOTE_PLAYER_ID_BASE while its network id is the raw value the snapshot named it
+	// by. Set uniformly by GameStatePlay::netApplySnapshotFields() (own avatar and remotes alike --
+	// see that function's own comment) and by main_server.cpp's serverProvisionPlayer()/
+	// serverConstructSim() (`= id`, trivially, since server never offsets). Exists so
+	// WorldHash::computeReplicated() can produce a digest that is comparable ACROSS processes --
+	// `id` alone cannot be, since its value depends on which process is asking. Meaningless (left at
+	// its default) for single-player and --host, where no cross-process comparison is ever made.
+	PlayerID player_net_id;
+
 	std::vector<ActionData> action_queue;
 };
 

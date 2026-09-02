@@ -1744,6 +1744,11 @@ static Avatar* serverProvisionPlayer(PlayerID id, FPoint spawn_pos) {
 
 	new_avatar->stats.pos = spawn_pos;
 
+	// P3.8: server-side, playerm id and network id always agree (this process never offsets) --
+	// see Avatar::player_net_id's own comment for why WorldHash::computeReplicated() needs this
+	// set explicitly anyway, rather than assuming so from av->id.
+	new_avatar->player_net_id = new_id;
+
 	// SaveLoad::loadGame() (out of scope) is what calls this for player 0 -- see
 	// serverCheckEquipmentChange()'s own comment on why it is load-bearing, not cosmetic:
 	// AnimationManager reference-counts by filename, and skipping this left the clone's

@@ -1,0 +1,10 @@
+# P3.8's tests/run-net.sh digest-equality scenario. Deliberately DIFFERENT from
+# p3.8-client2.txt -- proving the mirror is correct per-player needs two clients doing different
+# things at different ticks, not one shared script run twice (see P3.7's own "Notes for whoever
+# picks up P3.8"). Disconnects a couple ticks before client2 so a same-tick coincidence can't hide
+# an ordering bug.
+5 press right
+90 release right
+200 press up
+280 release up
+3550 disconnect

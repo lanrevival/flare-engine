@@ -437,8 +437,25 @@ void NetworkManager::sendTo(PlayerID to, const std::string& payload) {
 void NetworkManager::broadcast(const std::string& payload) {
 	if (!is_host)
 		return;
-	for (size_t i = 0; i < peers.size(); ++i)
+	for (size_t i = 0; i < peers.size(); ++i) {
+		// P3.8: a peer this server has accept()ed but not yet handshake_done (Hello received,
+		// HelloOk not yet queued) has no PlayerID this data could even be meaningful to, and --
+		// more importantly -- the client-side pumpPeer() branch below requires its very FIRST
+		// received frame to be exactly HELLO_OK or REFUSED. This server ticks (and broadcasts)
+		// every tick regardless of any one connection's handshake progress, so without this guard
+		// a peer accept()ed even one tick before its Hello is received and answered already has a
+		// PLAYER_SNAPSHOT queued in its send_buffer ahead of its own HELLO_OK -- TCP delivers that
+		// in the same order it was sent, so the client's strict first-frame check saw a snapshot,
+		// treated it as a protocol violation, and silently dropped the connection. Found by testing
+		// P3.8's own mirror logic against a real --connect session -- the connection LOOKED
+		// successful (the server's own dump-players/playerm state is entirely unaffected by what
+		// the client does afterward) while the client had actually already disconnected, which is
+		// also why this predates P3.8 but was never caught by P3.7's own liveness test: that test
+		// only ever asserted the SERVER's view, never the client's own hasLocalPlayerID().
+		if (!peers[i].handshake_done)
+			continue;
 		appendFramed(peers[i].send_buffer, payload);
+	}
 }
 
 void NetworkManager::sendToHost(const std::string& payload) {
