@@ -329,514 +329,83 @@ void GameStatePlay::netApplyMapSync(const Net::MsgMapSync& sync) {
 	mapr->force_spawn_pos = false;
 }
 
-// P3.4c. Opens netmgr as a HOST -- mutually exclusive with netConnectIfNeeded() above; main.cpp
-// already refused both --connect and --host being set together. Lazy for the same reason
-// netConnectIfNeeded() is: mods->mod_list must be populated (hashModList()) and playerm->local()
-// must already be a fully-formed Avatar (netHostProvisionPeer() clones from it), neither of which
-// is guaranteed at construction time.
-void GameStatePlay::netHostIfNeeded() {
+// P3.8b. This is a C++98 codebase (CMakeLists.txt: -std=c++98), so no std::to_string -- matches
+// the snprintf-into-a-stack-buffer idiom MessageEngine.cpp already uses for the same purpose.
+static std::string intToArg(long v) {
+	char buf[24];
+	snprintf(buf, sizeof(buf), "%ld", v);
+	return std::string(buf);
+}
+
+// P3.8b (D28). Spawns flare-server (--dedicated --no-local-player) as a child, pointed at the
+// same save/mods/data-path this client itself was loaded with, and waits for it to report
+// "listening on port" before returning. Once it does, settings->net_connect_target is set to the
+// loopback address and netConnectIfNeeded() (called immediately after this, same tick, in
+// logic()) takes over exactly as it would for a CLI --connect=<host>:<port> -- from that point on
+// there is no difference between a --host session and an ordinary guest. Lazy (called from
+// logic(), not the constructor) for the same reason netConnectIfNeeded() is: save_load's own
+// loaded slot/mods->mod_list/settings->path_data must already be populated, none of which is
+// guaranteed at construction time. No-op once attempted, successfully or not -- this plan does not
+// retry a failed spawn or a refused connection, matching netConnectIfNeeded()'s own precedent.
+//
+// Replaces the netHost* family (P3.4c/P3.4d) that used to hand-drive every connected peer's own
+// Avatar::logic() call, loot/title/death-penalty/equipment/used-item bookkeeping, and snapshot
+// broadcast directly inside this client process -- see
+// plans/phase3/P3.8b-host-becomes-a-child-process.md's Why for why that ~630-line duplicate of
+// main_server.cpp is gone rather than kept alongside this.
+void GameStatePlay::netHostSpawnAndConnect() {
 	if (net_host_attempted || settings->net_host_port == 0)
 		return;
 	net_host_attempted = true;
 
-	netmgr = new Net::NetworkManager();
-	if (!netmgr->startHost(settings->net_host_port, static_cast<unsigned int>(settings->net_max_players), Net::hashModList(mods->mod_list))) {
-		Utils::logError("GameStatePlay: --host could not open port %u.", static_cast<unsigned>(settings->net_host_port));
-		delete netmgr;
-		netmgr = NULL;
+	std::string exe_path = Net::ChildProcess::findSiblingExecutable("flare-server");
+	if (exe_path.empty()) {
+		Utils::logError("GameStatePlay: --host could not locate flare-server next to this executable.");
 		return;
 	}
-	// Id 0 is this client's own local avatar (playerm->create(0) in the constructor) -- reserve it
-	// so the first real connection can never collide with it. Mirrors main_server.cpp's own
-	// seedNextPlayerID(1) call in main(), same reasoning: unlike P3.4b's remotePlayerId() offset
-	// (needed because a --connect client's local id and a REMOTE host's own player-0 id are
-	// different processes' id spaces colliding at 0), this client IS the id allocator here, so
-	// reserving id 0 up front is sufficient -- no offset needed for anything this function creates.
-	netmgr->seedNextPlayerID(1);
-	Utils::logInfo("GameStatePlay: --host listening on port %u, max-players=%d.",
-	               static_cast<unsigned>(settings->net_host_port), settings->net_max_players);
-}
 
-// P3.4c. Clones playerm->local()'s loaded class/gear/action-bar state into a freshly created id,
-// exactly like main_server.cpp's serverProvisionPlayer() -- see that function's own comments for why
-// every one of these calls is load-bearing rather than cosmetic (loadEquipmentData() instead of a
-// struct-copy avoids double-freeing PlayerInventory's raw ItemStack* storage; loadAnimations()/
-// loadSounds() are required for AnimationManager's filename refcounting; blockPlayer() seeds D10's
-// player-blocks-enemies collision so the very first tick before this peer's own Avatar::logic() runs
-// isn't unblocked). Unlike netApplySnapshotEntry() (P3.4b), this Avatar goes on to be driven by real,
-// this-peer's-own decoded PLAYER_COMMANDs every tick via netHostDrivePeers() -- including its own
-// real Avatar::logic() calls, which is what keeps the collider correctly blocked/unblocked on every
-// subsequent move (Avatar.cpp:1007,1137,1155) -- so, unlike P3.4b's pure-snapshot remotes, seeding
-// the initial block here is safe and complete, not half-correct.
-Avatar* GameStatePlay::netHostProvisionPeer(uint8_t id, const FPoint& spawn_pos) {
-	Avatar* source = player;
-	PlayerInventory* source_inv = player_inventory;
-	ActionBarState* source_ab = player_actionbar;
-	if (!source || !source_inv || !source_ab) {
-		Utils::logError("GameStatePlay: netHostProvisionPeer requires the local player to already be loaded.");
-		return NULL;
+	std::vector<std::string> spawn_args;
+	spawn_args.push_back("--dedicated");
+	spawn_args.push_back("--no-local-player");
+	spawn_args.push_back("--port=" + intToArg(settings->net_host_port));
+	spawn_args.push_back("--max-players=" + intToArg(settings->net_max_players));
+	// NOT settings->load_slot -- GameStateLoad::logicLoading() clears it the moment it consumes
+	// it (GameStateLoad.cpp: "settings->load_slot.clear();"), long before GameStatePlay exists.
+	// save_load->getGameSlot() is the same on-disk numeric slot id (GameStateLoad.cpp:
+	// "save_load->setGameSlot(game_slots[selected_slot]->id);"), still valid here and exactly what
+	// main_server.cpp's own serverLoadGame() expects from --load-slot -- confirmed empirically:
+	// the first version of this function used settings->load_slot directly and the spawned
+	// flare-server always failed with "--load-slot is required" (see this plan's Status note).
+	spawn_args.push_back("--load-slot=" + intToArg(save_load->getGameSlot()));
+	spawn_args.push_back("--data-path=" + settings->path_data);
+	if (!mods->mod_list.empty()) {
+		std::string mod_arg = "--mods=";
+		for (size_t i = 0; i < mods->mod_list.size(); ++i) {
+			if (i > 0)
+				mod_arg += ",";
+			mod_arg += mods->mod_list[i].name;
+		}
+		spawn_args.push_back(mod_arg);
 	}
 
-	playerm->create(id);
-	Avatar* new_avatar = playerm->get(id);
-	PlayerInventory* new_inv = playerm->inventoryFor(id);
-	ActionBarState* new_ab = playerm->actionbarFor(id);
-	if (!new_avatar || !new_inv || !new_ab)
-		return NULL;
-
-	new_avatar->stats = source->stats;
-
-	new_inv->loadEquipmentData();
-	if (new_inv->max_equipment_set > 0)
-		new_inv->active_equipment_set = 1;
-
-	*new_ab = *source_ab;
-	new_ab->owner = new_avatar;
-	for (unsigned s = 0; s < new_ab->hotkeys.size(); ++s)
-		new_ab->hotkeys[s] = 0;
-
-	new_avatar->stats.pos = spawn_pos;
-
-	new_avatar->loadAnimations();
-	new_avatar->loadSounds();
-	mapr->collider.blockPlayer(new_avatar->stats.pos.x, new_avatar->stats.pos.y, id);
-
-	// P3.4d: this peer's own step-FX are never loaded above -- only loadAnimations()/loadSounds()
-	// are. Matches server_equipment_changed[8]'s own initial-true default: the first
-	// netHostCheckEquipmentChange() pass after provisioning is what actually loads them.
-	net_host_equip_changed.insert(id);
-
-	Utils::logInfo("GameStatePlay: provisioned connected peer id=%u at (%.1f, %.1f)",
-	               static_cast<unsigned>(id), static_cast<double>(new_avatar->stats.pos.x), static_cast<double>(new_avatar->stats.pos.y));
-
-	return new_avatar;
-}
-
-// P3.4c. --host only (a no-op for a plain client or single-player -- netmgr is either NULL or,
-// on the --connect path, not isHost()). Mirrors main_server.cpp's serverSyncNetworkPlayers(): pumps
-// the transport, provisions a real Avatar for every newly-connected peer, frees a disconnected
-// peer's Avatar (D26 -- PlayerManager::remove() already handles the in-flight-hazard/summon cleanup),
-// and decodes this tick's PLAYER_COMMAND from every still-connected peer into net_host_cmd.
-void GameStatePlay::netHostSyncPeers() {
-	net_host_cmd.clear();
-	if (!netmgr || !netmgr->isHost())
+	std::string log_path = settings->path_user + "host-server.log";
+	if (!net_host_child.spawn(exe_path, spawn_args, log_path)) {
+		Utils::logError("GameStatePlay: --host could not launch flare-server (see %s).", log_path.c_str());
 		return;
-
-	netmgr->update();
-
-	PlayerID id;
-	while (netmgr->popDisconnected(&id)) {
-		net_host_players.erase(id);
-		if (playerm->get(id))
-			playerm->remove(id);
 	}
-
-	while (netmgr->popConnected(&id)) {
-		FPoint spawn_pos = player->stats.pos;
-		if (mapr->teleportation)
-			spawn_pos = mapr->teleport_destination;
-		if (netHostProvisionPeer(id, spawn_pos)) {
-			net_host_players.insert(id);
-			// P3.5a: mirrors serverSyncNetworkPlayers()'s own two additions -- see
-			// plans/phase3/P3.5a-join-map-sync.md.
-			entitym->preloadSummonPrototypesForPlayer(id);
-			netmgr->sendTo(id, Net::encodeMapSync(mapr->getFilename(), spawn_pos.x, spawn_pos.y));
-		}
-		// else: logged by netHostProvisionPeer() itself. The peer stays connected but bound to no
-		// player -- its packets simply decode into net_host_cmd and are never read by anything,
-		// since netHostDrivePeers() only ever consults net_host_players.
-	}
-
-	PlayerID from;
-	std::string payload;
-	while (netmgr->popPacket(&from, &payload)) {
-		PlayerCommand cmd;
-		if (Net::decodePlayerCommand(payload, cmd)) {
-			net_host_cmd[from] = cmd;
-		}
-		else {
-			// P3.2's own fuzz-safety guarantee is what makes this safe to just drop -- see
-			// serverSyncNetworkPlayers()'s matching comment.
-			Utils::logError("GameStatePlay: dropped a malformed PLAYER_COMMAND from player id=%u.", static_cast<unsigned>(from));
-		}
-	}
-}
-
-// P3.4c. Drives every connected peer's own real Avatar::logic() call, plus the same per-player
-// "kind A" state main_server.cpp's serverLogic() already consumes for a driven player: equipment-set
-// stepping, level-up, RESPEC, transform/revert, and respawn -- all sourced from that peer's own
-// decoded PLAYER_COMMAND, never from this machine's menus (peers have no menu on this screen). The
-// LOCAL player's own equivalent blocks, elsewhere in logic(), are untouched by this plan.
-//
-// Consolidated into one loop per peer rather than main_server.cpp's several separate per-player
-// loops (level-up, then command+logic(), then RESPEC, then transform/respawn, each its own pass over
-// every driven player) -- none of these five touch another player's state, so interleaving them
-// per-peer instead of phase-separating across all peers cannot change the result, and there is no
-// second real player on this client's own screen for whom the previous two-phase split was ever
-// load-bearing.
-//
-// P3.4d added the kind-C generalisation this comment used to say was missing: loot auto-pickup and
-// title-earning are called inline in the loop below (netHostCheckLoot()/netHostCheckTitle(), right
-// before peer->logic(), matching checkLoot()/checkTitle()'s own tick position relative to
-// player->logic()); death penalty, equipment-change reload, and used-item consumption are their own
-// separate calls elsewhere in logic() (netHostCheckDeathPenalty()/netHostCheckEquipmentChange()/
-// netHostCheckUsedItems()), matching those three's own tick positions too. See
-// plans/phase3/P3.4d-host-peer-kind-c.md.
-void GameStatePlay::netHostDrivePeers() {
-	for (std::set<uint8_t>::const_iterator it = net_host_players.begin(); it != net_host_players.end(); ++it) {
-		uint8_t id = *it;
-
-		size_t idx = 0;
-		for (; idx < playerm->players.size(); ++idx) {
-			if (playerm->players[idx]->id == id)
-				break;
-		}
-		if (idx == playerm->players.size())
-			continue; // disconnected this same tick; already erased from net_host_players by netHostSyncPeers()
-
-		Avatar* peer = playerm->players[idx];
-		PlayerInventory* inventory = playerm->inventories[idx];
-		ActionBarState* actionbar = playerm->actionbars[idx];
-		PowerBonusState* powerbonus = playerm->powerbonuses[idx];
-
-		PlayerCommand cmd;
-		std::map<uint8_t, PlayerCommand>::const_iterator cmd_it = net_host_cmd.find(id);
-		if (cmd_it != net_host_cmd.end())
-			cmd = cmd_it->second;
-		// else: neutral/idle default -- D2, the host never waits a tick on a slow peer.
-
-		// P3.4d: mirrors main_server.cpp's own equip_set_delta trigger site -- see
-		// net_host_equip_changed's own comment for why a set-insert is enough here (unlike
-		// serverLogic()'s respawn block, this function runs entirely before the tail block that
-		// consumes it).
-		if (inventory->applyEquipmentSetDelta(cmd.equip_set_delta))
-			net_host_equip_changed.insert(id);
-
-		// Never populated from anything real -- remote click-arbitration has no meaning on this
-		// client's screen, same reasoning as netApplySnapshotEntry() (P3.4b). Reused for both calls
-		// below: neither is ever given real values to arbitrate either way.
-		PlayerInputLocks peer_locks;
-
-		// P3.4d: kind C, same tick position checkLoot()/checkTitle() occupy relative to
-		// player->logic() in logic() itself -- see each function's own comment.
-		netHostCheckLoot(peer, inventory);
-		netHostCheckTitle(peer);
-
-		peer->logic(cmd, peer_locks);
-
-		if (peer->stats.level_up) {
-			inventory->applyEquipment();
-			peer->stats.hp = peer->stats.get(Stats::HP_MAX);
-			peer->stats.mp = peer->stats.get(Stats::MP_MAX);
-			peer->stats.level_up = false;
-		}
-
-		if (peer->close_menus)
-			peer->close_menus = false;
-		if (peer->show_game_over)
-			peer->show_game_over = false;
-
-		if (peer->respec_powers) {
-			peer->respec_powers = false;
-			EngineSettings::HeroClasses::HeroClass* peer_class = eset->hero_classes.getByName(peer->stats.character_class);
-
-			for (size_t i = 0; i < powerbonus->current_cell.size(); ++i)
-				powerbonus->current_cell[i] = 0;
-			if (peer_class && !peer->respec_use_engine_defaults) {
-				for (size_t j = 0; j < peer_class->powers.size(); j++)
-					peer->stats.powers_list.push_back(peer_class->powers[j]);
-			}
-			powerbonus->clearActionBarBonusLevels();
-
-			for (unsigned i = 0; i < actionbar->slots_count; ++i)
-				actionbar->clearSlot(i);
-			if (peer_class && !peer->respec_use_engine_defaults)
-				actionbar->set(peer_class->hotkeys, ActionBarState::SET_SKIP_EMPTY);
-		}
-
-		peer->checkTransform(peer_locks);
-
-		if (peer->setPowers) {
-			peer->setPowers = false;
-			for (int i = 0; i < MenuActionBar::SLOT_MAX; i++) {
-				actionbar->hotkeys_temp[i] = actionbar->hotkeys[i];
-				actionbar->hotkeys[i] = 0;
-			}
-			int count = MenuActionBar::SLOT_MAIN1;
-			for (size_t i = 0; i < peer->charmed_stats->powers_ai.size(); i++) {
-				if (powers->isValid(peer->charmed_stats->powers_ai[i].id) && powers->powers[peer->charmed_stats->powers_ai[i].id]->beacon != true) {
-					actionbar->hotkeys[count] = peer->charmed_stats->powers_ai[i].id;
-					actionbar->locked[count] = true;
-					count++;
-					if (count == MenuActionBar::SLOT_MAX)
-						count = 0;
-					else if (count == MenuActionBar::SLOT_MAIN1)
-						break;
-				}
-			}
-			if (peer->stats.manual_untransform && powers->isValid(peer->untransform_power)) {
-				actionbar->hotkeys[count] = peer->untransform_power;
-				actionbar->locked[count] = true;
-			}
-			else if (peer->stats.manual_untransform && peer->untransform_power == 0)
-				Utils::logError("GameStatePlay: peer id=%u untransform power not found, cannot untransform manually.", static_cast<unsigned>(id));
-
-			actionbar->updated = true;
-
-			if (peer->stats.transform_with_equipment)
-				inventory->applyEquipment();
-		}
-		if (peer->revertPowers) {
-			peer->revertPowers = false;
-			for (int i = 0; i < MenuActionBar::SLOT_MAX; i++) {
-				actionbar->hotkeys[i] = actionbar->hotkeys_temp[i];
-				actionbar->locked[i] = false;
-			}
-			actionbar->updated = true;
-			inventory->applyEquipment();
-		}
-
-		if (peer->respawn) {
-			peer->stats.alive = true;
-			peer->stats.corpse = false;
-			peer->stats.cur_state = StatBlock::ENTITY_STANCE;
-			inventory->applyEquipment();
-			// P3.4d: mirrors main_server.cpp's respawn block setting server_equipment_changed[id] =
-			// true right before its own (inline) serverCheckEquipmentChange() call -- see
-			// net_host_equip_changed's own comment for why a plain set-insert is enough here instead.
-			net_host_equip_changed.insert(id);
-			peer->stats.hp = peer->stats.get(Stats::HP_MAX);
-			peer->stats.logic();
-			peer->stats.recalc();
-
-			for (size_t i = 0; i < powerbonus->current_cell.size(); ++i)
-				powerbonus->current_cell[i] = 0;
-			powerbonus->clearActionBarBonusLevels();
-
-			powers->activatePassives(&peer->stats);
-			peer->respawn = false;
-		}
-	}
-}
-
-// P3.4c. --host only. Called once per tick, unconditionally (even while isPaused() -- a connected
-// peer should keep receiving periodic snapshots rather than appear to hang), right after this tick's
-// simulation has settled. Identical in construction to main_server.cpp's serverBroadcastSnapshot():
-// reads straight off playerm->players, so it reflects exactly what this tick's local and peer
-// Avatar::logic() calls just produced, nothing recomputed or guessed.
-void GameStatePlay::netHostBroadcastSnapshot() {
-	if (!netmgr || !netmgr->isHost())
+	if (!net_host_child.waitForLogLine(log_path, "listening on port", 5000)) {
+		Utils::logError("GameStatePlay: --host: flare-server did not start listening within 5s (see %s).", log_path.c_str());
+		net_host_child.terminate();
 		return;
-
-	std::vector<Net::PlayerSnapshotEntry> entries;
-	for (size_t i = 0; i < playerm->players.size(); ++i) {
-		Avatar* av = playerm->players[i];
-		Net::PlayerSnapshotEntry entry;
-		entry.id = av->id;
-		entry.pos_x = av->stats.pos.x;
-		entry.pos_y = av->stats.pos.y;
-		entry.direction = av->stats.direction;
-		entry.animation = av->activeAnimation ? av->activeAnimation->getName() : std::string();
-		entry.hp = av->stats.hp;
-		entry.hp_max = av->stats.get(Stats::HP_MAX);
-		entry.alive = av->stats.alive;
-		entries.push_back(entry);
 	}
-	netmgr->broadcast(Net::encodePlayerSnapshot(entries));
+
+	settings->net_connect_target = "127.0.0.1:" + intToArg(settings->net_host_port);
+	// P3.8b's own tests/run-net.sh scenario 3 polls this exact process's stdout/stderr for this
+	// line as proof the loopback port is accepting connections -- see that step's own comment for
+	// why (it avoids the harness needing to know host-server.log's path inside settings->path_user).
+	Utils::logInfo("GameStatePlay: --host: flare-server ready, connecting to 127.0.0.1:%u",
+	               static_cast<unsigned>(settings->net_host_port));
 }
-
-// P3.4d. Kind C: no input dependency, so every connected peer's own inventory applies its own
-// death penalty too, not just local's -- mirrors main_server.cpp's own unconditional loop over
-// every playerm->inventories entry. Called right after the local player's own
-// player_inventory->applyDeathPenalty() call in logic(), same unconditional (not gated by
-// isPaused()) position, for the same ordering reason that call's own comment gives: must run
-// before checkLoot()/peer->logic().
-void GameStatePlay::netHostCheckDeathPenalty() {
-	for (std::set<uint8_t>::const_iterator it = net_host_players.begin(); it != net_host_players.end(); ++it) {
-		PlayerInventory* peer_inv = playerm->inventoryFor(*it);
-		if (peer_inv)
-			peer_inv->applyDeathPenalty();
-	}
-}
-
-// P3.4d. Kind C, auto-pickup only -- mirrors serverCheckLoot() exactly, not
-// GameStatePlay::checkLoot(): that function's manual click-pickup branch is
-// inpt->mouse/mapr->cam.pos-driven, meaningless for a peer with no camera on this screen, the same
-// reasoning main_server.cpp's own comment gives for dropping it there. Called inline from
-// netHostDrivePeers()'s own per-peer loop, immediately before peer->logic() -- the same tick
-// position checkLoot() occupies relative to player->logic() in logic() itself.
-void GameStatePlay::netHostCheckLoot(Avatar* peer, PlayerInventory* inv) {
-	if (!peer->stats.alive)
-		return;
-
-	ItemStack pickup = loot->checkAutoPickup(peer->stats.pos);
-	if (!pickup.empty()) {
-		inv->add(pickup, PlayerInventory::CARRIED, ItemStorage::NO_SLOT, PlayerInventory::ADD_PLAY_SOUND, PlayerInventory::ADD_AUTO_EQUIP);
-		if (items->isValid(pickup.item)) {
-			StatusID pickup_status = camp->registerStatus(items->items[pickup.item]->pickup_status);
-			camp->setStatus(pickup_status);
-		}
-		pickup.clear();
-	}
-}
-
-// P3.4d. Ported unchanged from checkPrimaryStat(), reading the given peer's own stats (a
-// parameter) instead of the player member -- mirrors serverCheckPrimaryStat() exactly. See
-// netHostCheckTitle()'s own comment for why this is a duplicate rather than a shared, parameterised
-// checkPrimaryStat().
-bool GameStatePlay::netHostCheckPrimaryStat(const StatBlock& stats, const std::string& first, const std::string& second) {
-	int high = 0;
-	size_t high_index = eset->primary_stats.list.size();
-	size_t low_index = eset->primary_stats.list.size();
-
-	for (size_t i = 0; i < eset->primary_stats.list.size(); ++i) {
-		int stat = stats.get_primary(i);
-		if (stat > high) {
-			if (high_index != eset->primary_stats.list.size()) {
-				low_index = high_index;
-			}
-			high = stat;
-			high_index = i;
-		}
-		else if (stat == high && low_index == eset->primary_stats.list.size()) {
-			low_index = i;
-		}
-		else if (low_index == eset->primary_stats.list.size() || (low_index < eset->primary_stats.list.size() && stat > stats.get_primary(low_index))) {
-			low_index = i;
-		}
-	}
-
-	if (high_index != eset->primary_stats.list.size() && first != eset->primary_stats.list[high_index].id)
-		return false;
-
-	if (!second.empty()) {
-		if (low_index != eset->primary_stats.list.size() && second != eset->primary_stats.list[low_index].id)
-			return false;
-	}
-	else if (stats.get_primary(high_index) == stats.get_primary(low_index)) {
-		// titles that require a single stat are ignored if two stats are equal
-		return false;
-	}
-
-	return true;
-}
-
-// P3.4d. Kind C, ported from checkTitle() parameterised by peer -- mirrors serverCheckTitle(Avatar*)
-// exactly. Reuses the existing titles vector directly: title definitions are shared game data, not
-// per-player. Duplicated rather than parameterising checkTitle()/checkPrimaryStat() themselves --
-// see plans/phase3/P3.4d-host-peer-kind-c.md's Notes for the executor. Called inline from
-// netHostDrivePeers()'s own per-peer loop, immediately before peer->logic(), matching checkTitle()'s
-// own tick position relative to player->logic() in logic() itself.
-void GameStatePlay::netHostCheckTitle(Avatar* peer) {
-	if (!peer->stats.check_title || titles.empty())
-		return;
-
-	int title_id = -1;
-
-	for (unsigned i = 0; i < titles.size(); i++) {
-		if (titles[i].title.empty())
-			continue;
-
-		if (titles[i].level > 0 && peer->stats.level < titles[i].level)
-			continue;
-		if (titles[i].power > 0 && std::find(peer->stats.powers_list.begin(), peer->stats.powers_list.end(), titles[i].power) == peer->stats.powers_list.end())
-			continue;
-		if (!titles[i].primary_stat_1.empty() && !netHostCheckPrimaryStat(peer->stats, titles[i].primary_stat_1, titles[i].primary_stat_2))
-			continue;
-
-		bool status_failed = false;
-		for (size_t j = 0; j < titles[i].requires_status.size(); ++j) {
-			if (!camp->checkStatus(titles[i].requires_status[j])) {
-				status_failed = true;
-				break;
-			}
-		}
-		for (size_t j = 0; j < titles[i].requires_not_status.size(); ++j) {
-			if (camp->checkStatus(titles[i].requires_not_status[j])) {
-				status_failed = true;
-				break;
-			}
-		}
-
-		if (status_failed)
-			continue;
-
-		title_id = static_cast<int>(i);
-		break;
-	}
-
-	if (title_id != -1) peer->stats.character_subclass = titles[static_cast<size_t>(title_id)].title;
-	peer->stats.check_title = false;
-	peer->stats.refresh_stats = true;
-}
-
-// P3.4d. Peer-scoped substitute for checkEquipmentChange()'s menu->inv->changed_equipment --
-// mirrors main_server.cpp's server_equipment_changed[8] array/serverCheckEquipmentChange() exactly,
-// as a set instead (see net_host_equip_changed's own comment). Trigger sites: netHostProvisionPeer()
-// (initial load -- matches the array's initial-true default, so this peer's own step-FX, which
-// netHostProvisionPeer() never loads, gets loaded once), and netHostDrivePeers()'s own
-// applyEquipmentSetDelta() and respawn blocks. Called once from logic()'s own "whether paused or
-// not" tail block, right after the existing local checkEquipmentChange() call -- unlike
-// main_server.cpp's respawn block (which must call serverCheckEquipmentChange() inline, because its
-// own tail loop already ran earlier in serverLogic()'s tick), netHostDrivePeers() runs entirely
-// before this tail block, so inserting into the set from its respawn block is enough; this call
-// picks it up the same tick.
-void GameStatePlay::netHostCheckEquipmentChange() {
-	for (std::set<uint8_t>::iterator it = net_host_equip_changed.begin(); it != net_host_equip_changed.end(); ) {
-		uint8_t id = *it;
-		Avatar* peer = playerm->get(id);
-		PlayerInventory* peer_inv = playerm->inventoryFor(id);
-		ActionBarState* peer_ab = playerm->actionbarFor(id);
-
-		if (peer && peer_inv && peer_ab) {
-			peer_ab->updated = true;
-			peer->loadAnimations();
-
-			if (peer->feet_index != -1) {
-				ItemID feet_id = peer_inv->inventory[PlayerInventory::EQUIPMENT][peer->feet_index].item;
-				if (items->isValid(feet_id))
-					peer->loadStepFX(items->items[feet_id]->stepfx);
-			}
-		}
-
-		net_host_equip_changed.erase(it++);
-	}
-}
-
-// P3.4d. Mirrors main_server.cpp's serverInventoryForCaster() -- resolved by StatBlock* pointer
-// identity only, never dereferenced, since this function is what knows a StatBlock* maps to a
-// PlayerID via playerm. Returns NULL for the local player's own caster (checkUsedItems() already
-// handles that one) and for a caster that no longer matches any connected peer.
-PlayerInventory* GameStatePlay::netHostInventoryForCaster(StatBlock* caster) {
-	for (std::set<uint8_t>::const_iterator it = net_host_players.begin(); it != net_host_players.end(); ++it) {
-		Avatar* peer = playerm->get(*it);
-		if (peer && &peer->stats == caster)
-			return playerm->inventoryFor(*it);
-	}
-	return NULL;
-}
-
-// P3.4d. Fixes the disclosed correctness bug named in P3.4c's own Status note: mirrors
-// main_server.cpp's serverCheckUsedItems() almost unchanged. checkUsedItems() (local, above) now
-// only consumes entries whose caster is player->stats -- see the caster guard added there -- so the
-// two functions never double-consume the same entry. Both must run, in either order, before
-// powers->clearUsedItems(), which is why that call moved to logic()'s own tail call site instead of
-// staying inside checkUsedItems()'s own body.
-void GameStatePlay::netHostCheckUsedItems() {
-	for (unsigned i = 0; i < powers->used_items.size(); i++) {
-		PlayerInventory* inventory = netHostInventoryForCaster(powers->used_items_caster[i]);
-		if (inventory)
-			inventory->remove(powers->used_items[i], 1);
-	}
-	for (unsigned i = 0; i < powers->used_equipped_items.size(); i++) {
-		PlayerInventory* inventory = netHostInventoryForCaster(powers->used_equipped_items_caster[i]);
-		if (inventory) {
-			inventory->inventory[PlayerInventory::EQUIPMENT].remove(powers->used_equipped_items[i], 1);
-			inventory->applyEquipment();
-		}
-	}
-}
-
 /**
  * Reset all game states to a new game.
  */
@@ -1375,11 +944,14 @@ void GameStatePlay::checkLootDrop() {
  */
 void GameStatePlay::checkUsedItems() {
 	for (unsigned i=0; i<powers->used_items.size(); i++) {
-		// P3.4d: skip an entry caused by a connected peer's own item use -- see
-		// netHostCheckUsedItems()'s own comment. PowerManager.cpp's payPowerCost() only ever tags a
-		// caster when src_stats->hero is true, and before P3.4c the local player was the only
-		// possible hero caster, so this guard is a provable no-op everywhere the replay corpus
-		// reaches (see plans/phase3/P3.4d-host-peer-kind-c.md's Steps).
+		// P3.4d: skip an entry caused by another hero-flagged caster. PowerManager.cpp's
+		// payPowerCost() only ever tags a caster when src_stats->hero is true. Single-player has
+		// only ever had one such caster (player->stats), so this guard is a provable no-op there.
+		// On a --connect/--host client (P3.8/P3.8b) it is a no-op for a different reason: nothing
+		// on this process ever calls a hero Avatar's own logic()/power-casting internals any more
+		// -- the local avatar is a mirror (is_mirror in logic()) and every other player is a pure
+		// snapshot puppet that never runs Avatar::logic() at all -- so powers->used_items is simply
+		// never populated there in the first place.
 		if (powers->used_items_caster[i] != &player->stats)
 			continue;
 		// Deliberately still routed through MenuInventory's wrapper here, not PlayerInventory
@@ -1395,9 +967,7 @@ void GameStatePlay::checkUsedItems() {
 		player_inventory->inventory[PlayerInventory::EQUIPMENT].remove(powers->used_equipped_items[i], 1);
 		player_inventory->applyEquipment();
 	}
-	// P3.4d: powers->clearUsedItems() moved to logic()'s own tail call site, after
-	// netHostCheckUsedItems() also runs -- clearing here would wipe a connected peer's own entries
-	// before that function ever saw them.
+	// P3.4d: powers->clearUsedItems() is called from logic()'s own tail call site instead of here.
 }
 
 /**
@@ -1605,10 +1175,13 @@ void GameStatePlay::logic() {
 	PlayerInputLocks player_locks;
 	player_locks.copyFrom(*inpt);
 
+	// P3.8b: netHostSpawnAndConnect() runs first -- a no-op unless --host was passed, otherwise it
+	// blocks (spawning flare-server and waiting for it to listen) and, on success, sets
+	// settings->net_connect_target before netConnectIfNeeded() below ever checks it, so a --host
+	// session's very first tick already has a connect target to act on.
+	netHostSpawnAndConnect();
 	netConnectIfNeeded();
 	netSyncPlayers();
-	netHostIfNeeded();
-	netHostSyncPeers();
 
 	if (inpt->window_resized)
 		refreshWidgets();
@@ -1624,18 +1197,17 @@ void GameStatePlay::logic() {
 	// and every golden had to stay put to prove it.
 	player_inventory->applyDeathPenalty();
 
-	// P3.4d: kind C, same unconditional position as the local call just above -- see
-	// netHostCheckDeathPenalty()'s own comment.
-	netHostCheckDeathPenalty();
-
 	// check menus first (top layer gets mouse click priority)
 	menu->logic();
 
 	if (!isPaused()) {
-		// P3.8: true only for a fully-joined --connect client (has_local_id is never set for
-		// --host or single-player -- see NetworkManager.cpp). Gates every call below that mutates
-		// shared world state (this avatar's own sim, or objects entitym/hazards/loot/npcs own) --
-		// see this plan's Why for which nearby-looking calls are deliberately NOT gated.
+		// P3.8/P3.8b: true only once this client has a real network id -- never for single-player
+		// (netmgr NULL) and, since P3.8b, this now includes --host too: it connects to its own
+		// spawned flare-server on loopback exactly like any other guest (see
+		// netHostSpawnAndConnect()), so it is a mirror from the moment that connection completes,
+		// same as everyone else. Gates every call below that mutates shared world state (this
+		// avatar's own sim, or objects entitym/hazards/loot/npcs own) -- see P3.8's own Why for
+		// which nearby-looking calls are deliberately NOT gated.
 		bool is_mirror = netmgr && netmgr->hasLocalPlayerID();
 
 		if (!second_timer.isEnd())
@@ -1711,20 +1283,12 @@ void GameStatePlay::logic() {
 			player->action_queue.clear();
 		}
 
-		// P3.4b/P3.8: forwards the finished command to the host either way -- on a mirror this is
-		// now the ONLY thing that determines what happens next; on a still-self-simulating --host
-		// avatar (not this plan's concern, see Why) it also lets other connected clients see this
-		// player move. player_cmd is fully finished by this point in the tick (nothing above reads
-		// or writes it again), so it is safe to serialize here unmodified.
+		// P3.4b/P3.8/P3.8b: forwards the finished command to the host -- on a mirror (every
+		// connected client now, --host included since P3.8b) this is the ONLY thing that
+		// determines what happens next. player_cmd is fully finished by this point in the tick
+		// (nothing above reads or writes it again), so it is safe to serialize here unmodified.
 		if (netmgr && netmgr->hasLocalPlayerID())
 			netmgr->sendToHost(Net::encodePlayerCommand(player_cmd));
-
-		// P3.4c: every connected peer's own Avatar::logic() call, plus the per-player state that
-		// goes with it (level-up, RESPEC, transform/revert, respawn) -- see netHostDrivePeers()'s
-		// own comment for exactly what is and isn't ported from main_server.cpp's serverLogic().
-		// Gated the same way local's own block above is (inside !isPaused()) -- see isPaused()'s
-		// own updated comment for why a connected peer is what makes that safe now.
-		netHostDrivePeers();
 
 		// update camera -- moved out of Avatar::logic() (P1.4d); the camera has no sim
 		// consequence, only mapr->logic()'s later cam.logic() smoothing step needs the target.
@@ -1801,11 +1365,6 @@ void GameStatePlay::logic() {
 	checkBook();
 	checkEquipmentChange();
 	checkUsedItems();
-	// P3.4d: kind C, same "whether paused or not" tail position as the two local calls just above.
-	// netHostCheckUsedItems() must run before clearUsedItems() below, same as checkUsedItems() --
-	// see clearUsedItems()'s own new call site comment.
-	netHostCheckEquipmentChange();
-	netHostCheckUsedItems();
 	powers->clearUsedItems();
 	checkStash();
 	checkSaveEvent();
@@ -1911,10 +1470,6 @@ void GameStatePlay::logic() {
 	}
 
 	player_locks.copyTo(*inpt);
-
-	// P3.4c: unconditional, like main_server.cpp's own call site -- a connected peer should keep
-	// receiving periodic snapshots every tick, paused or not, rather than appear to hang.
-	netHostBroadcastSnapshot();
 
 	// Last thing in the tick, after both the simulation and the menus have had their say.
 	drainSimEvents();
@@ -2024,19 +1579,24 @@ bool GameStatePlay::isPaused() {
 	// would have stopped advancing time.
 	//
 	// This is also the seam for Phase 3. A pause is a single-player affordance: with eight
-	// players sharing a world, one of them opening a menu must not freeze the other seven. The
-	// condition becomes "not headless AND not a multiplayer session"; single-player keeps today's
-	// feel, which is why the client half was unchanged through P3.4b.
+	// players sharing a world, one of them opening a menu must not freeze the other seven. P3.4c
+	// made this concrete for the one multiplayer session a client could host at the time: a --host
+	// peer with at least one connected player refused the pause outright, because this client's own
+	// if (!isPaused()) block was also what drove every OTHER connected peer's Avatar::logic() call
+	// (netHostDrivePeers()) -- pausing locally would have frozen everyone else too.
 	//
-	// P3.4c makes this concrete for the one multiplayer session this client can host: a
-	// --host peer with at least one connected player refuses the pause outright, exactly as this
-	// comment always said Phase 3 would. Deliberately narrower than "netmgr exists" -- a --connect
-	// client pausing only stops sending its OWN commands (the other players' state comes from
-	// snapshots, unaffected by this client's local menu), so that path is left alone; opening a menu
-	// there is no different from just standing still. peerCount() alone isn't the right test either
-	// -- a peer mid-handshake and not yet in net_host_players has no Avatar depending on this tick
-	// advancing.
-	return !settings->headless && menu->pause_requested && !(netmgr && netmgr->isHost() && !net_host_players.empty());
+	// P3.8 (D27) already made a --connect client's own local pause harmless: it only stops that
+	// client from sending its OWN PLAYER_COMMAND (logic()'s is_mirror block) -- every other
+	// player's state comes from snapshots this process never stops applying (netSyncPlayers() runs
+	// unconditionally, above isPaused()'s reach), so opening a menu there is no different from just
+	// standing still. P3.8b makes --host exactly the same kind of client (netHostSpawnAndConnect()):
+	// its own simulation now lives entirely in the spawned flare-server process, which has no
+	// concept of this client's menu state and never stops ticking because of it. The --host-specific
+	// carve-out this function used to need is gone along with netHostDrivePeers() itself -- see
+	// plans/phase3/P3.8b-host-becomes-a-child-process.md. Single-player, --connect, and --host all
+	// resolve to the same rule now: refuse only when headless, otherwise grant exactly what the menu
+	// asked for.
+	return !settings->headless && menu->pause_requested;
 }
 
 void GameStatePlay::resetNPC() {
@@ -2090,6 +1650,11 @@ bool GameStatePlay::checkPrimaryStat(const std::string& first, const std::string
 }
 
 GameStatePlay::~GameStatePlay() {
+	// P3.8b: stop flare-server before anything else -- session teardown (exit, map change via
+	// Load, dying back to the title screen) must not leave an orphaned child process running.
+	// Idempotent and safe even if --host was never used (net_host_child was never spawn()ed).
+	net_host_child.terminate();
+
 	curs->setLowHP(false);
 
 	delete quests;

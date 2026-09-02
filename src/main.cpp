@@ -544,8 +544,9 @@ int main(int argc, char *argv[]) {
 --load-script=<SCRIPT>   Execute's a script upon loading a saved game.\n\
                          The script path is mod-relative.\n\
 --connect=<HOST>:<PORT>  Joins a running dedicated server as a network client.\n\
---host=<PORT>            Opens an embedded network host on this client, so other\n\
-                         players can connect to --connect=<this machine>:<PORT>.\n\
+--host=<PORT>            Spawns a local flare-server and connects to it as a network\n\
+                         client, so other players can connect to\n\
+                         --connect=<this machine>:<PORT> too.\n\
 --max-players=<N>        With --host, the connection cap, 2-8 (D3). Default 8.\n\
 --safe-video             Launches with the minimum video settings.\n\
 --no-lock-file           Skips the single-instance check, so that more than one copy\n\

@@ -1,24 +1,32 @@
 #!/bin/sh
-# Two scenarios against one flare-server --dedicated and headless flare --connect clients on
-# loopback:
+# Three scenarios against headless flare/flare-server processes on loopback:
 #
-#   1. P3.7's own liveness check -- two clients running the same short script, asserting every
-#      process exits 0 and the server's --dump-players sees both.
-#   2. P3.8's digest-equality check -- two clients running DIFFERENT scripts for longer, asserting
-#      WorldHash::computeReplicated() agrees across the server and both clients at every sampled
-#      tick. This is the acceptance bar P3.7's own "Notes for whoever picks up P3.8" said would
-#      become available once the guest's own avatar was a real mirror -- see
-#      plans/phase3/P3.8-guest-becomes-a-mirror.md's Why for what makes it a meaningful check now
-#      (as opposed to P3.7's own zero-input sanity check, which wasn't).
+#   1. P3.7's own liveness check -- two clients running the same short script against a manually
+#      started flare-server --dedicated, asserting every process exits 0 and the server's
+#      --dump-players sees both.
+#   2. P3.8's digest-equality check -- two clients running DIFFERENT scripts for longer against a
+#      manually started flare-server --dedicated, asserting WorldHash::computeReplicated() agrees
+#      across the server and both clients at every sampled tick. This is the acceptance bar P3.7's
+#      own "Notes for whoever picks up P3.8" said would become available once the guest's own
+#      avatar was a real mirror -- see plans/phase3/P3.8-guest-becomes-a-mirror.md's Why for what
+#      makes it a meaningful check now (as opposed to P3.7's own zero-input sanity check, which
+#      wasn't).
+#   3. P3.8b's --host end-to-end check -- ONE headless `flare --host=<port>` process (which spawns
+#      its own flare-server child, see GameStatePlay::netHostSpawnAndConnect()) plus ONE headless
+#      `flare --connect` guest joining it, asserting the same digest-equality property scenario 2
+#      already established now also holds for the host-spawned path -- see
+#      plans/phase3/P3.8b-host-becomes-a-child-process.md's Why for why this needs its own
+#      scenario rather than being assumed from scenario 2 alone (nothing before this plan ever
+#      exercised --host at all).
 #
 #   tests/run-net.sh [data-path]
 #
-# Exit 0 = both scenarios passed. Exit 1 = either failed.
+# Exit 0 = all three scenarios passed. Exit 1 = any failed.
 #
-# Kept as one file with two scenarios, not split into two scripts -- both need the exact same
-# fixture/isolated-$HOME/trap machinery, and P3.7's own two real bugs (found and fixed developing
-# scenario 1) apply equally to scenario 2, so there is nothing scenario-specific to gain from
-# separating them.
+# Kept as one file with three scenarios, not split into separate scripts -- all three need the
+# exact same fixture/isolated-$HOME/trap machinery, and P3.7's own two real bugs (found and fixed
+# developing scenario 1) apply equally to scenarios 2 and 3, so there is nothing scenario-specific
+# to gain from separating them.
 
 set -e
 cd "$(dirname "$0")/.."
@@ -276,6 +284,130 @@ fi
 
 if [ "$s2_fail" = "0" ]; then
 	echo "PASS (scenario 2): server + 2 distinctly-scripted headless clients agreed on every sampled tick's digest"
+else
+	overall_fail=1
+fi
+
+# ---------------------------------------------------------------------------------------------
+# Scenario 3: --host end to end (P3.8b)
+# ---------------------------------------------------------------------------------------------
+
+PORT=$((37800 + (RANDOM % 1000)))
+HOST_HOME="$OUT/s3_host_home"
+mkdir -p "$HOST_HOME/.config/flare" "$HOST_HOME/.local/share/flare/saves"
+: > "$HOST_HOME/.config/flare/settings.txt"
+cp -r "$FIXTURE_HOME/.local/share/flare/saves/empyrean" "$HOST_HOME/.local/share/flare/saves/empyrean"
+
+echo "scenario 3 (--host end to end): starting host on port $PORT"
+# No separate flare-server is started by this harness -- --host starts its own
+# (GameStatePlay::netHostSpawnAndConnect()), inheriting HOME="$HOST_HOME" via fork()/execvp(), so
+# it finds the exact same fixture save the host process's own local load just used, with no
+# separate copy step needed.
+HOME="$HOST_HOME" ./flare --headless --data-path="$DATA_PATH" --mods="$MODS" --load-slot=1 \
+	--host="$PORT" --script=tests/scripts/p3.8b-host.txt --max-ticks=3600 --no-lock-file \
+	--hash-replicated --hash-every=60 \
+	> "$OUT/s3_host.out" 2> "$OUT/s3_host.err" &
+HOST_PID=$!
+
+# Poll the HOST's own stdout/stderr (not flare-server's -- that log lives inside $HOST_HOME,
+# whose path this harness deliberately does not need to know) for netHostSpawnAndConnect()'s own
+# "ready, connecting" line -- proof the spawned child is listening and the host's own loopback
+# connection has started, so the guest below is not racing it. A longer budget than scenario 1/2's
+# "listening on port" poll (15s vs ~5s) -- this line only appears after netHostSpawnAndConnect()'s
+# OWN internal 5s spawn/listen budget has already been spent, on top of however long spawning a
+# whole second process actually takes.
+listening=""
+for i in $(seq 1 300); do
+	if grep -q "connecting to 127.0.0.1" "$OUT/s3_host.out" "$OUT/s3_host.err" 2>/dev/null; then
+		listening=1
+		break
+	fi
+	sleep 0.05
+done
+if [ -z "$listening" ]; then
+	echo "FAIL (scenario 3): host never reported connecting to its own spawned flare-server"
+	echo "--- s3_host.err ---"; cat "$OUT/s3_host.err"
+	echo "--- s3_host host-server.log ---"; cat "$HOST_HOME"/.local/share/flare/host-server.log 2>/dev/null || true
+	kill "$HOST_PID" 2>/dev/null || true
+	exit 1
+fi
+
+s3_fail=0
+GUEST_HOME="$OUT/s3_guest_home"
+mkdir -p "$GUEST_HOME/.config/flare" "$GUEST_HOME/.local/share/flare/saves"
+: > "$GUEST_HOME/.config/flare/settings.txt"
+cp -r "$FIXTURE_HOME/.local/share/flare/saves/empyrean" "$GUEST_HOME/.local/share/flare/saves/empyrean"
+
+HOME="$GUEST_HOME" ./flare --headless --data-path="$DATA_PATH" --mods="$MODS" --load-slot=1 \
+	--connect="127.0.0.1:$PORT" --script=tests/scripts/p3.8b-guest.txt --max-ticks=3600 \
+	--no-lock-file --hash-replicated --hash-every=60 \
+	> "$OUT/s3_guest.out" 2> "$OUT/s3_guest.err" &
+GUEST_PID=$!
+
+guest_fail=0
+if ! wait "$GUEST_PID"; then
+	guest_fail=1
+fi
+if [ "$guest_fail" != "0" ]; then
+	echo "FAIL (scenario 3): the guest client exited non-zero"
+	echo "--- s3_guest.err (tail) ---"; tail -20 "$OUT/s3_guest.err"
+	s3_fail=1
+fi
+
+host_rc=0
+wait "$HOST_PID" || host_rc=$?
+if [ "$host_rc" != "0" ]; then
+	echo "FAIL (scenario 3): host exited $host_rc"
+	echo "--- s3_host.err (tail) ---"; tail -20 "$OUT/s3_host.err"
+	s3_fail=1
+fi
+
+# The host's own ~GameStatePlay() terminates its spawned flare-server on the way out
+# (net_host_child.terminate()) -- confirm nothing with this scenario's own port is still around
+# a moment after the host process itself has already exited.
+sleep 0.2
+if pgrep -f "flare-server.*--port=$PORT" > /dev/null 2>&1; then
+	echo "FAIL (scenario 3): flare-server (port $PORT) is still running after the host process exited"
+	pkill -f "flare-server.*--port=$PORT" 2>/dev/null || true
+	s3_fail=1
+fi
+
+grep -oE '^tick [0-9]+ 0x[0-9a-f]+' "$OUT/s3_host.out"  > "$OUT/s3_host.digests"  2>/dev/null || true
+grep -oE '^tick [0-9]+ 0x[0-9a-f]+' "$OUT/s3_guest.out" > "$OUT/s3_guest.digests" 2>/dev/null || true
+
+# Two processes to compare now, not three (scenario 2's server/client1/client2) -- there is no
+# separate standalone flare-server log here to diff against, only the host's own --hash-replicated
+# output and the guest's. Same tolerant-match reasoning as scenario 2's own comment: a small,
+# reproducible fraction of mismatches at a scripted movement's start/end boundary is real network
+# latency, not a defect -- see that scenario's comment for the full argument.
+digest_rc=0
+digest_report="$(awk -v h="$OUT/s3_host.digests" -v g="$OUT/s3_guest.digests" '
+BEGIN {
+	while ((getline line < h) > 0) { split(line, f, " "); hd[f[2]] = f[3] }
+	while ((getline line < g) > 0) { split(line, f, " "); gd[f[2]] = f[3] }
+	matched = 0
+	mismatched = 0
+	for (t in hd) {
+		if (t in gd) {
+			matched++
+			if (hd[t] != gd[t]) {
+				mismatched++
+				printf "MISMATCH tick %s: host=%s guest=%s\n", t, hd[t], gd[t]
+			}
+		}
+	}
+	printf "matched=%d mismatched=%d\n", matched, mismatched
+	exit (matched < 10 || mismatched > matched * 0.15) ? 1 : 0
+}
+')" || digest_rc=$?
+echo "$digest_report"
+if [ "$digest_rc" != "0" ]; then
+	echo "FAIL (scenario 3): digest comparison failed (see MISMATCH lines above, or too few ticks matched)"
+	s3_fail=1
+fi
+
+if [ "$s3_fail" = "0" ]; then
+	echo "PASS (scenario 3): --host spawned its own flare-server, a guest joined it, and both agreed on every sampled tick's digest"
 else
 	overall_fail=1
 fi

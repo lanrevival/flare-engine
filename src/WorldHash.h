@@ -60,8 +60,14 @@ public:
 	 * compute() cannot be compared between a client and server process before then -- this can,
 	 * once the two processes stop independently simulating (P3.8, D27). Before that, two
 	 * processes fed the same scripted input can still disagree here by a tick or two of network
-	 * latency; this is infrastructure for P3.8 onward, not an equality guarantee on its own. */
-	static uint64_t computeReplicated(unsigned long tick);
+	 * latency; this is infrastructure for P3.8 onward, not an equality guarantee on its own.
+	 *
+	 * P3.8b: exclude_id, when >= 0, skips the player whose Avatar::id equals it -- used only by
+	 * main_server.cpp's own --no-local-player runs, to leave the --load-slot clone template
+	 * (never a real network player then) out of the digest a client's own computeReplicated() is
+	 * compared against. -1 (the default) excludes nothing, matching every call site before this
+	 * parameter existed. */
+	static uint64_t computeReplicated(unsigned long tick, int exclude_id = -1);
 
 	/** "0x%016llx" -- the form printed by --hash and stored in golden files. */
 	static std::string toString(uint64_t h);

@@ -1,0 +1,10 @@
+# P3.8b's tests/run-net.sh scenario 3 (--host end to end). This is the HOST side: the process
+# that itself spawns flare-server (--dedicated --no-local-player) and connects to it, same as
+# p3.8-client1.txt/p3.8-client2.txt (P3.8) but against a host-spawned server rather than a
+# manually-started one. Deliberately DIFFERENT from p3.8b-guest.txt -- proving the host's own
+# mirror is correct needs two distinctly-scripted clients, not one shared script.
+5 press up
+90 release up
+200 press left
+280 release left
+3550 disconnect

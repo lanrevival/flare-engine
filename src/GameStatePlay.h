@@ -32,10 +32,8 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Utils.h"
 
 #include <stdint.h>
-#include <map>
-#include <set>
 
-#include "PlayerCommand.h" // held by value in net_host_cmd below
+#include "net/ChildProcess.h" // held by value in net_host_child below
 
 class ActionBarState;
 class Avatar;
@@ -137,49 +135,16 @@ private:
 	Net::NetworkManager* netmgr;
 	bool net_connect_attempted;
 
-	// P3.4c: embedding a NetworkManager HOST directly in this client, so a second player can
-	// connect straight to this machine without a separate --dedicated process. Mutually exclusive
-	// with netConnectIfNeeded() above -- main.cpp refuses --connect and --host together, and
-	// netmgr is shared by both (a GameStatePlay is a client or a host, never both). Unlike P3.4b's
-	// remotePlayerId() offset, connected peers here keep their raw network PlayerID as their
-	// playerm id directly -- this client's own local avatar is always id 0 (playerm->create(0) in
-	// the constructor) and netmgr->seedNextPlayerID(1) in netHostIfNeeded() guarantees no accepted
-	// peer can ever be assigned id 0, so there is no collision to offset around. Mirrors
-	// main_server.cpp's serverSyncNetworkPlayers()/serverLogic()/serverBroadcastSnapshot() --
-	// see plans/phase3/P3.4c-host-embedded-mode.md for exactly what is and isn't ported.
-	void netHostIfNeeded();
-	void netHostSyncPeers();
-	void netHostDrivePeers();
-	void netHostBroadcastSnapshot();
-	Avatar* netHostProvisionPeer(uint8_t id, const FPoint& spawn_pos);
-
+	// P3.8b (D28). --host no longer embeds a second simulation in this client -- it spawns
+	// flare-server (--dedicated --no-local-player) as a child and points netConnectIfNeeded() at
+	// it on loopback, so a host session and a guest session run the exact same client code path.
+	// Replaces the ~630-line netHost* family P3.4c/P3.4d hand-ported from main_server.cpp (peer
+	// provisioning, per-peer Avatar::logic() driving, loot/title/death-penalty/equipment/used-item
+	// duplication, snapshot broadcast) -- see
+	// plans/phase3/P3.8b-host-becomes-a-child-process.md.
+	void netHostSpawnAndConnect();
 	bool net_host_attempted;
-	std::set<uint8_t> net_host_players;           // ids currently bound to a connected, handshake-complete peer
-	std::map<uint8_t, PlayerCommand> net_host_cmd; // this tick's decoded command per connected peer
-
-	// P3.4d: kind-C generalisation for connected peers -- loot auto-pickup, title-earning, death
-	// penalty, equipment-change notification, used-item consumption. Deliberately separate
-	// functions from checkLoot()/checkTitle()/checkPrimaryStat()/checkEquipmentChange()/
-	// checkUsedItems() above, parameterised by peer instead of sharing those -- mirrors
-	// main_server.cpp's own precedent of never sharing these with GameStatePlay.cpp either
-	// (serverCheckLoot()/serverCheckTitle()/serverCheckPrimaryStat()/serverCheckEquipmentChange()/
-	// serverCheckUsedItems() are separate functions there too), so this plan's diff never touches a
-	// line any prior plan's replay-corpus verification already depends on. See
-	// plans/phase3/P3.4d-host-peer-kind-c.md.
-	void netHostCheckDeathPenalty();
-	void netHostCheckLoot(Avatar* peer, PlayerInventory* inv);
-	bool netHostCheckPrimaryStat(const StatBlock& stats, const std::string& first, const std::string& second);
-	void netHostCheckTitle(Avatar* peer);
-	void netHostCheckEquipmentChange();
-	void netHostCheckUsedItems();
-	PlayerInventory* netHostInventoryForCaster(StatBlock* caster);
-
-	// Peer-scoped substitute for menu->inv->changed_equipment (peers have no MenuInventory on this
-	// screen) -- presence of an id means "netHostCheckEquipmentChange() has a reload pending for
-	// it". Mirrors main_server.cpp's server_equipment_changed[8] array, as a set instead, matching
-	// this file's existing net_host_players/net_host_cmd style. See netHostCheckEquipmentChange()'s
-	// own comment for its two trigger sites.
-	std::set<uint8_t> net_host_equip_changed;
+	Net::ChildProcess net_host_child;
 
 	int npc_id;
 

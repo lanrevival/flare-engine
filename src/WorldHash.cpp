@@ -237,7 +237,7 @@ uint64_t WorldHash::compute(unsigned long tick) {
 // build -- so a value that diverges here is, by construction, a value that would also diverge on
 // the wire. Deliberately excludes mp/xp/currency (not in PlayerSnapshotEntry today) and every
 // other section compute() covers -- see WorldHash.h's doc comment on this function for why.
-uint64_t WorldHash::computeReplicated(unsigned long tick) {
+uint64_t WorldHash::computeReplicated(unsigned long tick, int exclude_id) {
 	uint64_t h = init();
 
 	h = mixI32(h, TAG_HEADER);
@@ -250,7 +250,17 @@ uint64_t WorldHash::computeReplicated(unsigned long tick) {
 	// what it always is). player_net_id -- not av->id -- is what's actually comparable across
 	// processes; see Avatar::player_net_id's own comment. Small (<=8 per D3), so a plain
 	// insertion-sorted copy is simplest.
-	std::vector<Avatar*> by_net_id(playerm->players.begin(), playerm->players.end());
+	//
+	// P3.8b: exclude_id (keyed on av->id, not player_net_id -- see this function's own header
+	// comment) is filtered out while building the copy, not after sorting, so it never occupies a
+	// slot at all.
+	std::vector<Avatar*> by_net_id;
+	for (size_t i = 0; i < playerm->players.size(); ++i) {
+		Avatar* av = playerm->players[i];
+		if (exclude_id >= 0 && av->id == static_cast<uint8_t>(exclude_id))
+			continue;
+		by_net_id.push_back(av);
+	}
 	for (size_t i = 1; i < by_net_id.size(); ++i) {
 		Avatar* key = by_net_id[i];
 		size_t j = i;

@@ -1,0 +1,9 @@
+# P3.8b's tests/run-net.sh scenario 3 (--host end to end). This is the GUEST side: an ordinary
+# --connect client joining the host-spawned server. Deliberately DIFFERENT from p3.8b-host.txt --
+# see that file's own comment. Disconnects a couple ticks after the host so a same-tick
+# coincidence can't hide an ordering bug.
+5 press down
+90 release down
+200 press right
+280 release right
+3560 disconnect

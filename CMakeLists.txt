@@ -144,6 +144,7 @@ Set (FLARE_HEADERS
 	./src/Avatar.h
 	./src/Camera.h
 	./src/CampaignManager.h
+	./src/net/ChildProcess.h
 	./src/CombatText.h
 	./src/CommonIncludes.h
 	./src/CursorManager.h
@@ -313,7 +314,10 @@ ENDIF (WIN32)
 #    or the rest of FLARE_PRESENTATION_SOURCES calls into these (SaveLoad.cpp #includes
 #    GameStatePlay.h but never uses a GameStatePlay symbol), so excluding them costs nothing and
 #    keeps that property true at the link-set level, not just in main_server.cpp's own source.
+#  - net/ChildProcess.cpp (P3.8b): only GameStatePlay's own --host handling ever spawns anything.
+#    flare-server never spawns a child process, so it should not link the code that could.
 Set (FLARE_SERVER_EXCLUDED_PRESENTATION_SOURCES
+	./src/net/ChildProcess.cpp
 	./src/DeviceList.cpp
 	./src/SDLHardwareRenderDevice.cpp
 	./src/SDLSoftwareRenderDevice.cpp

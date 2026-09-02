@@ -63,6 +63,7 @@ Set (FLARE_PRESENTATION_SOURCES
 	./src/AnimationMedia.cpp
 	./src/AnimationSet.cpp
 	./src/Camera.cpp
+	./src/net/ChildProcess.cpp
 	./src/CombatText.cpp
 	./src/CursorManager.cpp
 	./src/DeviceList.cpp

@@ -178,7 +178,7 @@ public:
 		, sim_seed(RNG_DEFAULT_SIM_SEED), record_path(), replay_path(), dump_players(false)
 		, assert_player_wiring(false), spawn_test_players(0), test_player_summon(0)
 		, dump_ai_targets(false), dump_summon_prototypes(false), dump_damage_events(false), kill_player(-1)
-		, dedicated(false), port(0), max_players(8) {}
+		, dedicated(false), port(0), max_players(8), no_local_player(false) {}
 	std::vector<std::string> mod_list;
 	std::string load_slot;
 	std::string data_path;
@@ -210,6 +210,14 @@ public:
 	bool dedicated;
 	unsigned short port;    // 0 means "use DEFAULT_SERVER_PORT", set below main()
 	int max_players;        // includes the reserved local id 0 -- see serverInitNetwork()
+
+	// P3.8b (D28): player id 0 (the --load-slot template every joining player is cloned from,
+	// see serverProvisionPlayer()) still exists internally either way -- this only controls
+	// whether it is ALSO treated as a real, visible network player. Requires dedicated (checked in
+	// main()); meaningless otherwise, since nothing else reads it. See
+	// plans/phase3/P3.8b-host-becomes-a-child-process.md's Why for why this is additive and does
+	// not change plain --dedicated's own existing, already-tested behaviour.
+	bool no_local_player;
 };
 
 // The Platform implementations are compiled by #include-ing them into the entry point rather
@@ -1028,13 +1036,19 @@ static void serverSyncNetworkPlayers() {
 // settled server-computed state -- not last tick's. playerm->players already holds exactly the
 // players worth broadcasting (local id 0 plus every id serverSyncNetworkPlayers() currently keeps
 // provisioned), sorted by id.
-static void serverBroadcastSnapshot() {
+//
+// P3.8b: no_local_player skips id 0 entirely -- it is the --load-slot clone template
+// (serverProvisionPlayer()), never a real network player, when --no-local-player was passed. See
+// plans/phase3/P3.8b-host-becomes-a-child-process.md's Why.
+static void serverBroadcastSnapshot(bool no_local_player) {
 	if (!netmgr)
 		return;
 
 	std::vector<Net::PlayerSnapshotEntry> entries;
 	for (size_t i = 0; i < playerm->players.size(); ++i) {
 		Avatar* av = playerm->players[i];
+		if (no_local_player && av->id == playerm->local_id)
+			continue;
 		Net::PlayerSnapshotEntry entry;
 		entry.id = av->id;
 		entry.pos_x = av->stats.pos.x;
@@ -1987,7 +2001,8 @@ static const unsigned long TRAJECTORY_SAMPLE_TICKS = 30;
 static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_every,
                                     bool hash_replicated,
                                     uint64_t* trajectory, unsigned long* last_event_tick,
-                                    unsigned long* died_tick, bool dump_ai_targets) {
+                                    unsigned long* died_tick, bool dump_ai_targets,
+                                    bool no_local_player) {
 	bool done = false;
 	unsigned long total_ticks = 0;
 	uint64_t traj = WorldHash::init();
@@ -2054,7 +2069,7 @@ static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_
 				serverLogic();
 				// P3.4: broadcast this tick's settled state. Guarded inside the function itself
 				// (netmgr is NULL on every non---dedicated run), so this call is free elsewhere.
-				serverBroadcastSnapshot();
+				serverBroadcastSnapshot(no_local_player);
 			}
 			inpt->resetScroll();
 
@@ -2083,7 +2098,9 @@ static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_
 			// Per-tick digests make a divergence bisectable: diff two runs and the first
 			// differing line is the exact tick they parted.
 			if (hash_every > 0 && total_ticks % hash_every == 0) {
-				uint64_t h = hash_replicated ? WorldHash::computeReplicated(total_ticks) : WorldHash::compute(total_ticks);
+				uint64_t h = hash_replicated
+					? WorldHash::computeReplicated(total_ticks, no_local_player ? static_cast<int>(playerm->local_id) : -1)
+					: WorldHash::compute(total_ticks);
 				printf("tick %lu %s\n", total_ticks, WorldHash::toString(h).c_str());
 			}
 
@@ -2183,7 +2200,11 @@ static void printHelp() {
 	       "                         PLAYER_COMMAND packets drive their own Avatar for real. See\n"
 	       "                         plans/phase3/P3.3-authoritative-server-tick.md.\n"
 	       "--port=<N>               With --dedicated, the TCP port to listen on. Default 44680.\n"
-	       "--max-players=<N>        With --dedicated, the connection cap, 2-8 (D3). Default 8.\n");
+	       "--max-players=<N>        With --dedicated, the connection cap, 2-8 (D3). Default 8.\n"
+	       "--no-local-player        With --dedicated, player id 0 (the --load-slot template every\n"
+	       "                         joining player is cloned from) is never broadcast, dumped, or\n"
+	       "                         hashed as a real network player. See\n"
+	       "                         plans/phase3/P3.8b-host-becomes-a-child-process.md.\n");
 }
 
 static std::string parseServerArg(const std::string& arg) {
@@ -2295,6 +2316,9 @@ int main(int argc, char *argv[]) {
 		else if (arg == "max-players") {
 			args.max_players = static_cast<int>(strtol(parseServerArgValue(arg_full).c_str(), NULL, 10));
 		}
+		else if (arg == "no-local-player") {
+			args.no_local_player = true;
+		}
 		else if (arg == "max-fps") {
 			// Accepted so that the sim-rate-vs-render-rate claim can actually be tested: a
 			// server run at 30 and at 144 must produce the same tick count in the same wall
@@ -2320,6 +2344,16 @@ int main(int argc, char *argv[]) {
 
 	if (args.load_slot.empty()) {
 		Utils::logError("main_server: --load-slot is required.");
+		delete settings;
+		return 1;
+	}
+
+	// P3.8b: --no-local-player only means anything to code that broadcasts or hashes over the
+	// network (serverBroadcastSnapshot(), the --hash-replicated digest, --dump-players) -- with no
+	// --dedicated there is no network, and player 0 is the only player there could ever be, so
+	// "hide it" would just mean "print/hash nothing," which is never what anyone wants.
+	if (args.no_local_player && !args.dedicated) {
+		Utils::logError("main_server: --no-local-player requires --dedicated.");
 		delete settings;
 		return 1;
 	}
@@ -2397,9 +2431,20 @@ int main(int argc, char *argv[]) {
 
 	// P2.1 diagnostics -- both read playerm right after construction, before any tick has run.
 	// stdout, not the log: golden/CI parsing shouldn't have to deal with timestamps.
+	//
+	// P3.8b: --no-local-player skips id 0 here too -- it is the clone template, not a real network
+	// player, so "players=" stays honest about what the loop right below it actually prints.
 	if (args.dump_players) {
-		printf("players=%zu\n", playerm->count());
+		size_t player_lines = 0;
 		for (size_t i = 0; i < playerm->players.size(); ++i) {
+			if (args.no_local_player && playerm->players[i]->id == playerm->local_id)
+				continue;
+			++player_lines;
+		}
+		printf("players=%zu\n", player_lines);
+		for (size_t i = 0; i < playerm->players.size(); ++i) {
+			if (args.no_local_player && playerm->players[i]->id == playerm->local_id)
+				continue;
 			printf("player id=%u\n", static_cast<unsigned>(playerm->players[i]->id));
 		}
 	}
@@ -2439,7 +2484,7 @@ int main(int argc, char *argv[]) {
 	unsigned long last_event_tick = 0;
 	unsigned long died_tick = 0;
 	unsigned long ticks = serverMainLoop(args.max_ticks, args.hash_every, args.hash_replicated, &trajectory,
-	                                     &last_event_tick, &died_tick, args.dump_ai_targets);
+	                                     &last_event_tick, &died_tick, args.dump_ai_targets, args.no_local_player);
 
 	replay->finish();
 
@@ -2558,6 +2603,8 @@ int main(int argc, char *argv[]) {
 	if (args.dump_players) {
 		for (size_t p = 0; p < playerm->players.size(); ++p) {
 			Avatar* player = playerm->players[p];
+			if (args.no_local_player && player->id == playerm->local_id)
+				continue;
 			printf("player id=%u xp=%lu alive=%d\n", static_cast<unsigned>(player->id), player->stats.xp, player->stats.alive ? 1 : 0);
 		}
 	}
