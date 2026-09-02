@@ -46,6 +46,22 @@ jobs:
         if: steps.build.outcome != 'success'
         run: exit 1
 
+  # P6.0. This job proves the tree still builds on the machine Mike develops on; it does not
+  # make macOS a supported platform. Linux (the 'build' job above) remains the only shipping
+  # target, and this job carries no goldens, no replay corpus and no net harness of its own.
+  build-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Install dependencies
+        run: brew install sdl2 sdl2_image sdl2_mixer sdl2_ttf
+
+      - name: Build
+        run: |
+          cmake -DCMAKE_PREFIX_PATH="$(brew --prefix)" .
+          make -j4 flare flare-server
+
   rng-guard:
     # The four Math:: helpers and the global generator were removed in P0.3b so that every
     # random draw has to name sim_rng or fx_rng. Nothing in the type system enforces that, so
