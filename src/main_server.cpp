@@ -1052,7 +1052,7 @@ static void serverSyncNetworkPlayers() {
 // (serverProvisionPlayer()), never a real network player, when --no-local-player was passed. See
 // plans/phase3/P3.8b-host-becomes-a-child-process.md's Why. Entities are unaffected by
 // no_local_player -- it is a player-only concept.
-static void serverBroadcastSnapshot(bool no_local_player) {
+static void serverBroadcastSnapshot(unsigned long tick, bool no_local_player) {
 	if (!netmgr)
 		return;
 
@@ -1072,7 +1072,7 @@ static void serverBroadcastSnapshot(bool no_local_player) {
 		entry.alive = av->stats.alive;
 		entries.push_back(entry);
 	}
-	netmgr->broadcast(Net::encodePlayerSnapshot(entries));
+	netmgr->broadcast(Net::encodePlayerSnapshot(static_cast<uint32_t>(tick), entries));
 
 	// P3.9. NPCs (stats.npc) are excluded -- not wire-replicated yet, see P3.11c -- same exclusion
 	// WorldHash::computeReplicated() and EntityManager::handleNewMap()'s own delete loop apply.
@@ -1098,7 +1098,6 @@ static void serverBroadcastSnapshot(bool no_local_player) {
 		snap.corpse = e->stats.corpse;
 		snapshot_entries.push_back(snap);
 	}
-
 	// P3.9. Per-peer catch-up burst: each connected peer gets a spawn message for every live
 	// entity IT hasn't been told about yet, not just entities newly created this tick -- see
 	// server_announced_entities' own comment for why a global "ever announced" set breaks a peer
@@ -2154,7 +2153,11 @@ static unsigned long serverMainLoop(unsigned long max_ticks, unsigned long hash_
 				serverLogic();
 				// P3.4: broadcast this tick's settled state. Guarded inside the function itself
 				// (netmgr is NULL on every non---dedicated run), so this call is free elsewhere.
-				serverBroadcastSnapshot(no_local_player);
+				// total_ticks + 1, not total_ticks: this call sits before total_ticks++ below, and
+				// the embedded tick needs to match the number this tick's simulation actually
+				// produced -- the same total_ticks value the digest/liveness bookkeeping further
+				// down (after the increment) uses to label this exact tick.
+				serverBroadcastSnapshot(total_ticks + 1, no_local_player);
 			}
 			inpt->resetScroll();
 

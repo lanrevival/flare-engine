@@ -52,6 +52,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "UtilsParsing.h"
 #include "Version.h"
 #include "WorldHash.h"
+#include "net/NetProtocol.h"
 
 GameSwitcher *gswitch;
 
@@ -294,10 +295,32 @@ static void mainLoop () {
 
 			// Per-tick digests make a divergence bisectable, same reasoning and format as
 			// main_server.cpp's own hash_every block -- kept directly comparable line-for-line.
-			if (settings->headless && settings->hash_replicated && settings->hash_every > 0
-			    && total_ticks % settings->hash_every == 0) {
-				printf("tick %lu %s\n", total_ticks,
-				       WorldHash::toString(WorldHash::computeReplicated(total_ticks)).c_str());
+			//
+			// A --connect/--host client is sampled by the SERVER's own tick number
+			// (Net::g_last_synced_tick), not this process's own local loop-iteration count
+			// (total_ticks): this process's own main loop paces itself off wall-clock time
+			// (SDL_Delay above), never off the server's tick counter, so two independently
+			// scheduled clients sampling "their own local tick 60" were really sampling whatever
+			// broadcast each had most recently applied -- the same real moment only by
+			// coincidence. See Net::g_last_synced_tick's own comment (NetProtocol.h) for the
+			// permanent divergence this caused on anything that never stops changing (a wandering
+			// entity), found chasing the P3.9 plan's own two disclosed gaps. Single-player and
+			// --dedicated (Net::g_is_synced_client stays false) are unaffected -- both keep
+			// sampling by local tick exactly as before.
+			if (settings->headless && settings->hash_replicated && settings->hash_every > 0) {
+				static unsigned long last_hash_tick = static_cast<unsigned long>(-1);
+				if (Net::g_is_synced_client) {
+					unsigned long synced = static_cast<unsigned long>(Net::g_last_synced_tick);
+					if (synced > 0 && synced != last_hash_tick && synced % settings->hash_every == 0) {
+						printf("tick %lu %s\n", synced,
+						       WorldHash::toString(WorldHash::computeReplicated(synced)).c_str());
+						last_hash_tick = synced;
+					}
+				}
+				else if (total_ticks % settings->hash_every == 0) {
+					printf("tick %lu %s\n", total_ticks,
+					       WorldHash::toString(WorldHash::computeReplicated(total_ticks)).c_str());
+				}
 			}
 
 			// Engine done means the user escapes the main game menu.

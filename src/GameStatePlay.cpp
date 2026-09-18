@@ -211,8 +211,24 @@ void GameStatePlay::netSyncPlayers() {
 			got_one = true;
 		else if (type == Net::MSG_MAP_SYNC && Net::decodeMapSync(payload, map_sync))
 			got_map_sync = true;
-		else if (type == Net::MSG_ENTITY_SPAWN && Net::decodeEntitySpawn(payload, entity_spawn))
-			got_entity_spawn = true;
+		else if (type == Net::MSG_ENTITY_SPAWN) {
+			// Accumulated across every MSG_ENTITY_SPAWN packet in this drain, not overwritten --
+			// the server sends one per per-peer catch-up burst (main_server.cpp's
+			// serverBroadcastSnapshot()), and a client that falls even one tick behind can have
+			// TWO burst packets land in the same popPacket() drain (this loop runs once per LOCAL
+			// tick, not once per server broadcast). decodeEntitySpawn() clears its own out-param
+			// each call, so decoding straight into entity_spawn like MSG_ENTITY_SNAPSHOT below
+			// silently discarded every earlier burst's entities in that drain -- permanently: the
+			// server's own per-peer announced-set (server_announced_entities) never re-sends an
+			// id once sent, so a dropped entry never gets a second chance. Found by tracing a
+			// scenario-3 entity that existed on one mirror but never on the other despite the
+			// server broadcasting it every tick.
+			Net::MsgEntitySpawn burst;
+			if (Net::decodeEntitySpawn(payload, burst)) {
+				entity_spawn.entities.insert(entity_spawn.entities.end(), burst.entities.begin(), burst.entities.end());
+				got_entity_spawn = true;
+			}
+		}
 		else if (type == Net::MSG_ENTITY_SNAPSHOT && Net::decodeEntitySnapshot(payload, entity_snap))
 			got_entity_snapshot = true;
 		// Any other message type this tick is silently dropped -- nothing else is defined yet.
@@ -230,6 +246,13 @@ void GameStatePlay::netSyncPlayers() {
 		netApplyEntitySnapshot(entity_snap);
 	if (!got_one)
 		return;
+
+	// See Net::g_last_synced_tick's own comment (NetProtocol.h) -- lets main.cpp's periodic
+	// --hash-replicated block sample by the server's own tick number instead of this process's own
+	// local loop-iteration count, the fix for a permanent digest divergence on anything that never
+	// stops changing (a wandering entity) between two independently-paced mirrors.
+	Net::g_is_synced_client = true;
+	Net::g_last_synced_tick = snap.tick;
 
 	PlayerID local_id = netmgr->localPlayerID();
 	std::vector<PlayerID> seen; // network ids, not playerm ids -- see remotePlayerId()

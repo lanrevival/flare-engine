@@ -48,7 +48,10 @@ class Mod;
 
 namespace Net {
 
-const uint16_t PROTOCOL_VERSION = 1;
+// Bumped to 2 by the mirror-tick-sync bugfix: MSG_PLAYER_SNAPSHOT gained a leading tick field
+// (MsgPlayerSnapshot::tick's own comment), an incompatible wire-format change -- a stale binary on
+// either end must be refused at handshake, not silently misparse every snapshot after it.
+const uint16_t PROTOCOL_VERSION = 2;
 
 enum MessageType {
 	MSG_HELLO = 1,
@@ -104,6 +107,18 @@ struct PlayerSnapshotEntry {
 };
 
 struct MsgPlayerSnapshot {
+	// The server's own tick counter at the moment this broadcast was built (serverMainLoop()'s
+	// total_ticks). Added by the mirror-tick-sync bugfix: a client's own local loop iterates at
+	// its own wall-clock pace (SDL_Delay-throttled, not locked to the server), so two independently
+	// scheduled --connect/--host clients sampling "their own local tick 60" were in fact sampling
+	// two DIFFERENT real server broadcasts whenever their own pacing drifted apart even slightly --
+	// invisible for a player once movement stops (the mirrored value stops changing, so any nearby
+	// broadcast reads the same), but permanent for anything that never stops changing (a wandering
+	// entity's position/direction), which is why the disclosed P3.9 divergence never resolved no
+	// matter how long the quiet tail ran. Both peers now key their own periodic digest sample on
+	// THIS value (main.cpp's periodic hash block) instead of their own local tick counter, so a
+	// sample only ever compares two peers' views of the SAME real broadcast.
+	uint32_t tick;
 	std::vector<PlayerSnapshotEntry> players;
 };
 
@@ -177,7 +192,7 @@ bool decodePlayerCommand(const std::string& payload, PlayerCommand& out);
 std::string encodeSystemMessage(const std::string& key, const std::vector<MessageArg>& args);
 bool decodeSystemMessage(const std::string& payload, MsgSystemMessage& out);
 
-std::string encodePlayerSnapshot(const std::vector<PlayerSnapshotEntry>& players);
+std::string encodePlayerSnapshot(uint32_t tick, const std::vector<PlayerSnapshotEntry>& players);
 bool decodePlayerSnapshot(const std::string& payload, MsgPlayerSnapshot& out);
 
 std::string encodeMapSync(const std::string& map_filename, float spawn_x, float spawn_y);
@@ -202,6 +217,18 @@ std::string debugDump(const std::string& payload);
 // meaningful -- a reordering is a legitimate mismatch). A robustness check against an accidental
 // version/mod mismatch (D2's LAN trust model), not a security hash.
 uint32_t hashModList(const std::vector<Mod>& mods);
+
+// Set by GameStatePlay::netSyncPlayers() the first time (and every time) a MSG_PLAYER_SNAPSHOT
+// lands; read by main.cpp's own periodic --hash-replicated block. A --connect/--host client's own
+// game loop paces itself off wall-clock time (SDL_Delay in mainLoop()), not off the server's tick
+// counter, so two independently-scheduled clients sampling "their own local tick 60" were really
+// sampling whatever broadcast each happened to have most recently applied -- the SAME real moment
+// only by coincidence. See MsgPlayerSnapshot::tick's own comment for the bug this caused and
+// g_last_synced_tick lets main.cpp sample by the server's own tick number instead, so a sample
+// only ever compares two peers' views of the identical broadcast. Never set on single-player or
+// --dedicated (both read these as g_is_synced_client == false and keep sampling by local tick).
+extern bool g_is_synced_client;
+extern uint32_t g_last_synced_tick;
 
 } // namespace Net
 

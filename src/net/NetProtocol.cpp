@@ -26,6 +26,9 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 namespace Net {
 
+bool g_is_synced_client = false;
+uint32_t g_last_synced_tick = 0;
+
 namespace {
 
 void writeU8(std::string& out, uint8_t v) {
@@ -332,9 +335,10 @@ bool decodeSystemMessage(const std::string& payload, MsgSystemMessage& out) {
 	return true;
 }
 
-std::string encodePlayerSnapshot(const std::vector<PlayerSnapshotEntry>& players) {
+std::string encodePlayerSnapshot(uint32_t tick, const std::vector<PlayerSnapshotEntry>& players) {
 	std::string out;
 	writeU8(out, static_cast<uint8_t>(MSG_PLAYER_SNAPSHOT));
+	writeU32(out, tick);
 	writeU8(out, static_cast<uint8_t>(players.size()));
 	for (size_t i = 0; i < players.size(); ++i) {
 		const PlayerSnapshotEntry& p = players[i];
@@ -354,6 +358,9 @@ bool decodePlayerSnapshot(const std::string& payload, MsgPlayerSnapshot& out) {
 	size_t offset = 0;
 	uint8_t type;
 	if (!readU8(payload, offset, type) || type != MSG_PLAYER_SNAPSHOT)
+		return false;
+
+	if (!readU32(payload, offset, out.tick))
 		return false;
 
 	uint8_t count;
