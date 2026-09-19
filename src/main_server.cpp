@@ -172,6 +172,14 @@ static QuestLog* server_quests = NULL;
 static Net::NetworkManager* netmgr = NULL;
 static const unsigned short DEFAULT_SERVER_PORT = 44680; // arbitrary, dynamic/private range
 
+// P3.3. Ids currently bound to a connected, handshake-completed peer. Declared up here (rather than
+// down by server_net_cmd, where it originally lived) because P3.11a's serverSendPlayerEvent() --
+// used from serverCheckLoot(), well before server_net_cmd's own neighborhood -- needs it in scope.
+// A connected player who sent no packet this tick is still driven (they're just idle, not
+// disconnected); server_net_cmd (declared where this variable used to be) being empty for their id
+// is what makes serverNetCommandFor() fall back to a neutral PlayerCommand().
+static std::set<PlayerID> server_net_players;
+
 class ServerCmdLineArgs {
 public:
 	ServerCmdLineArgs()
@@ -774,6 +782,19 @@ static PlayerID resolveHazardOwnerId(const Hazard* z) {
 	return Net::NO_HAZARD_OWNER;
 }
 
+// P3.11a. Fans a one-shot MsgPlayerEvent out to 'target', or drops it silently if that id isn't an
+// actual connected peer (the local player has no network connection to receive it, and doesn't
+// need one -- the driving process already ran the local menu/sound code these events replace for a
+// mirror). Takes 'event' by value: callers build a mostly-default-constructed MsgPlayerEvent and
+// only fill in the fields their event_type actually uses (see the struct's own field comments),
+// and this function's own job is only to stamp 'target' and decide whether to send at all.
+static void serverSendPlayerEvent(PlayerID target, Net::MsgPlayerEvent event) {
+	if (!netmgr || server_net_players.find(target) == server_net_players.end())
+		return;
+	event.target = target;
+	netmgr->sendTo(target, Net::encodePlayerEvent(event));
+}
+
 // The sim-relevant subset of GameStatePlay::checkLoot() -- auto-pickup only. Dropped: the
 // menu->isDragging() guard (no UI, never dragging) and the manual click-pickup branch
 // (mapr->cam.pos-based, mouse-only). The caller gates this on the player's own stats.alive,
@@ -791,6 +812,24 @@ static void serverCheckLoot(Avatar* player, PlayerInventory* inventory) {
 			StatusID pickup_status = camp->registerStatus(items->items[pickup.item]->pickup_status);
 			camp->setStatus(pickup_status);
 		}
+
+		// P3.11a: this used to add to inventory in complete silence -- reuse CampaignManager.cpp's
+		// own "You receive ..." reward-text phrasing (:233,237,239) rather than invent new wording,
+		// fanned out the same way any other server-produced log line reaches its player
+		// (PLAYER_EVENT_LOG_MESSAGE, see serverCheckLog()'s own comment on why this can't just be
+		// player->logMsg(): a mirror never runs the local code that used to drain that queue for
+		// itself, but this call site IS already server-authoritative for every player).
+		Net::MsgPlayerEvent ev;
+		ev.event_type = Net::PLAYER_EVENT_LOG_MESSAGE;
+		ev.log_msg_type = Avatar::MSG_NORMAL;
+		if (pickup.item == eset->misc.currency_id)
+			ev.text = msg->getv("You receive %d %s.", pickup.quantity, eset->loot.currency.c_str());
+		else if (pickup.quantity > 1)
+			ev.text = msg->getv("You receive %s x%d.", items->getItemName(pickup.item).c_str(), pickup.quantity);
+		else
+			ev.text = msg->getv("You receive %s.", items->getItemName(pickup.item).c_str());
+		serverSendPlayerEvent(player->id, ev);
+
 		pickup.clear();
 	}
 }
@@ -827,8 +866,11 @@ static void serverCheckLootDrop() {
 }
 
 // The sim-relevant subset of GameStatePlay::checkLog() -- drains each player's own log_msg so the
-// queue doesn't grow unbounded over a long-running server. The pushes into menu->hudlog/
-// menu->questlog are dropped along with the widgets they'd update.
+// queue doesn't grow unbounded over a long-running server, same as before P3.11a. The pushes into
+// menu->hudlog/menu->questlog are still dropped along with the widgets they'd update -- but a
+// connected peer needs this text too (it used to see it only via those now-nonexistent widgets, and
+// a mirror runs no local code that would ever produce it), so each entry now also fans out as a
+// PLAYER_EVENT_LOG_MESSAGE before being popped, instead of being discarded outright.
 //
 // P2.3b, kind C: log_msg is per-avatar with no input dependency -- every player's own queue is
 // drained, not just local()'s.
@@ -836,6 +878,11 @@ static void serverCheckLog() {
 	for (size_t p = 0; p < playerm->players.size(); ++p) {
 		Avatar* player = playerm->players[p];
 		while (!player->log_msg.empty()) {
+			Net::MsgPlayerEvent ev;
+			ev.event_type = Net::PLAYER_EVENT_LOG_MESSAGE;
+			ev.text = player->log_msg.front().first;
+			ev.log_msg_type = static_cast<uint8_t>(player->log_msg.front().second);
+			serverSendPlayerEvent(player->id, ev);
 			player->log_msg.pop();
 		}
 	}
@@ -963,11 +1010,11 @@ static void serverUpdateActionBar(ActionBarState* actionbar, PlayerInventory* in
 // needs it earlier in the file, at the real connect-time call site.
 static Avatar* serverProvisionPlayer(PlayerID id, FPoint spawn_pos);
 
-// P3.3. Ids currently bound to a connected, handshake-completed peer -- distinct from
-// server_net_cmd below, which only holds THIS tick's decoded packets. A connected player who sent
+// P3.3. server_net_players itself is declared earlier in the file (see its own comment there) --
+// serverSendPlayerEvent (P3.11a) needs it before serverCheckLoot()'s own position. This map holds
+// only THIS tick's decoded packets, distinct from server_net_players: a connected player who sent
 // no packet this tick is still driven (they're just idle, not disconnected); server_net_cmd being
 // empty for their id is what makes serverNetCommandFor() fall back to a neutral PlayerCommand().
-static std::set<PlayerID> server_net_players;
 static std::map<PlayerID, PlayerCommand> server_net_cmd;
 
 // P3.9. Every non-NPC net_id announced to EACH connected peer via MSG_ENTITY_SPAWN, keyed by
@@ -1092,6 +1139,46 @@ static void serverBroadcastSnapshot(unsigned long tick, bool no_local_player) {
 		entry.hp = av->stats.hp;
 		entry.hp_max = av->stats.get(Stats::HP_MAX);
 		entry.alive = av->stats.alive;
+
+		// P3.11a. mp/xp/level/currency/effects/cooldowns are what MenuCharacter (and
+		// MenuActionBar's cooldown wedges) read that Avatar::logic() alone used to keep current --
+		// a mirror never runs it (is_mirror), so without these a connected player's own menus would
+		// show whatever the avatar had at creation, forever. (stats.powers_list itself is NOT sent
+		// -- see this loop's own comment further down, past the cooldown arrays, for why.)
+		entry.mp = av->stats.mp;
+		entry.mp_max = av->stats.get(Stats::MP_MAX);
+		entry.xp = static_cast<uint32_t>(av->stats.xp);
+		entry.level = av->stats.level;
+		entry.currency = av->stats.currency;
+
+		for (size_t j = 0; j < av->stats.effects.effect_list.size(); ++j) {
+			// Timer::getCurrent() isn't const -- av is never const here, so a non-const ref is fine.
+			Effect& eff = av->stats.effects.effect_list[j];
+			Net::PlayerEffectEntry pe;
+			pe.id = eff.id;
+			pe.magnitude = eff.magnitude;
+			pe.ticks_remaining = eff.timer.getCurrent();
+			pe.ticks_total = eff.timer.getDuration();
+			entry.effects.push_back(pe);
+		}
+
+		// Avatar's constructor only new Timer()s a slot for a PowerID that's actually
+		// powers->isValid() -- PowerManager reserves ids in blocks (P503 reserved / 386 allocated
+		// is typical), so plenty of slots are NULL by design, not a bug. 0 for those: an invalid
+		// PowerID is never looked up by a mirror either (see netApplySnapshotFields()), so its
+		// value is inert, but the index alignment (index == PowerID) has to be preserved regardless.
+		entry.power_cooldown_ticks.reserve(av->power_cooldown_timers.size());
+		for (size_t j = 0; j < av->power_cooldown_timers.size(); ++j)
+			entry.power_cooldown_ticks.push_back(av->power_cooldown_timers[j] ? av->power_cooldown_timers[j]->getCurrent() : 0);
+
+		entry.power_cast_ticks.reserve(av->power_cast_timers.size());
+		for (size_t j = 0; j < av->power_cast_timers.size(); ++j)
+			entry.power_cast_ticks.push_back(av->power_cast_timers[j] ? av->power_cast_timers[j]->getCurrent() : 0);
+
+		// stats.powers_list/ActionBarState hotkeys are deliberately NOT sent -- see
+		// PlayerSnapshotEntry's own header comment (net/NetProtocol.h) for the MenuPowers
+		// auto-unlock divergence this plan found and left as a follow-up.
+
 		entries.push_back(entry);
 	}
 	netmgr->broadcast(Net::encodePlayerSnapshot(static_cast<uint32_t>(tick), entries));
@@ -1348,6 +1435,14 @@ static void serverLogic() {
 			player->stats.hp = player->stats.get(Stats::HP_MAX);
 			player->stats.mp = player->stats.get(Stats::MP_MAX);
 			player->stats.level_up = false;
+
+			// P3.11a: the level-up sound is the only client-visible effect this event still needs
+			// to carry -- Avatar::logic()'s own accompanying log lines already fan out separately
+			// as ordinary PLAYER_EVENT_LOG_MESSAGEs (serverCheckLog()), and the new level/stat
+			// totals this block just applied ride the next MSG_PLAYER_SNAPSHOT like everything else.
+			Net::MsgPlayerEvent ev;
+			ev.event_type = Net::PLAYER_EVENT_LEVEL_UP;
+			serverSendPlayerEvent(player->id, ev);
 		}
 	}
 
@@ -1486,6 +1581,14 @@ static void serverLogic() {
 		}
 		if (player->show_game_over) {
 			player->show_game_over = false;
+
+			// P3.11a: a connected client's own game-over screen used to never appear at all -- its
+			// avatar never runs this code locally (is_mirror skips player->logic()), so nothing
+			// ever set show_game_over on its own end. The event itself carries no payload; the
+			// client just opens its own menu->game_over on receipt (GameStatePlay's own dispatch).
+			Net::MsgPlayerEvent ev;
+			ev.event_type = Net::PLAYER_EVENT_DEATH;
+			serverSendPlayerEvent(player->id, ev);
 		}
 	}
 
@@ -1525,6 +1628,12 @@ static void serverLogic() {
 		if (player_class && !player->respec_use_engine_defaults) {
 			actionbar->set(player_class->hotkeys, ActionBarState::SET_SKIP_EMPTY);
 		}
+
+		// P3.11a: the rebuilt powers_list/actionbar already ride the next MSG_PLAYER_SNAPSHOT: this
+		// event's only job is telling the client a respec just happened, nothing to apply locally.
+		Net::MsgPlayerEvent ev;
+		ev.event_type = Net::PLAYER_EVENT_RESPEC;
+		serverSendPlayerEvent(player->id, ev);
 	}
 
 	// these actions occur whether the game is paused or not.
@@ -2816,7 +2925,24 @@ int main(int argc, char *argv[]) {
 			Avatar* player = playerm->players[p];
 			if (args.no_local_player && player->id == playerm->local_id)
 				continue;
-			printf("player id=%u xp=%lu alive=%d\n", static_cast<unsigned>(player->id), player->stats.xp, player->stats.alive ? 1 : 0);
+
+			// P3.11a: mp/level/currency/effects/cooldowns are the fields a connected client's own
+			// mirrored MenuCharacter now renders -- printed here so a headless verification run can
+			// confirm they match without a display. `powers` is server-only diagnostic info, NOT a
+			// value a connected client is guaranteed to match -- stats.powers_list itself isn't
+			// wire-replicated (see PlayerSnapshotEntry's own header comment, net/NetProtocol.h).
+			size_t active_cooldowns = 0;
+			for (size_t j = 0; j < player->power_cooldown_timers.size(); ++j) {
+				// NULL for a reserved-but-unallocated PowerID -- see serverBroadcastSnapshot()'s
+				// own comment on the same array for why this isn't a bug.
+				if (player->power_cooldown_timers[j] && !player->power_cooldown_timers[j]->isEnd())
+					++active_cooldowns;
+			}
+
+			printf("player id=%u xp=%lu level=%d mp=%.1f currency=%d alive=%d effects=%zu powers=%zu cooldowns_active=%zu\n",
+			       static_cast<unsigned>(player->id), player->stats.xp, player->stats.level,
+			       static_cast<double>(player->stats.mp), player->stats.currency, player->stats.alive ? 1 : 0,
+			       player->stats.effects.effect_list.size(), player->stats.powers_list.size(), active_cooldowns);
 		}
 	}
 

@@ -350,6 +350,28 @@ std::string encodePlayerSnapshot(uint32_t tick, const std::vector<PlayerSnapshot
 		writeFloat(out, p.hp);
 		writeFloat(out, p.hp_max);
 		writeU8(out, p.alive ? 1 : 0);
+
+		writeFloat(out, p.mp);
+		writeFloat(out, p.mp_max);
+		writeU32(out, p.xp);
+		writeU32(out, static_cast<uint32_t>(p.level));
+		writeU32(out, static_cast<uint32_t>(p.currency));
+
+		writeU16(out, static_cast<uint16_t>(p.effects.size()));
+		for (size_t j = 0; j < p.effects.size(); ++j) {
+			writeString(out, p.effects[j].id);
+			writeFloat(out, p.effects[j].magnitude);
+			writeU32(out, p.effects[j].ticks_remaining);
+			writeU32(out, p.effects[j].ticks_total);
+		}
+
+		writeU16(out, static_cast<uint16_t>(p.power_cooldown_ticks.size()));
+		for (size_t j = 0; j < p.power_cooldown_ticks.size(); ++j)
+			writeU32(out, p.power_cooldown_ticks[j]);
+
+		writeU16(out, static_cast<uint16_t>(p.power_cast_ticks.size()));
+		for (size_t j = 0; j < p.power_cast_ticks.size(); ++j)
+			writeU32(out, p.power_cast_ticks[j]);
 	}
 	return out;
 }
@@ -381,6 +403,54 @@ bool decodePlayerSnapshot(const std::string& payload, MsgPlayerSnapshot& out) {
 		    || !readU8(payload, offset, alive_byte))
 			return false;
 		p.alive = alive_byte != 0;
+
+		uint32_t xp32, level32, currency32;
+		if (!readFloat(payload, offset, p.mp)
+		    || !readFloat(payload, offset, p.mp_max)
+		    || !readU32(payload, offset, xp32)
+		    || !readU32(payload, offset, level32)
+		    || !readU32(payload, offset, currency32))
+			return false;
+		p.xp = xp32;
+		p.level = static_cast<int32_t>(level32);
+		p.currency = static_cast<int32_t>(currency32);
+
+		uint16_t effect_count;
+		if (!readU16(payload, offset, effect_count))
+			return false;
+		p.effects.clear();
+		for (uint16_t j = 0; j < effect_count; ++j) {
+			PlayerEffectEntry e;
+			if (!readString(payload, offset, e.id)
+			    || !readFloat(payload, offset, e.magnitude)
+			    || !readU32(payload, offset, e.ticks_remaining)
+			    || !readU32(payload, offset, e.ticks_total))
+				return false;
+			p.effects.push_back(e);
+		}
+
+		uint16_t cooldown_count;
+		if (!readU16(payload, offset, cooldown_count))
+			return false;
+		p.power_cooldown_ticks.clear();
+		for (uint16_t j = 0; j < cooldown_count; ++j) {
+			uint32_t v;
+			if (!readU32(payload, offset, v))
+				return false;
+			p.power_cooldown_ticks.push_back(v);
+		}
+
+		uint16_t cast_count;
+		if (!readU16(payload, offset, cast_count))
+			return false;
+		p.power_cast_ticks.clear();
+		for (uint16_t j = 0; j < cast_count; ++j) {
+			uint32_t v;
+			if (!readU32(payload, offset, v))
+				return false;
+			p.power_cast_ticks.push_back(v);
+		}
+
 		out.players.push_back(p);
 	}
 
@@ -673,6 +743,111 @@ bool decodeLootSnapshot(const std::string& payload, MsgLootSnapshot& out) {
 	}
 
 	return true;
+}
+
+MsgPlayerEvent::MsgPlayerEvent()
+	: target(0)
+	, event_type(0)
+	, text()
+	, log_msg_type(0)
+	, pos_x(0.f), pos_y(0.f)
+	, amount(0.f)
+	, is_number(false)
+	, displaytype(0)
+	, source_is_target_itself(false)
+	, sfx_type(0)
+	, chosen_sound(0)
+	, use_pos(false)
+{
+}
+
+std::string encodePlayerEvent(const MsgPlayerEvent& event) {
+	std::string out;
+	writeU8(out, static_cast<uint8_t>(MSG_PLAYER_EVENT));
+	writeU8(out, event.target);
+	writeU8(out, event.event_type);
+
+	switch (event.event_type) {
+		case PLAYER_EVENT_LOG_MESSAGE:
+			writeString(out, event.text);
+			writeU8(out, event.log_msg_type);
+			break;
+		case PLAYER_EVENT_COMBAT_TEXT:
+			writeFloat(out, event.pos_x);
+			writeFloat(out, event.pos_y);
+			writeFloat(out, event.amount);
+			writeU8(out, event.is_number ? 1 : 0);
+			writeString(out, event.text);
+			writeU8(out, event.displaytype);
+			writeU8(out, event.source_is_target_itself ? 1 : 0);
+			break;
+		case PLAYER_EVENT_SOUND:
+			writeU8(out, event.sfx_type);
+			writeU32(out, event.chosen_sound);
+			writeFloat(out, event.pos_x);
+			writeFloat(out, event.pos_y);
+			writeU8(out, event.use_pos ? 1 : 0);
+			break;
+		case PLAYER_EVENT_LEVEL_UP:
+		case PLAYER_EVENT_DEATH:
+		case PLAYER_EVENT_RESPEC:
+			// no payload -- the recipient's own next MSG_PLAYER_SNAPSHOT already carries the new
+			// level/stats this event announces; see this struct's own header comment on why
+			// level-up's log text and sound travel as separate events instead. (RESPEC's own
+			// powers_list/actionbar rebuild isn't wire-replicated at all -- see
+			// PlayerSnapshotEntry's own header comment on the powers_list gap this plan found.)
+			break;
+		default:
+			break;
+	}
+
+	return out;
+}
+
+bool decodePlayerEvent(const std::string& payload, MsgPlayerEvent& out) {
+	size_t offset = 0;
+	uint8_t type;
+	if (!readU8(payload, offset, type) || type != MSG_PLAYER_EVENT)
+		return false;
+
+	if (!readU8(payload, offset, out.target) || !readU8(payload, offset, out.event_type))
+		return false;
+
+	switch (out.event_type) {
+		case PLAYER_EVENT_LOG_MESSAGE:
+			return readString(payload, offset, out.text) && readU8(payload, offset, out.log_msg_type);
+		case PLAYER_EVENT_COMBAT_TEXT: {
+			uint8_t is_number_byte, source_byte;
+			if (!readFloat(payload, offset, out.pos_x)
+			    || !readFloat(payload, offset, out.pos_y)
+			    || !readFloat(payload, offset, out.amount)
+			    || !readU8(payload, offset, is_number_byte)
+			    || !readString(payload, offset, out.text)
+			    || !readU8(payload, offset, out.displaytype)
+			    || !readU8(payload, offset, source_byte))
+				return false;
+			out.is_number = is_number_byte != 0;
+			out.source_is_target_itself = source_byte != 0;
+			return true;
+		}
+		case PLAYER_EVENT_SOUND: {
+			uint8_t use_pos_byte;
+			if (!readU8(payload, offset, out.sfx_type)
+			    || !readU32(payload, offset, out.chosen_sound)
+			    || !readFloat(payload, offset, out.pos_x)
+			    || !readFloat(payload, offset, out.pos_y)
+			    || !readU8(payload, offset, use_pos_byte))
+				return false;
+			out.use_pos = use_pos_byte != 0;
+			return true;
+		}
+		case PLAYER_EVENT_LEVEL_UP:
+		case PLAYER_EVENT_DEATH:
+		case PLAYER_EVENT_RESPEC:
+			return true; // no payload
+		default:
+			return false; // unrecognised event type -- malformed, not a forward-compat case here
+	}
 }
 
 uint8_t peekMessageType(const std::string& payload) {

@@ -232,12 +232,14 @@ uint64_t WorldHash::compute(unsigned long tick) {
 	return h;
 }
 
-// P3.7 (players), P3.9 (entities, appended below the player section). Field set mirrors
+// P3.7 (players), P3.9 (entities, appended below the player section), P3.11a (players extended
+// with mp/xp/level/currency/effects/power cooldown+cast ticks). Field set mirrors
 // Net::PlayerSnapshotEntry/Net::EntitySnapshotEntry exactly (net/NetProtocol.h) and the
 // construction in serverBroadcastSnapshot() (main_server.cpp) / GameStatePlay.cpp's own snapshot
 // build -- so a value that diverges here is, by construction, a value that would also diverge on
-// the wire. Deliberately excludes mp/xp/currency (not in PlayerSnapshotEntry today) and hazards/
-// loot/inventory/campaign entirely -- see WorldHash.h's doc comment on this function for why.
+// the wire. Still excludes hazards/loot/inventory/campaign, and now also stats.powers_list/
+// ActionBarState (see PlayerSnapshotEntry's own header comment for why) -- see WorldHash.h's doc
+// comment on this function for why the rest are excluded.
 uint64_t WorldHash::computeReplicated(unsigned long tick, int exclude_id) {
 	uint64_t h = init();
 
@@ -281,6 +283,49 @@ uint64_t WorldHash::computeReplicated(unsigned long tick, int exclude_id) {
 		h = mixFloat(h, av->stats.hp);
 		h = mixFloat(h, av->stats.get(Stats::HP_MAX));
 		h = mixI32(h, av->stats.alive ? 1 : 0);
+
+		// P3.11a additions below. mp/xp/level/currency are plain scalars, same as hp/hp_max above.
+		h = mixFloat(h, av->stats.mp);
+		h = mixFloat(h, av->stats.get(Stats::MP_MAX));
+		h = mixU64(h, static_cast<uint64_t>(av->stats.xp));
+		h = mixI32(h, av->stats.level);
+		h = mixI32(h, av->stats.currency);
+
+		// Sorted by id: EffectManager::effect_list's own insertion order isn't guaranteed identical
+		// across processes (same "container order isn't a cross-process invariant" reasoning as the
+		// player list itself, just above) -- an unsorted mix here could report a false digest
+		// divergence for two lists holding the identical set of effects in a different order.
+		std::vector<Effect> effects_sorted(av->stats.effects.effect_list);
+		for (size_t i = 1; i < effects_sorted.size(); ++i) {
+			Effect key = effects_sorted[i];
+			size_t j = i;
+			while (j > 0 && effects_sorted[j - 1].id > key.id) {
+				effects_sorted[j] = effects_sorted[j - 1];
+				--j;
+			}
+			effects_sorted[j] = key;
+		}
+		h = mixU64(h, static_cast<uint64_t>(effects_sorted.size()));
+		for (size_t i = 0; i < effects_sorted.size(); ++i) {
+			h = mixString(h, effects_sorted[i].id);
+			h = mixFloat(h, effects_sorted[i].magnitude);
+			h = mixU64(h, static_cast<uint64_t>(effects_sorted[i].timer.getCurrent()));
+		}
+
+		// Indexed by PowerID, not insertion order -- both vectors are sized to the same static,
+		// mod-matched powers->powers.size() on every process, so direct index order is already a
+		// stable cross-process key with no sort needed (unlike effect_list above). NULL for a
+		// reserved-but-unallocated PowerID (see serverBroadcastSnapshot()'s matching comment) --
+		// mixed as 0, same as every other process sees for that same always-NULL index.
+		for (size_t i = 0; i < av->power_cooldown_timers.size(); ++i)
+			h = mixU64(h, av->power_cooldown_timers[i] ? static_cast<uint64_t>(av->power_cooldown_timers[i]->getCurrent()) : 0);
+		for (size_t i = 0; i < av->power_cast_timers.size(); ++i)
+			h = mixU64(h, av->power_cast_timers[i] ? static_cast<uint64_t>(av->power_cast_timers[i]->getCurrent()) : 0);
+
+		// stats.powers_list and ActionBarState's hotkeys are deliberately NOT mixed in here -- see
+		// PlayerSnapshotEntry's own header comment (net/NetProtocol.h) for the MenuPowers
+		// auto-unlock divergence this plan found (a 100% digest mismatch, bisected to exactly this
+		// field) and left as a follow-up rather than fix in this plan's own scope.
 	}
 
 	// P3.9. Field set mirrors Net::EntitySnapshotEntry exactly (net/NetProtocol.h). Sorted by

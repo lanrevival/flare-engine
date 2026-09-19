@@ -55,6 +55,7 @@ namespace Net {
 	struct MsgHazardSnapshot;
 	struct MsgLootSpawn;
 	struct MsgLootSnapshot;
+	struct MsgPlayerEvent;
 }
 
 class ActionData;
@@ -141,6 +142,11 @@ private:
 	void netApplyHazardSnapshot(const Net::MsgHazardSnapshot& snapshot);
 	void netApplyLootSpawn(const Net::MsgLootSpawn& spawn);
 	void netApplyLootSnapshot(const Net::MsgLootSnapshot& snapshot);
+
+	// P3.11a. One-shot events addressed to this client alone -- level-up/death/respec/log
+	// messages/combat text/sound, everything Avatar::logic() used to trigger only for a local hero.
+	// See plans/phase3/P3.11a-player-state-and-events.md.
+	void netApplyPlayerEvent(const Net::MsgPlayerEvent& event);
 
 	// This client's own local avatar always occupies playerm id 0 (playerm->create(0) in the
 	// constructor, unrelated to networking). A dedicated server ALWAYS has its own player 0 too

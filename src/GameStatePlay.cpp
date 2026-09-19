@@ -214,6 +214,10 @@ void GameStatePlay::netSyncPlayers() {
 	bool got_loot_spawn = false;
 	Net::MsgLootSnapshot loot_snap;
 	bool got_loot_snapshot = false;
+	// P3.11a: accumulated across the whole drain, not overwritten -- same reasoning as
+	// MSG_ENTITY_SPAWN's own burst handling above (more than one one-shot event, e.g. two log
+	// messages, can legitimately land in the same local-tick drain).
+	std::vector<Net::MsgPlayerEvent> player_events;
 	while (netmgr->popPacket(&from, &payload)) {
 		uint8_t type = Net::peekMessageType(payload);
 		if (type == Net::MSG_PLAYER_SNAPSHOT && Net::decodePlayerSnapshot(payload, snap))
@@ -260,6 +264,11 @@ void GameStatePlay::netSyncPlayers() {
 		}
 		else if (type == Net::MSG_LOOT_SNAPSHOT && Net::decodeLootSnapshot(payload, loot_snap))
 			got_loot_snapshot = true;
+		else if (type == Net::MSG_PLAYER_EVENT) {
+			Net::MsgPlayerEvent event;
+			if (Net::decodePlayerEvent(payload, event))
+				player_events.push_back(event);
+		}
 		// Any other message type this tick is silently dropped -- nothing else is defined yet.
 	}
 	// Handled before the got_one early return below -- MSG_MAP_SYNC/MSG_ENTITY_*/MSG_HAZARD_*/
@@ -282,6 +291,8 @@ void GameStatePlay::netSyncPlayers() {
 		netApplyHazardSnapshot(hazard_snap);
 	if (got_loot_snapshot)
 		netApplyLootSnapshot(loot_snap);
+	for (size_t i = 0; i < player_events.size(); ++i)
+		netApplyPlayerEvent(player_events[i]);
 	if (!got_one)
 		return;
 
@@ -386,6 +397,51 @@ void GameStatePlay::netApplySnapshotFields(Avatar* av, const Net::PlayerSnapshot
 	av->stats.alive = entry.alive;
 	if (!entry.animation.empty())
 		av->setAnimation(entry.animation);
+
+	// P3.11a: mp/xp/level/currency/effects/cooldowns -- what MenuCharacter (and MenuActionBar's
+	// cooldown wedges) read that only Avatar::logic() (skipped by is_mirror) used to keep current.
+	// See PlayerSnapshotEntry's own header comment for why cooldown/cast
+	// durations aren't sent -- they're derived here instead, from mod data (cooldown) or this same
+	// entry's own animation field (cast, already applied above).
+	av->stats.mp = entry.mp;
+	av->stats.current[Stats::MP_MAX] = entry.mp_max;
+	av->stats.xp = entry.xp;
+	av->stats.level = entry.level;
+	av->stats.currency = entry.currency;
+
+	av->stats.effects.effect_list.clear();
+	for (size_t i = 0; i < entry.effects.size(); ++i) {
+		Effect e;
+		e.id = entry.effects[i].id;
+		e.magnitude = entry.effects[i].magnitude;
+		e.timer.setDuration(entry.effects[i].ticks_total);
+		e.timer.setCurrent(entry.effects[i].ticks_remaining);
+		av->stats.effects.effect_list.push_back(e);
+	}
+
+	// av->power_cooldown_timers[i]/power_cast_timers[i] are NULL for any PowerID Avatar's own
+	// constructor found !powers->isValid() for (PowerManager reserves ids in blocks, so plenty are
+	// unallocated by design -- see serverBroadcastSnapshot()'s matching comment). entry's own
+	// arrays already carry 0 at those same indices (index == PowerID alignment, preserved on both
+	// ends), so skipping a NULL slot here loses nothing.
+	unsigned cast_duration = av->activeAnimation ? av->activeAnimation->getDuration() : 0;
+	for (size_t i = 0; i < entry.power_cooldown_ticks.size() && i < av->power_cooldown_timers.size(); ++i) {
+		if (av->power_cooldown_timers[i]) {
+			PowerID pid = static_cast<PowerID>(i);
+			unsigned cooldown_duration = powers->isValid(pid) ? static_cast<unsigned>(powers->powers[pid]->cooldown) : 0;
+			av->power_cooldown_timers[i]->setDuration(cooldown_duration);
+			av->power_cooldown_timers[i]->setCurrent(entry.power_cooldown_ticks[i]);
+		}
+
+		if (av->power_cast_timers[i] && i < entry.power_cast_ticks.size() && i < av->power_cast_timers.size()) {
+			av->power_cast_timers[i]->setDuration(cast_duration);
+			av->power_cast_timers[i]->setCurrent(entry.power_cast_ticks[i]);
+		}
+	}
+
+	// stats.powers_list/ActionBarState hotkeys are deliberately left alone here -- see
+	// PlayerSnapshotEntry's own header comment (net/NetProtocol.h) for the MenuPowers auto-unlock
+	// divergence this plan found and left as a follow-up; they are not part of the wire entry.
 }
 
 // P3.5a. Routes through the exact same intermap-teleport machinery checkTeleport() already runs for
@@ -594,6 +650,55 @@ void GameStatePlay::netApplyLootSnapshot(const Net::MsgLootSnapshot& snapshot) {
 			loot->loot.erase(loot->loot.begin() + i);
 			--i; // erase() shifts everything after it down; re-check this index
 		}
+	}
+}
+
+// P3.11a. Always addressed to this client alone (NetworkManager::sendTo, never broadcast -- see
+// MsgPlayerEvent's own header comment), so unlike a snapshot there is no target-id branch here:
+// every event this function is ever called with is already this client's own.
+void GameStatePlay::netApplyPlayerEvent(const Net::MsgPlayerEvent& event) {
+	switch (event.event_type) {
+		case Net::PLAYER_EVENT_LOG_MESSAGE:
+			// Pushed onto the exact queue checkLog() already drains into menu->hudlog/questlog --
+			// no separate client-side path, so nothing here duplicates that formatting/suppression
+			// logic. A mirror's own player->log_msg is otherwise always empty (Avatar::logic()
+			// never runs locally for it), so there is no ordering conflict with a local push.
+			player->log_msg.push(std::pair<std::string, int>(event.text, static_cast<int>(event.log_msg_type)));
+			break;
+
+		case Net::PLAYER_EVENT_LEVEL_UP: {
+			// Matches Avatar::logic()'s own level-up SimEvent construction exactly (Avatar.cpp) --
+			// the only client-visible effect this event still needs to carry, since the log lines
+			// that used to accompany it already arrive as separate PLAYER_EVENT_LOG_MESSAGEs and the
+			// new level/stat totals ride the next MSG_PLAYER_SNAPSHOT like everything else.
+			SimEvent e(SimEvent::SFX_LEVELUP);
+			e.candidates.push_back(player->sound_levelup);
+			sim_events->push(e);
+			break;
+		}
+
+		case Net::PLAYER_EVENT_DEATH:
+			// Matches GameStatePlay::logic()'s own local-death handling (the show_game_over ->
+			// menu->game_over->visible = true branch) -- a connected client's own avatar never runs
+			// that branch itself (is_mirror skips player->logic(), the only thing that used to set
+			// show_game_over), so without this a connected client never saw its own death at all.
+			menu->game_over->visible = true;
+			break;
+
+		case Net::PLAYER_EVENT_RESPEC:
+			// Nothing to apply locally: the server already rebuilt powers_list/actionbar before
+			// sending this, and the next MSG_PLAYER_SNAPSHOT carries the result like everything else.
+			break;
+
+		case Net::PLAYER_EVENT_COMBAT_TEXT:
+		case Net::PLAYER_EVENT_SOUND:
+			// Not sent by any server code yet -- see plans/phase3/P3.11a-player-state-and-events.md's
+			// Out of scope (combat text/sound network fan-out is a follow-up plan). Declared on the
+			// wire and decodable already so that plan doesn't need another protocol version bump.
+			break;
+
+		default:
+			break;
 	}
 }
 

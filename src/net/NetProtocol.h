@@ -48,9 +48,11 @@ class Mod;
 
 namespace Net {
 
-// Bumped to 3 by P3.10 (hazard/loot replication): four new message types were added, incompatible
-// with a stale binary, same reasoning as the 1->2 bump before it (MsgPlayerSnapshot::tick).
-const uint16_t PROTOCOL_VERSION = 3;
+// Bumped to 4 by P3.11a (full player state and one-shot events): PlayerSnapshotEntry grew several
+// fields and MSG_PLAYER_EVENT was added, both incompatible with a stale binary, same reasoning as
+// the 3->4 bump before it (P3.10's hazard/loot messages) and the 1->2 bump before that
+// (MsgPlayerSnapshot::tick).
+const uint16_t PROTOCOL_VERSION = 4;
 
 enum MessageType {
 	MSG_HELLO = 1,
@@ -65,7 +67,8 @@ enum MessageType {
 	MSG_HAZARD_SPAWN = 10,
 	MSG_HAZARD_SNAPSHOT = 11,
 	MSG_LOOT_SPAWN = 12,
-	MSG_LOOT_SNAPSHOT = 13
+	MSG_LOOT_SNAPSHOT = 13,
+	MSG_PLAYER_EVENT = 14
 };
 
 enum RefusalReason {
@@ -96,9 +99,56 @@ struct MsgSystemMessage {
 	std::vector<MessageArg> args;
 };
 
-// One player's server-computed state for one tick -- P3.4. position/direction/animation/hp/alive
-// are exactly what the server's own Avatar::logic() (run per-player since P3.3) just produced;
-// there is nothing for a receiving client to compute or predict, only apply.
+// P3.11a. One active effect (buff/debuff) on a player, enough for a mirror to reconstruct the
+// EffectManager::effect_list entry MenuCharacter/status icons read. id/magnitude are static-ish
+// per application, so those alone would be enough for cooldowns' own "derive duration client-side"
+// trick -- but unlike a power's cooldown (one fixed duration per PowerID, already loaded from mod
+// data), an effect's total duration varies per source (item, power rank, ...) with nothing on the
+// wire to look it up by, so ticks_total has to travel too. Needed for real, not just tidiness:
+// MenuActiveEffects.cpp's own status-icon shrink overlay reads timer.getCurrent()/getDuration() as
+// a fraction (`:137,194`) -- sending only remaining ticks and reconstructing a Timer with
+// setDuration(remaining) (current==duration==remaining, the same trick that works for cooldowns)
+// would make that ratio permanently 1.0, rendering every buff/debuff icon as freshly applied no
+// matter how close to expiring it actually is.
+struct PlayerEffectEntry {
+	std::string id;
+	float magnitude;
+	uint32_t ticks_remaining;
+	uint32_t ticks_total;
+};
+
+// One player's server-computed state for one tick -- P3.4, extended by P3.11a. position/direction/
+// animation/hp/alive are exactly what the server's own Avatar::logic() (run per-player since P3.3)
+// just produced; there is nothing for a receiving client to compute or predict, only apply.
+//
+// P3.11a added mp/mp_max/xp/level/currency/effects/power cooldown+cast ticks: MenuCharacter reads
+// these directly off a live Avatar, and a mirror never runs Avatar::logic() (the only thing that
+// used to update them), so without these fields it shows whatever stale values the avatar had at
+// creation, forever.
+//
+// Deliberately does NOT include StatBlock::powers_list or ActionBarState's hotkeys, despite both
+// being read by MenuPowers/MenuActionBar and despite an earlier draft of this plan having included
+// them: MenuPowers::logic() -> setUnlockedPowers() (MenuPowers.cpp) unconditionally re-derives and
+// pushes "auto-unlocked" starter/free powers into player->stats.powers_list every tick, on every
+// client (not is_mirror-gated, since nothing routes through a menu server-side to gate) -- a
+// pre-existing behavior that was invisible in single-player (menu and simulation share one process,
+// so there was never anything to disagree with) but is a genuine, deeper gap once powers_list
+// becomes wire data: the dedicated server never runs MenuPowers at all (headless, no menu system),
+// so its own powers_list never receives this auto-grant, and a connected client's own unconditional
+// re-derivation immediately overwrites whatever the server just sent, every tick, with locally
+// invented content the server disagrees with. Found empirically (see this plan's own commit
+// history/Notes) as a 100% WorldHash::computeReplicated() digest divergence once powers_list was
+// wired up. Fixing it needs MenuPowers' auto-unlock logic ported server-side (the same class of fix
+// P2.3b/P3.3 already made for level-up/death/respec) -- out of this plan's scope; see Out of scope.
+//
+// power_cooldown_ticks/power_cast_ticks carry only *remaining* ticks (Timer::getCurrent()), one
+// entry per PowerID, sized to match powers->powers.size() -- never Timer::getDuration(), which the
+// receiving client derives itself instead: cooldown duration from the static, mod-matched
+// Power::cooldown, cast duration from activeAnimation->getDuration() off whichever animation this
+// same entry's own `animation` field already names (see GameStatePlay::netApplySnapshotFields()).
+// Sending duration too would just be re-stating what the client's own already-loaded data implies.
+// A NULL entry (Avatar allocates a Timer* only for a PowerID powers->isValid(), see Avatar.cpp's
+// constructor) is sent/applied/mixed as 0 -- see serverBroadcastSnapshot()'s own comment.
 struct PlayerSnapshotEntry {
 	PlayerID id;
 	float pos_x, pos_y;
@@ -107,6 +157,14 @@ struct PlayerSnapshotEntry {
 	float hp;
 	float hp_max;
 	bool alive;
+	float mp;
+	float mp_max;
+	uint32_t xp;
+	int32_t level;
+	int32_t currency;
+	std::vector<PlayerEffectEntry> effects;
+	std::vector<uint32_t> power_cooldown_ticks;
+	std::vector<uint32_t> power_cast_ticks;
 };
 
 struct MsgPlayerSnapshot {
@@ -243,6 +301,66 @@ struct MsgLootSnapshot {
 	std::vector<LootSnapshotEntry> loot;
 };
 
+// P3.11a. One-shot notification addressed to a single connected player: level-up, death, respec
+// completion, a log message, a combat-text number, or a sound -- everything Avatar::logic() used
+// to trigger only for a local hero, fanned out per-recipient from the server at the exact point
+// each already-existing flag/queue is consumed (see main_server.cpp's own serverLogic() -- this is
+// not a new server-side concept, just a new way of reporting ones that already exist). Sent
+// point-to-point (NetworkManager::sendTo), never broadcast: `target` is who this is for, and no
+// other peer ever receives it.
+enum PlayerEventType {
+	PLAYER_EVENT_LEVEL_UP = 1,
+	PLAYER_EVENT_DEATH = 2,
+	PLAYER_EVENT_RESPEC = 3,
+	PLAYER_EVENT_LOG_MESSAGE = 4,
+	PLAYER_EVENT_COMBAT_TEXT = 5,
+	PLAYER_EVENT_SOUND = 6
+};
+
+struct MsgPlayerEvent {
+	// Zero-initializes every field: callers only ever set the subset that matters for whichever
+	// event_type they're building (see per-field comments below), and encodePlayerEvent() only
+	// ever reads that same subset -- but leaving the rest indeterminate would be a real (if
+	// harmless) uninitialized-read, not just untidy.
+	MsgPlayerEvent();
+
+	PlayerID target;
+	uint8_t event_type; // PlayerEventType
+
+	// PLAYER_EVENT_LOG_MESSAGE (uses `text` alone) and PLAYER_EVENT_COMBAT_TEXT's !is_number case
+	// (uses `text` for a pre-formatted string, e.g. "miss", matching CombatText::addString) share
+	// this one field -- the two event types are never both true, so there is nothing to collide.
+	// Log text is already msg->get()/getv()-resolved server-side, same string Avatar::logMsg()'s
+	// callers already built -- see NetProtocol.h's file header on why this plan doesn't adopt
+	// MsgSystemMessage's key+args reassembly (REFUSED_MOD_MISMATCH already guarantees an identical
+	// msg->get() catalog on both ends, so re-resolving client-side buys nothing). log_msg_type is
+	// PLAYER_EVENT_LOG_MESSAGE-only: Avatar::MSG_NORMAL or Avatar::MSG_UNIQUE (Avatar.h), exactly
+	// what GameStatePlay::checkLog() already expects as its own log_msg queue entries' second field
+	// -- see netApplyPlayerEvent(), which reuses that exact queue/drain rather than duplicating it.
+	std::string text;
+	uint8_t log_msg_type;
+
+	// PLAYER_EVENT_COMBAT_TEXT. is_number selects amount (a floating damage number, matching
+	// CombatText::addFloat) vs `text` above (matching CombatText::addString). displaytype is a
+	// CombatText::MSG_* value (CombatText.h). source_is_target_itself is D25's own filtering input:
+	// true when `target` (the player this event is addressed to) is the one who dealt or received
+	// this damage, resolved server-side before sending so no other player's identity ever needs to
+	// appear in a payload addressed to a third party.
+	float pos_x, pos_y;
+	float amount;
+	bool is_number;
+	uint8_t displaytype;
+	bool source_is_target_itself;
+
+	// PLAYER_EVENT_SOUND. sfx_type is a SimEvent::SFX_* value (SimEvents.h). chosen_sound is the
+	// SoundID the server already rolled from SimEvent::candidates -- every client that hears the
+	// same event hears the same sound, matching D2's determinism intent even though sound itself
+	// doesn't feed the digest. use_pos false means "play without positioning" (e.g. a UI/self cue).
+	uint8_t sfx_type;
+	uint32_t chosen_sound;
+	bool use_pos;
+};
+
 std::string encodeHello(const std::string& display_name, uint32_t mod_hash);
 bool decodeHello(const std::string& payload, MsgHello& out);
 
@@ -281,6 +399,9 @@ bool decodeLootSpawn(const std::string& payload, MsgLootSpawn& out);
 
 std::string encodeLootSnapshot(const std::vector<LootSnapshotEntry>& loot);
 bool decodeLootSnapshot(const std::string& payload, MsgLootSnapshot& out);
+
+std::string encodePlayerEvent(const MsgPlayerEvent& event);
+bool decodePlayerEvent(const std::string& payload, MsgPlayerEvent& out);
 
 // Reads just the message-type byte, without decoding anything else -- callers switch on this
 // before picking a decode*(). Returns 0 (not a valid MessageType) if payload is empty.
