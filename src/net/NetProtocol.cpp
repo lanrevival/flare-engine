@@ -510,6 +510,171 @@ bool decodeEntitySnapshot(const std::string& payload, MsgEntitySnapshot& out) {
 	return true;
 }
 
+std::string encodeHazardSpawn(const std::vector<HazardSpawnEntry>& hazards) {
+	std::string out;
+	writeU8(out, static_cast<uint8_t>(MSG_HAZARD_SPAWN));
+	writeU16(out, static_cast<uint16_t>(hazards.size()));
+	for (size_t i = 0; i < hazards.size(); ++i) {
+		const HazardSpawnEntry& h = hazards[i];
+		writeU32(out, h.net_id);
+		writeString(out, h.animation_name);
+		writeU32(out, h.power_index);
+		writeU8(out, h.owner_id);
+	}
+	return out;
+}
+
+bool decodeHazardSpawn(const std::string& payload, MsgHazardSpawn& out) {
+	size_t offset = 0;
+	uint8_t type;
+	if (!readU8(payload, offset, type) || type != MSG_HAZARD_SPAWN)
+		return false;
+
+	uint16_t count;
+	if (!readU16(payload, offset, count))
+		return false;
+
+	out.hazards.clear();
+	for (uint16_t i = 0; i < count; ++i) {
+		HazardSpawnEntry h;
+		if (!readU32(payload, offset, h.net_id)
+		    || !readString(payload, offset, h.animation_name)
+		    || !readU32(payload, offset, h.power_index)
+		    || !readU8(payload, offset, h.owner_id))
+			return false;
+		out.hazards.push_back(h);
+	}
+
+	return true;
+}
+
+std::string encodeHazardSnapshot(const std::vector<HazardSnapshotEntry>& hazards) {
+	std::string out;
+	writeU8(out, static_cast<uint8_t>(MSG_HAZARD_SNAPSHOT));
+	writeU16(out, static_cast<uint16_t>(hazards.size()));
+	for (size_t i = 0; i < hazards.size(); ++i) {
+		const HazardSnapshotEntry& h = hazards[i];
+		writeU32(out, h.net_id);
+		writeFloat(out, h.pos_x);
+		writeFloat(out, h.pos_y);
+		writeU8(out, h.direction);
+		writeU32(out, static_cast<uint32_t>(h.lifespan));
+		writeU32(out, static_cast<uint32_t>(h.delay_frames));
+	}
+	return out;
+}
+
+bool decodeHazardSnapshot(const std::string& payload, MsgHazardSnapshot& out) {
+	size_t offset = 0;
+	uint8_t type;
+	if (!readU8(payload, offset, type) || type != MSG_HAZARD_SNAPSHOT)
+		return false;
+
+	uint16_t count;
+	if (!readU16(payload, offset, count))
+		return false;
+
+	out.hazards.clear();
+	for (uint16_t i = 0; i < count; ++i) {
+		HazardSnapshotEntry h;
+		uint32_t lifespan32, delay32;
+		if (!readU32(payload, offset, h.net_id)
+		    || !readFloat(payload, offset, h.pos_x)
+		    || !readFloat(payload, offset, h.pos_y)
+		    || !readU8(payload, offset, h.direction)
+		    || !readU32(payload, offset, lifespan32)
+		    || !readU32(payload, offset, delay32))
+			return false;
+		h.lifespan = static_cast<int32_t>(lifespan32);
+		h.delay_frames = static_cast<int32_t>(delay32);
+		out.hazards.push_back(h);
+	}
+
+	return true;
+}
+
+std::string encodeLootSpawn(const std::vector<LootSpawnEntry>& loot) {
+	std::string out;
+	writeU8(out, static_cast<uint8_t>(MSG_LOOT_SPAWN));
+	writeU16(out, static_cast<uint16_t>(loot.size()));
+	for (size_t i = 0; i < loot.size(); ++i) {
+		const LootSpawnEntry& l = loot[i];
+		writeU32(out, l.net_id);
+		writeU32(out, l.item);
+		writeU8(out, l.dropped_by_hero ? 1 : 0);
+	}
+	return out;
+}
+
+bool decodeLootSpawn(const std::string& payload, MsgLootSpawn& out) {
+	size_t offset = 0;
+	uint8_t type;
+	if (!readU8(payload, offset, type) || type != MSG_LOOT_SPAWN)
+		return false;
+
+	uint16_t count;
+	if (!readU16(payload, offset, count))
+		return false;
+
+	out.loot.clear();
+	for (uint16_t i = 0; i < count; ++i) {
+		LootSpawnEntry l;
+		uint8_t dropped_byte;
+		if (!readU32(payload, offset, l.net_id)
+		    || !readU32(payload, offset, l.item)
+		    || !readU8(payload, offset, dropped_byte))
+			return false;
+		l.dropped_by_hero = dropped_byte != 0;
+		out.loot.push_back(l);
+	}
+
+	return true;
+}
+
+std::string encodeLootSnapshot(const std::vector<LootSnapshotEntry>& loot) {
+	std::string out;
+	writeU8(out, static_cast<uint8_t>(MSG_LOOT_SNAPSHOT));
+	writeU16(out, static_cast<uint16_t>(loot.size()));
+	for (size_t i = 0; i < loot.size(); ++i) {
+		const LootSnapshotEntry& l = loot[i];
+		writeU32(out, l.net_id);
+		writeFloat(out, l.pos_x);
+		writeFloat(out, l.pos_y);
+		writeU32(out, static_cast<uint32_t>(l.quantity));
+		writeU8(out, l.on_ground ? 1 : 0);
+	}
+	return out;
+}
+
+bool decodeLootSnapshot(const std::string& payload, MsgLootSnapshot& out) {
+	size_t offset = 0;
+	uint8_t type;
+	if (!readU8(payload, offset, type) || type != MSG_LOOT_SNAPSHOT)
+		return false;
+
+	uint16_t count;
+	if (!readU16(payload, offset, count))
+		return false;
+
+	out.loot.clear();
+	for (uint16_t i = 0; i < count; ++i) {
+		LootSnapshotEntry l;
+		uint32_t quantity32;
+		uint8_t on_ground_byte;
+		if (!readU32(payload, offset, l.net_id)
+		    || !readFloat(payload, offset, l.pos_x)
+		    || !readFloat(payload, offset, l.pos_y)
+		    || !readU32(payload, offset, quantity32)
+		    || !readU8(payload, offset, on_ground_byte))
+			return false;
+		l.quantity = static_cast<int32_t>(quantity32);
+		l.on_ground = on_ground_byte != 0;
+		out.loot.push_back(l);
+	}
+
+	return true;
+}
+
 uint8_t peekMessageType(const std::string& payload) {
 	if (payload.empty())
 		return 0;

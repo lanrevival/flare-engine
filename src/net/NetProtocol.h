@@ -48,10 +48,9 @@ class Mod;
 
 namespace Net {
 
-// Bumped to 2 by the mirror-tick-sync bugfix: MSG_PLAYER_SNAPSHOT gained a leading tick field
-// (MsgPlayerSnapshot::tick's own comment), an incompatible wire-format change -- a stale binary on
-// either end must be refused at handshake, not silently misparse every snapshot after it.
-const uint16_t PROTOCOL_VERSION = 2;
+// Bumped to 3 by P3.10 (hazard/loot replication): four new message types were added, incompatible
+// with a stale binary, same reasoning as the 1->2 bump before it (MsgPlayerSnapshot::tick).
+const uint16_t PROTOCOL_VERSION = 3;
 
 enum MessageType {
 	MSG_HELLO = 1,
@@ -62,7 +61,11 @@ enum MessageType {
 	MSG_PLAYER_SNAPSHOT = 6,
 	MSG_MAP_SYNC = 7,
 	MSG_ENTITY_SPAWN = 8,
-	MSG_ENTITY_SNAPSHOT = 9
+	MSG_ENTITY_SNAPSHOT = 9,
+	MSG_HAZARD_SPAWN = 10,
+	MSG_HAZARD_SNAPSHOT = 11,
+	MSG_LOOT_SPAWN = 12,
+	MSG_LOOT_SNAPSHOT = 13
 };
 
 enum RefusalReason {
@@ -177,6 +180,69 @@ struct MsgEntitySnapshot {
 	std::vector<EntitySnapshotEntry> entities;
 };
 
+// P3.10. No owner (a monster-sourced hazard, or one this scan couldn't attribute) -- PlayerID's
+// own valid range is small (D3: up to 8 players), so 0xFF is a safe sentinel.
+const PlayerID NO_HAZARD_OWNER = 0xFF;
+
+// P3.10. Spawn-time-only fields for a Hazard -- same "spawn once, snapshot every tick" split
+// P3.9 established for entities. animation_name/power_index let a mirror resolve the same
+// visuals the server has (loadAnimation()/powers->powers[power_index]) without sending a full
+// stat dump, the same trust EntitySpawnEntry::type_filename already relies on (mod_hash
+// handshake guarantees matching mod data on both ends).
+struct HazardSpawnEntry {
+	uint32_t net_id;
+	std::string animation_name;
+	uint32_t power_index;
+	PlayerID owner_id;
+};
+
+struct MsgHazardSpawn {
+	std::vector<HazardSpawnEntry> hazards;
+};
+
+// P3.10. Full per-tick dump, same "absence is despawn" contract as MsgEntitySnapshot. delay_frames
+// is included because Hazard::addRenderable() gates rendering on it (delay_frames == 0) -- without
+// it a wound-up trap would render as already-active on every mirror.
+struct HazardSnapshotEntry {
+	uint32_t net_id;
+	float pos_x, pos_y;
+	uint8_t direction;
+	int32_t lifespan;
+	int32_t delay_frames;
+};
+
+struct MsgHazardSnapshot {
+	std::vector<HazardSnapshotEntry> hazards;
+};
+
+// P3.10. Spawn-time-only fields for a Loot. dropped_by_hero gates LootManager's own auto-pickup
+// eligibility check and never changes after creation, so it belongs here rather than in the
+// per-tick snapshot.
+struct LootSpawnEntry {
+	uint32_t net_id;
+	uint32_t item; // ItemID
+	bool dropped_by_hero;
+};
+
+struct MsgLootSpawn {
+	std::vector<LootSpawnEntry> loot;
+};
+
+// P3.10. Full per-tick dump. quantity is here, not spawn-only: LootManager::addLoot()'s
+// same-position merge path changes an existing stack's quantity without creating a new net_id.
+// on_ground lets a mirror know when a flying-loot animation has landed (see
+// GameStatePlay::netApplyLootSnapshot()'s own comment on why this needs local animation advance).
+struct LootSnapshotEntry {
+	uint32_t net_id;
+	float pos_x, pos_y;
+	int32_t quantity;
+	bool on_ground;
+};
+
+struct MsgLootSnapshot {
+	std::vector<LootSnapshotEntry> loot;
+};
+
 std::string encodeHello(const std::string& display_name, uint32_t mod_hash);
 bool decodeHello(const std::string& payload, MsgHello& out);
 
@@ -203,6 +269,18 @@ bool decodeEntitySpawn(const std::string& payload, MsgEntitySpawn& out);
 
 std::string encodeEntitySnapshot(const std::vector<EntitySnapshotEntry>& entities);
 bool decodeEntitySnapshot(const std::string& payload, MsgEntitySnapshot& out);
+
+std::string encodeHazardSpawn(const std::vector<HazardSpawnEntry>& hazards);
+bool decodeHazardSpawn(const std::string& payload, MsgHazardSpawn& out);
+
+std::string encodeHazardSnapshot(const std::vector<HazardSnapshotEntry>& hazards);
+bool decodeHazardSnapshot(const std::string& payload, MsgHazardSnapshot& out);
+
+std::string encodeLootSpawn(const std::vector<LootSpawnEntry>& loot);
+bool decodeLootSpawn(const std::string& payload, MsgLootSpawn& out);
+
+std::string encodeLootSnapshot(const std::vector<LootSnapshotEntry>& loot);
+bool decodeLootSnapshot(const std::string& payload, MsgLootSnapshot& out);
 
 // Reads just the message-type byte, without decoding anything else -- callers switch on this
 // before picking a decode*(). Returns 0 (not a valid MessageType) if payload is empty.

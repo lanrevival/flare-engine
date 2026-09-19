@@ -205,6 +205,15 @@ void GameStatePlay::netSyncPlayers() {
 	bool got_entity_spawn = false;
 	Net::MsgEntitySnapshot entity_snap;
 	bool got_entity_snapshot = false;
+	// P3.10: MSG_HAZARD_SPAWN/MSG_HAZARD_SNAPSHOT/MSG_LOOT_SPAWN/MSG_LOOT_SNAPSHOT, same shape.
+	Net::MsgHazardSpawn hazard_spawn;
+	bool got_hazard_spawn = false;
+	Net::MsgHazardSnapshot hazard_snap;
+	bool got_hazard_snapshot = false;
+	Net::MsgLootSpawn loot_spawn;
+	bool got_loot_spawn = false;
+	Net::MsgLootSnapshot loot_snap;
+	bool got_loot_snapshot = false;
 	while (netmgr->popPacket(&from, &payload)) {
 		uint8_t type = Net::peekMessageType(payload);
 		if (type == Net::MSG_PLAYER_SNAPSHOT && Net::decodePlayerSnapshot(payload, snap))
@@ -231,19 +240,48 @@ void GameStatePlay::netSyncPlayers() {
 		}
 		else if (type == Net::MSG_ENTITY_SNAPSHOT && Net::decodeEntitySnapshot(payload, entity_snap))
 			got_entity_snapshot = true;
+		else if (type == Net::MSG_HAZARD_SPAWN) {
+			// Accumulated across the drain, not overwritten -- same reasoning as MSG_ENTITY_SPAWN
+			// above (P3.9c's own fix, applied here from the start).
+			Net::MsgHazardSpawn burst;
+			if (Net::decodeHazardSpawn(payload, burst)) {
+				hazard_spawn.hazards.insert(hazard_spawn.hazards.end(), burst.hazards.begin(), burst.hazards.end());
+				got_hazard_spawn = true;
+			}
+		}
+		else if (type == Net::MSG_HAZARD_SNAPSHOT && Net::decodeHazardSnapshot(payload, hazard_snap))
+			got_hazard_snapshot = true;
+		else if (type == Net::MSG_LOOT_SPAWN) {
+			Net::MsgLootSpawn burst;
+			if (Net::decodeLootSpawn(payload, burst)) {
+				loot_spawn.loot.insert(loot_spawn.loot.end(), burst.loot.begin(), burst.loot.end());
+				got_loot_spawn = true;
+			}
+		}
+		else if (type == Net::MSG_LOOT_SNAPSHOT && Net::decodeLootSnapshot(payload, loot_snap))
+			got_loot_snapshot = true;
 		// Any other message type this tick is silently dropped -- nothing else is defined yet.
 	}
-	// Handled before the got_one early return below -- MSG_MAP_SYNC/MSG_ENTITY_* can arrive on a
-	// tick with no accompanying MSG_PLAYER_SNAPSHOT if the frames land in separate TCP reads.
-	// Spawn is applied before snapshot: a snapshot entry for a net_id this tick's own spawn just
-	// introduced must find it already created -- see netApplyEntitySnapshot()'s own comment on the
-	// one-tick tolerance for the case where it doesn't.
+	// Handled before the got_one early return below -- MSG_MAP_SYNC/MSG_ENTITY_*/MSG_HAZARD_*/
+	// MSG_LOOT_* can arrive on a tick with no accompanying MSG_PLAYER_SNAPSHOT if the frames land in
+	// separate TCP reads. Spawn is applied before snapshot: a snapshot entry for a net_id this
+	// tick's own spawn just introduced must find it already created -- see
+	// netApplyEntitySnapshot()'s own comment on the one-tick tolerance for the case where it
+	// doesn't.
 	if (got_map_sync)
 		netApplyMapSync(map_sync);
 	if (got_entity_spawn)
 		netApplyEntitySpawn(entity_spawn);
+	if (got_hazard_spawn)
+		netApplyHazardSpawn(hazard_spawn);
+	if (got_loot_spawn)
+		netApplyLootSpawn(loot_spawn);
 	if (got_entity_snapshot)
 		netApplyEntitySnapshot(entity_snap);
+	if (got_hazard_snapshot)
+		netApplyHazardSnapshot(hazard_snap);
+	if (got_loot_snapshot)
+		netApplyLootSnapshot(loot_snap);
 	if (!got_one)
 		return;
 
@@ -429,6 +467,131 @@ void GameStatePlay::netApplyEntitySnapshot(const Net::MsgEntitySnapshot& snapsho
 			e->unloadSounds(); // matches EntityManager::handleNewMap()'s own delete loop
 			delete e;
 			entitym->entities.erase(entitym->entities.begin() + i);
+			--i; // erase() shifts everything after it down; re-check this index
+		}
+	}
+}
+
+// P3.10. Same shape as netApplyEntitySpawn() above. power_index resolves a local Power* the same
+// way type_filename resolves a local prototype for entities -- trusted the same way (mod_hash
+// handshake guarantees matching mod data). src_stats is left NULL: nothing on a mirror ever reads
+// it (HazardManager::logic(), the only reader, never runs on a mirror -- see mirror_mode's own
+// comment).
+void GameStatePlay::netApplyHazardSpawn(const Net::MsgHazardSpawn& spawn) {
+	for (size_t i = 0; i < spawn.hazards.size(); ++i) {
+		const Net::HazardSpawnEntry& entry = spawn.hazards[i];
+		if (hazards->getHazardByNetId(entry.net_id))
+			continue; // already known -- a defensive no-op against a duplicate announce
+
+		Hazard* z = new Hazard(&mapr->collider);
+		z->net_id = entry.net_id;
+		z->power_index = static_cast<PowerID>(entry.power_index);
+		if (powers->isValid(z->power_index))
+			z->power = powers->powers[z->power_index];
+		if (!entry.animation_name.empty())
+			z->loadAnimation(entry.animation_name);
+		hazards->h.push_back(z);
+	}
+}
+
+// P3.10. Full per-tick dump, same "absence is despawn" contract as netApplyEntitySnapshot().
+void GameStatePlay::netApplyHazardSnapshot(const Net::MsgHazardSnapshot& snapshot) {
+	std::vector<uint32_t> seen;
+	for (size_t i = 0; i < snapshot.hazards.size(); ++i) {
+		const Net::HazardSnapshotEntry& entry = snapshot.hazards[i];
+		seen.push_back(entry.net_id);
+
+		Hazard* z = hazards->getHazardByNetId(entry.net_id);
+		if (!z)
+			continue;
+
+		z->pos.x = entry.pos_x;
+		z->pos.y = entry.pos_y;
+		z->direction = entry.direction;
+		z->lifespan = entry.lifespan;
+		z->delay_frames = entry.delay_frames;
+	}
+
+	for (size_t i = 0; i < hazards->h.size(); ++i) {
+		Hazard* z = hazards->h[i];
+		if (!z)
+			continue;
+		if (std::find(seen.begin(), seen.end(), z->net_id) == seen.end()) {
+			delete z;
+			hazards->h.erase(hazards->h.begin() + i);
+			--i; // erase() shifts everything after it down; re-check this index
+		}
+	}
+}
+
+// P3.10. Same shape as netApplyEntitySpawn(). The flying-loot animation is loaded here, once, using
+// the same default-to-last-variant fallback addLoot() uses (LootManager.cpp) when no
+// quantity-matched variant applies -- LootSpawnEntry carries no quantity (it can change later via
+// LootManager::addLoot()'s own same-position merge, so it lives in the snapshot instead), so the
+// quantity-ranged selection addLoot() does isn't reproducible here. Cosmetic only: it can only ever
+// pick a different icon *variant* for the same item, never a different item.
+void GameStatePlay::netApplyLootSpawn(const Net::MsgLootSpawn& spawn) {
+	for (size_t i = 0; i < spawn.loot.size(); ++i) {
+		const Net::LootSpawnEntry& entry = spawn.loot[i];
+		if (loot->getLootByNetId(entry.net_id))
+			continue; // already known -- a defensive no-op against a duplicate announce
+
+		Loot ld;
+		ld.net_id = entry.net_id;
+		ld.stack.item = static_cast<ItemID>(entry.item);
+		ld.dropped_by_hero = entry.dropped_by_hero;
+
+		if (items->isValid(ld.stack.item) && !items->items[ld.stack.item]->loot_animation.empty()) {
+			size_t index = items->items[ld.stack.item]->loot_animation.size() - 1;
+			ld.loadAnimation(items->items[ld.stack.item]->loot_animation[index].name);
+		}
+
+		loot->loot.push_back(ld);
+	}
+}
+
+// P3.10. Full per-tick dump, same "absence is despawn" contract as netApplyEntitySnapshot() --
+// loot->loot is vector<Loot> BY VALUE, so despawn is a plain erase() (Loot's own destructor handles
+// animation/tooltip cleanup), no delete needed.
+//
+// advanceFrame() is called here, once per applied snapshot, for a reason none of the other
+// netApply*Snapshot() functions need: LootManager::addRenders() uses animation->isLastFrame() to
+// choose which render LAYER (z-order relative to the floor) a loot object draws in, not just which
+// frame -- never advancing it would freeze a multi-frame flying-loot animation mid-air, in the
+// wrong z-order, forever. This is not the same as players/entities never calling advanceFrame()
+// when mirrored (a real, separate, pre-existing gap -- see this plan's own Out of scope): that one
+// is purely cosmetic (WorldHash never hashes frame index, only animation name); this one corrupts
+// render order. Driven once per snapshot, not once per local loop iteration, keeps it paced to the
+// server's own tick rate the same way Net::g_last_synced_tick already paces the digest sampler.
+void GameStatePlay::netApplyLootSnapshot(const Net::MsgLootSnapshot& snapshot) {
+	std::vector<uint32_t> seen;
+	for (size_t i = 0; i < snapshot.loot.size(); ++i) {
+		const Net::LootSnapshotEntry& entry = snapshot.loot[i];
+		seen.push_back(entry.net_id);
+
+		Loot* ld = loot->getLootByNetId(entry.net_id);
+		if (!ld)
+			continue;
+
+		ld->pos.x = entry.pos_x;
+		ld->pos.y = entry.pos_y;
+		ld->stack.quantity = entry.quantity;
+
+		// Drive the animation all the way to its last frame, not just until on_ground -- on_ground
+		// flips true a frame early (LootManager::logic() sets it at isSecondLastFrame(), one frame
+		// before isLastFrame()), so gating advanceFrame() on !on_ground would permanently stall the
+		// animation one frame short of isLastFrame(), which is exactly the frame addRenders() checks
+		// for z-order (this function's own header comment). advanceFrame() is idempotent once
+		// isLastFrame() is reached (PLAY_ONCE just re-sets times_played), so calling it every
+		// snapshot is safe.
+		if (ld->animation && !ld->animation->isLastFrame())
+			ld->animation->advanceFrame();
+		ld->on_ground = entry.on_ground;
+	}
+
+	for (size_t i = 0; i < loot->loot.size(); ++i) {
+		if (std::find(seen.begin(), seen.end(), loot->loot[i].net_id) == seen.end()) {
+			loot->loot.erase(loot->loot.begin() + i);
 			--i; // erase() shifts everything after it down; re-check this index
 		}
 	}
@@ -1318,6 +1481,10 @@ void GameStatePlay::logic() {
 		// comment. Cheap and tick-idempotent to set unconditionally, matching this codebase's
 		// existing pattern for other per-tick flag threading (e.g. Settings::headless).
 		entitym->mirror_mode = is_mirror;
+		// P3.10: same reasoning, for hazards and ground loot -- see HazardManager::mirror_mode's
+		// own comment.
+		hazards->mirror_mode = is_mirror;
+		loot->mirror_mode = is_mirror;
 
 		if (!second_timer.isEnd())
 			second_timer.tick();
@@ -1327,7 +1494,23 @@ void GameStatePlay::logic() {
 		}
 
 		// these actions only occur when the game isn't paused
-		if (player->stats.alive && !is_mirror) checkLoot();
+		//
+		// P3.10: no mirror-side equivalent of checkLoot() -- unlike entity/hazard behavior, ground
+		// loot's only sim-relevant effect (auto-pickup) is already fully server-authoritative and
+		// already fully replicated without any client involvement: main_server.cpp's serverLogic()
+		// calls the sim-relevant subset of checkLoot() (serverCheckLoot(), pre-existing since
+		// P2.3b) for every driven player using THAT player's own server-tracked stats.pos, every
+		// tick, regardless of whether that player is local or a connected client. A mirror peeking
+		// its own (inherently stale, mirrored) loot list and asking the server to pick up on its
+		// behalf would only ever race a check the server was already going to make first, using
+		// fresher data -- confirmed empirically while developing this plan (see its own Notes) by
+		// instrumenting both paths: the server's own serverCheckLoot() always wins. Manual
+		// (click-driven) pickup is the one part of checkLoot() that IS genuinely client-initiated,
+		// but it's out of scope here (no display/mouse in a headless verification session) --
+		// see this plan's own Out of scope.
+		if (player->stats.alive && !is_mirror) {
+			checkLoot();
+		}
 		checkEnemyFocus();
 		checkNPCFocus();
 		if (player->stats.alive) {

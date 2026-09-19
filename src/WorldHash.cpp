@@ -321,6 +321,61 @@ uint64_t WorldHash::computeReplicated(unsigned long tick, int exclude_id) {
 		}
 	}
 
+	// P3.10. Field set mirrors Net::HazardSnapshotEntry exactly. Sorted by net_id, same
+	// cross-process reason as the player/entity sections above.
+	h = mixI32(h, TAG_HAZARDS);
+	if (hazards) {
+		std::vector<Hazard*> hazards_by_net_id;
+		for (size_t i = 0; i < hazards->h.size(); ++i) {
+			if (hazards->h[i])
+				hazards_by_net_id.push_back(hazards->h[i]);
+		}
+		for (size_t i = 1; i < hazards_by_net_id.size(); ++i) {
+			Hazard* key = hazards_by_net_id[i];
+			size_t j = i;
+			while (j > 0 && hazards_by_net_id[j - 1]->net_id > key->net_id) {
+				hazards_by_net_id[j] = hazards_by_net_id[j - 1];
+				--j;
+			}
+			hazards_by_net_id[j] = key;
+		}
+		for (size_t p = 0; p < hazards_by_net_id.size(); ++p) {
+			Hazard* z = hazards_by_net_id[p];
+			h = mixU64(h, static_cast<uint64_t>(z->net_id));
+			h = mixFloat(h, z->pos.x);
+			h = mixFloat(h, z->pos.y);
+			h = mixU64(h, static_cast<uint64_t>(z->direction));
+			h = mixI32(h, z->lifespan);
+			h = mixI32(h, z->delay_frames);
+		}
+	}
+
+	// P3.10. Field set mirrors Net::LootSnapshotEntry exactly. Sorted by net_id, same reason.
+	h = mixI32(h, TAG_LOOT);
+	if (loot) {
+		std::vector<const Loot*> loot_by_net_id;
+		for (size_t i = 0; i < loot->loot.size(); ++i) {
+			loot_by_net_id.push_back(&loot->loot[i]);
+		}
+		for (size_t i = 1; i < loot_by_net_id.size(); ++i) {
+			const Loot* key = loot_by_net_id[i];
+			size_t j = i;
+			while (j > 0 && loot_by_net_id[j - 1]->net_id > key->net_id) {
+				loot_by_net_id[j] = loot_by_net_id[j - 1];
+				--j;
+			}
+			loot_by_net_id[j] = key;
+		}
+		for (size_t p = 0; p < loot_by_net_id.size(); ++p) {
+			const Loot* ld = loot_by_net_id[p];
+			h = mixU64(h, static_cast<uint64_t>(ld->net_id));
+			h = mixFloat(h, ld->pos.x);
+			h = mixFloat(h, ld->pos.y);
+			h = mixI32(h, ld->stack.quantity);
+			h = mixI32(h, ld->on_ground ? 1 : 0);
+		}
+	}
+
 	h = mixI32(h, TAG_END);
 	return h;
 }

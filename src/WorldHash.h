@@ -57,13 +57,15 @@ public:
 	static uint64_t compute(unsigned long tick);
 
 	/** Digest of only the fields the network already replicates: PlayerSnapshotEntry's set
-	 * (id, pos, direction, animation, hp, hp_max, alive) for every player, plus (P3.9)
-	 * EntitySnapshotEntry's set (net_id, pos, direction, cur_state, animation, hp, hp_max, alive,
-	 * corpse) for every non-NPC entity. Hazards/loot/inventory/campaign are not wire-replicated yet
-	 * (P3.10-P3.12), so compute() still cannot be compared between a client and server process --
-	 * this can, once the two processes stop independently simulating (P3.8, D27) and the entity set
-	 * itself stops being independently spawned per process (P3.9). Before that, two processes fed
-	 * the same scripted input can still disagree here by a tick or two of network latency; this is
+	 * (id, pos, direction, animation, hp, hp_max, alive) for every player, (P3.9) EntitySnapshotEntry's
+	 * set (net_id, pos, direction, cur_state, animation, hp, hp_max, alive, corpse) for every non-NPC
+	 * entity, and (P3.10) HazardSnapshotEntry's set (net_id, pos, direction, lifespan, delay_frames)
+	 * for every hazard plus LootSnapshotEntry's set (net_id, pos, quantity, on_ground) for every
+	 * ground loot. Inventory/campaign are not wire-replicated yet (P3.11b/P3.12), so compute() still
+	 * cannot be compared between a client and server process -- this can, once the two processes
+	 * stop independently simulating (P3.8, D27) and the entity/hazard/loot sets themselves stop
+	 * being independently spawned per process (P3.9, P3.10). Before that, two processes fed the same
+	 * scripted input can still disagree here by a tick or two of network latency; this is
 	 * infrastructure for P3.8 onward, not an equality guarantee on its own.
 	 *
 	 * P3.8b: exclude_id, when >= 0, skips the player whose Avatar::id equals it -- used only by
@@ -79,9 +81,11 @@ public:
 	 * own avatar is always playerm index 0 regardless of network id, so raw container order never
 	 * agreed between a server and a client). Entities carry the same cross-process risk in
 	 * principle (a joining client's catch-up spawn burst), so this applies the same fix
-	 * pre-emptively rather than waiting to rediscover it. compute() itself (single-process only,
-	 * used by the replay corpus) is untouched and keeps its own "container order, deliberately
-	 * unsorted" contract -- see this file's own class comment. */
+	 * pre-emptively rather than waiting to rediscover it. P3.10 applies the identical sort to the
+	 * hazard and loot sections it adds, for the same reason (a mirror's own hazards/loot are
+	 * populated in spawn-message-arrival order, not the server's own container order). compute()
+	 * itself (single-process only, used by the replay corpus) is untouched and keeps its own
+	 * "container order, deliberately unsorted" contract -- see this file's own class comment. */
 	static uint64_t computeReplicated(unsigned long tick, int exclude_id = -1);
 
 	/** "0x%016llx" -- the form printed by --hash and stored in golden files. */

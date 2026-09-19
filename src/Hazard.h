@@ -51,6 +51,11 @@ public:
 	bool isDangerousNow();
 	void addRenderable(std::vector<Renderable> &r, std::vector<Renderable> &r_dead);
 
+	// P3.10. Lets a mirror-constructed Hazard (GameStatePlay::netApplyHazardSpawn()) call
+	// loadAnimation() with the same name the server's own hazard is using -- nothing outside this
+	// class needed to read animation_name before replication existed.
+	const std::string& getAnimationName() const { return animation_name; }
+
 	bool active;
 	bool remove_now;
 	bool hit_wall;

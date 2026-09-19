@@ -44,8 +44,22 @@ public:
 	void handleNewMap();
 	void addRenders(std::vector<Renderable> &r, std::vector<Renderable> &r_dead);
 
+	// P3.10. Linear scan -- 'h' is small, same cost class as EntityManager::getEntityByNetId().
+	// Returns NULL if no hazard with this net_id exists.
+	Hazard* getHazardByNetId(uint32_t net_id) const;
+
 	std::vector<Hazard*> h;
 	Entity* last_enemy;
+
+	// P3.10. Set by GameStatePlay::logic() at the same point EntityManager::mirror_mode is set --
+	// see that field's own comment (EntityManager.h) for why handleNewMap() needs an all-or-nothing
+	// guard, not just gated creation. HazardManager's own constructor never calls handleNewMap()
+	// (unlike EntityManager's), so there is no equivalent "runs before this is meaningfully set"
+	// concern here.
+	bool mirror_mode;
+
+	// P3.10. Monotonic, session-unique, 1-based (0 stays checkNewHazards()'s "unassigned" sentinel).
+	uint32_t next_net_id;
 
 	// P2.4 step 0/6 (--dump-damage-events, AC6). Off by default and cost-free when off: the
 	// print is skipped entirely, and dump_tick is otherwise unused. Not a real simulation tick

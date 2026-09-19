@@ -59,8 +59,10 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "FileParser.h"
 #include "FogOfWar.h"
 #include "FontEngine.h"
+#include "Hazard.h"
 #include "HazardManager.h"
 #include "InputState.h"
+#include "Loot.h"
 #include "LootManager.h"
 #include "Map.h"
 #include "MenuActionBar.h"
@@ -759,6 +761,19 @@ static void serverCheckTeleport() {
 		wmap->teleportation = false;
 }
 
+// P3.10. Same scan HazardManager::logic() already does for threat registration
+// (&playerm->players[pi]->stats == hazard->src_stats) -- reused here to attribute a hazard to its
+// owning player for HazardSpawnEntry::owner_id. NO_HAZARD_OWNER for a monster-sourced hazard (or
+// anything this scan can't attribute, e.g. a summon's own attacks); no consumer reads it yet (D25
+// groundwork -- see this plan's own Out of scope).
+static PlayerID resolveHazardOwnerId(const Hazard* z) {
+	for (size_t pi = 0; pi < playerm->players.size(); ++pi) {
+		if (&playerm->players[pi]->stats == z->src_stats)
+			return playerm->players[pi]->id;
+	}
+	return Net::NO_HAZARD_OWNER;
+}
+
 // The sim-relevant subset of GameStatePlay::checkLoot() -- auto-pickup only. Dropped: the
 // menu->isDragging() guard (no UI, never dragging) and the manual click-pickup branch
 // (mapr->cam.pos-based, mouse-only). The caller gates this on the player's own stats.alive,
@@ -965,6 +980,11 @@ static std::map<PlayerID, PlayerCommand> server_net_cmd;
 // on disconnect (serverSyncNetworkPlayers() above) so a rejoining peer gets a fresh full burst.
 static std::map<PlayerID, std::set<uint32_t> > server_announced_entities;
 
+// P3.10. Same per-peer shape and reasoning as server_announced_entities above, one map each for
+// hazards and ground loot.
+static std::map<PlayerID, std::set<uint32_t> > server_announced_hazards;
+static std::map<PlayerID, std::set<uint32_t> > server_announced_loot;
+
 // True for playerm->local_id (this machine's own keyboard) and for any id currently bound to a
 // connected peer. Every other player -- e.g. a --spawn-test-players clone nothing has bound to a
 // real connection -- stays exactly as inert as it always has been (see serverSpawnTestPlayers()'s
@@ -998,6 +1018,8 @@ static void serverSyncNetworkPlayers() {
 	while (netmgr->popDisconnected(&id)) {
 		server_net_players.erase(id);
 		server_announced_entities.erase(id); // P3.9: see that map's own comment
+		server_announced_hazards.erase(id); // P3.10: same reasoning
+		server_announced_loot.erase(id); // P3.10: same reasoning
 		// D26 (P2.5 step 5): frees any in-flight Hazard/summons this player owned. get() guards
 		// against a disconnect racing a provisioning failure (serverProvisionPlayer() returned
 		// NULL for this id -- see popConnected() below), which would otherwise call remove() on an
@@ -1145,6 +1167,107 @@ static void serverBroadcastSnapshot(unsigned long tick, bool no_local_player) {
 	}
 
 	netmgr->broadcast(Net::encodeEntitySnapshot(snapshot_entries));
+
+	// P3.10. Same three-part shape as the entity section above: full-dump snapshot broadcast to
+	// everyone, per-peer catch-up spawn burst for whatever a given peer hasn't been told about yet,
+	// prune stale announced ids. See server_announced_entities' own comment for why per-peer (not
+	// global) matters.
+	std::set<uint32_t> live_hazard_ids;
+	std::vector<Net::HazardSnapshotEntry> hazard_snapshot_entries;
+	for (size_t i = 0; i < hazards->h.size(); ++i) {
+		Hazard* z = hazards->h[i];
+		if (!z)
+			continue;
+
+		live_hazard_ids.insert(z->net_id);
+
+		Net::HazardSnapshotEntry snap;
+		snap.net_id = z->net_id;
+		snap.pos_x = z->pos.x;
+		snap.pos_y = z->pos.y;
+		snap.direction = static_cast<uint8_t>(z->direction);
+		snap.lifespan = z->lifespan;
+		snap.delay_frames = z->delay_frames;
+		hazard_snapshot_entries.push_back(snap);
+	}
+	for (std::set<PlayerID>::const_iterator peer_it = server_net_players.begin(); peer_it != server_net_players.end(); ++peer_it) {
+		PlayerID peer = *peer_it;
+		std::set<uint32_t>& announced = server_announced_hazards[peer];
+
+		std::vector<Net::HazardSpawnEntry> new_spawns;
+		for (size_t i = 0; i < hazards->h.size(); ++i) {
+			Hazard* z = hazards->h[i];
+			if (!z || announced.find(z->net_id) != announced.end())
+				continue;
+
+			Net::HazardSpawnEntry spawn;
+			spawn.net_id = z->net_id;
+			spawn.animation_name = z->getAnimationName();
+			spawn.power_index = static_cast<uint32_t>(z->power_index);
+			spawn.owner_id = resolveHazardOwnerId(z);
+			new_spawns.push_back(spawn);
+			announced.insert(z->net_id);
+		}
+
+		std::vector<uint32_t> stale;
+		for (std::set<uint32_t>::const_iterator id_it = announced.begin(); id_it != announced.end(); ++id_it) {
+			if (live_hazard_ids.find(*id_it) == live_hazard_ids.end())
+				stale.push_back(*id_it);
+		}
+		for (size_t i = 0; i < stale.size(); ++i)
+			announced.erase(stale[i]);
+
+		if (!new_spawns.empty())
+			netmgr->sendTo(peer, Net::encodeHazardSpawn(new_spawns));
+	}
+	netmgr->broadcast(Net::encodeHazardSnapshot(hazard_snapshot_entries));
+
+	// P3.10. Same shape again, for ground loot.
+	std::set<uint32_t> live_loot_ids;
+	std::vector<Net::LootSnapshotEntry> loot_snapshot_entries;
+	for (size_t i = 0; i < loot->loot.size(); ++i) {
+		Loot& ld = loot->loot[i];
+
+		live_loot_ids.insert(ld.net_id);
+
+		Net::LootSnapshotEntry snap;
+		snap.net_id = ld.net_id;
+		snap.pos_x = ld.pos.x;
+		snap.pos_y = ld.pos.y;
+		snap.quantity = ld.stack.quantity;
+		snap.on_ground = ld.on_ground;
+		loot_snapshot_entries.push_back(snap);
+	}
+	for (std::set<PlayerID>::const_iterator peer_it = server_net_players.begin(); peer_it != server_net_players.end(); ++peer_it) {
+		PlayerID peer = *peer_it;
+		std::set<uint32_t>& announced = server_announced_loot[peer];
+
+		std::vector<Net::LootSpawnEntry> new_spawns;
+		for (size_t i = 0; i < loot->loot.size(); ++i) {
+			Loot& ld = loot->loot[i];
+			if (announced.find(ld.net_id) != announced.end())
+				continue;
+
+			Net::LootSpawnEntry spawn;
+			spawn.net_id = ld.net_id;
+			spawn.item = static_cast<uint32_t>(ld.stack.item);
+			spawn.dropped_by_hero = ld.dropped_by_hero;
+			new_spawns.push_back(spawn);
+			announced.insert(ld.net_id);
+		}
+
+		std::vector<uint32_t> stale;
+		for (std::set<uint32_t>::const_iterator id_it = announced.begin(); id_it != announced.end(); ++id_it) {
+			if (live_loot_ids.find(*id_it) == live_loot_ids.end())
+				stale.push_back(*id_it);
+		}
+		for (size_t i = 0; i < stale.size(); ++i)
+			announced.erase(stale[i]);
+
+		if (!new_spawns.empty())
+			netmgr->sendTo(peer, Net::encodeLootSpawn(new_spawns));
+	}
+	netmgr->broadcast(Net::encodeLootSnapshot(loot_snapshot_entries));
 }
 
 // The tick-order-preserving port of GameStatePlay::logic(), replacing gswitch->logic(). See

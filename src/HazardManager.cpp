@@ -44,9 +44,19 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 HazardManager::HazardManager()
 	: last_enemy(NULL)
+	, mirror_mode(false)
+	, next_net_id(1)
 	, dump_damage_events(false)
 	, dump_tick(0)
 {
+}
+
+Hazard* HazardManager::getHazardByNetId(uint32_t net_id) const {
+	for (size_t i = 0; i < h.size(); ++i) {
+		if (h[i]->net_id == net_id)
+			return h[i];
+	}
+	return NULL;
 }
 
 /**
@@ -255,6 +265,11 @@ void HazardManager::checkNewHazards() {
 		Hazard *new_haz = powers->hazards.front();
 		powers->hazards.pop();
 
+		// P3.10. Single choke point for adding to 'h' -- assigns net_id only when the hazard
+		// doesn't already have one, matching EntityManager::addEntity()'s own idiom.
+		if (new_haz->net_id == 0)
+			new_haz->net_id = next_net_id++;
+
 		h.push_back(new_haz);
 	}
 }
@@ -263,6 +278,12 @@ void HazardManager::checkNewHazards() {
  * Reset all hazards and get new collision object
  */
 void HazardManager::handleNewMap() {
+	// P3.10. A mirror's 'h' is populated and depopulated exclusively by
+	// GameStatePlay::netApplyHazardSpawn()/netApplyHazardSnapshot() -- see mirror_mode's own
+	// comment (HazardManager.h) for why this has to be a complete no-op, not just skip creation.
+	if (mirror_mode)
+		return;
+
 	for (unsigned int i = 0; i < h.size(); i++) {
 		delete h[i];
 	}

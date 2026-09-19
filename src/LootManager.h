@@ -64,9 +64,6 @@ private:
 	SoundID sfx_loot;
 	std::string sfx_loot_channel;
 
-	// loot refers to ItemManager indices
-	std::vector<Loot> loot;
-
 	// enemies which should drop loot, but didnt yet.
 	std::vector<class StatBlock*> enemiesDroppingLoot;
 
@@ -123,6 +120,27 @@ public:
 	void parseLoot(std::string &val, EventComponent *e, std::vector<EventComponent> *ec_list);
 
 	void removeFromEnemiesDroppingLoot(const StatBlock* sb);
+
+	// P3.10. Linear scan -- 'loot' is small, same cost class as EntityManager::getEntityByNetId().
+	// Returns NULL if no loot with this net_id exists. The returned pointer is only valid until the
+	// next mutation of 'loot' (it is vector<Loot> BY VALUE, not by pointer, unlike
+	// EntityManager::entities/HazardManager::h) -- use and discard within one function, the same
+	// discipline checkPickup()/checkAutoPickup()/checkNearestPickup() already follow for their own
+	// iterators.
+	Loot* getLootByNetId(uint32_t net_id);
+
+	// P3.10. 'loot' is public (unlike its two sibling managers' collections -- EntityManager::
+	// entities/HazardManager::h were already public for this same reason before this plan) so
+	// GameStatePlay's mirror-apply code (netApplyLootSpawn()/netApplyLootSnapshot()) can push/erase
+	// directly, the same access those functions already have to entitym->entities/hazards->h.
+	std::vector<Loot> loot;
+
+	// P3.10. See HazardManager::mirror_mode's own comment -- identical reasoning and identical
+	// all-or-nothing handleNewMap() guard.
+	bool mirror_mode;
+
+	// P3.10. Monotonic, session-unique, 1-based (0 stays addLoot()'s "unassigned" sentinel).
+	uint32_t next_net_id;
 };
 
 #endif

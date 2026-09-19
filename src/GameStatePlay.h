@@ -51,6 +51,10 @@ namespace Net {
 	struct MsgMapSync;
 	struct MsgEntitySpawn;
 	struct MsgEntitySnapshot;
+	struct MsgHazardSpawn;
+	struct MsgHazardSnapshot;
+	struct MsgLootSpawn;
+	struct MsgLootSnapshot;
 }
 
 class ActionData;
@@ -130,6 +134,13 @@ private:
 	// handling -- writes every named entity's mutable fields, then deletes any non-NPC entity in
 	// entitym->entities NOT named this tick.
 	void netApplyEntitySnapshot(const Net::MsgEntitySnapshot& snapshot);
+
+	// P3.10. Same shape as netApplyEntitySpawn()/netApplyEntitySnapshot() above, for hazards and
+	// ground loot -- see plans/phase3/P3.10-hazard-loot-replication.md.
+	void netApplyHazardSpawn(const Net::MsgHazardSpawn& spawn);
+	void netApplyHazardSnapshot(const Net::MsgHazardSnapshot& snapshot);
+	void netApplyLootSpawn(const Net::MsgLootSpawn& spawn);
+	void netApplyLootSnapshot(const Net::MsgLootSnapshot& snapshot);
 
 	// This client's own local avatar always occupies playerm id 0 (playerm->create(0) in the
 	// constructor, unrelated to networking). A dedicated server ALWAYS has its own player 0 too

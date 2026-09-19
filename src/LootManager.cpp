@@ -61,6 +61,8 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 LootManager::LootManager()
 	: sfx_loot(0)
 	, sfx_loot_channel("loot")
+	, mirror_mode(false)
+	, next_net_id(1)
 {
 	if (!eset->loot.sfx_loot.empty()) {
 		sfx_loot = snd->load(eset->loot.sfx_loot, "LootManager dropping loot");
@@ -99,6 +101,12 @@ void LootManager::loadGraphics() {
 }
 
 void LootManager::handleNewMap() {
+	// P3.10. A mirror's 'loot' is populated and depopulated exclusively by
+	// GameStatePlay::netApplyLootSpawn()/netApplyLootSnapshot() -- see mirror_mode's own comment
+	// (LootManager.h) for why this has to be a complete no-op, not just skip creation.
+	if (mirror_mode)
+		return;
+
 	loot.clear();
 	enemiesDroppingLoot.clear();
 }
@@ -446,8 +454,22 @@ void LootManager::addLoot(ItemStack stack, const FPoint& pos, bool dropped_by_he
 		ld.on_ground = true;
 	}
 
+	// P3.10. Single choke point for adding to 'loot' -- assigns net_id only when the loot doesn't
+	// already have one, matching EntityManager::addEntity()'s own idiom. The merge path above
+	// returns before reaching here, so a merged stack correctly keeps its original net_id.
+	if (ld.net_id == 0)
+		ld.net_id = next_net_id++;
+
 	loot.push_back(ld);
 	sim_events->pushSound(SimEvent::SFX_LOOT, sfx_loot, sfx_loot_channel, pos);
+}
+
+Loot* LootManager::getLootByNetId(uint32_t net_id) {
+	for (size_t i = 0; i < loot.size(); ++i) {
+		if (loot[i].net_id == net_id)
+			return &loot[i];
+	}
+	return NULL;
 }
 
 /**
