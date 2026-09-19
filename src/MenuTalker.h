@@ -27,6 +27,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "CommonIncludes.h"
 #include "Utils.h"
 #include "Widget.h"
+#include "net/NetProtocol.h" // Net::MsgTalkCommand -- pending_commands stores it by value (C++98, no incomplete-type container support)
 
 class Avatar;
 class CampaignManager;
@@ -58,6 +59,10 @@ private:
 	void nextDialog();
 	void setupTabList();
 	void addAction(const std::string& label, int node_id, bool is_vendor);
+
+	// P3.11c: NPCs have no net_id (see Net::MsgTalkCommand's own header comment, net/NetProtocol.h)
+	// -- this is the mirror-side counterpart of that same npcs->npcs index lookup.
+	uint32_t indexOfNpc(NPC* target) const;
 
 	Sprite *portrait;
 	std::string hero_name;
@@ -109,6 +114,20 @@ public:
 	bool npc_from_map;
 
 	Avatar* player;
+
+	// P3.11c: set every tick from GameStatePlay.cpp, same pattern P3.11b established for
+	// EntityManager/HazardManager/LootManager/MenuInventory's own mirror_mode fields. When true,
+	// chooseDialogNode()/nextDialog()/setNPC() send a Net::MsgTalkCommand instead of calling
+	// npc->processEvent()/mutating dialog_node/event_cursor locally -- the server is authoritative
+	// for a connected guest's own conversation state.
+	bool mirror_mode;
+	std::vector<Net::MsgTalkCommand> pending_commands;
+
+	// P3.11c: applies server-authoritative dialog state to this mirror's own rendering --
+	// GameStatePlay::netApplyTalkState()'s only way to reach into MenuTalker. Deliberately never
+	// sends a network command itself (unlike setNPC()/chooseDialogNode()/nextDialog() in
+	// mirror_mode) -- this call IS the network's own answer arriving; sending one back would loop.
+	void applyTalkState(NPC* new_npc, int new_dialog_node, unsigned new_event_cursor);
 };
 
 #endif

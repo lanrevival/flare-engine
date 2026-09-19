@@ -955,6 +955,60 @@ bool decodeInventorySnapshot(const std::string& payload, MsgInventorySnapshot& o
 	return true;
 }
 
+std::string encodeTalkCommand(const MsgTalkCommand& cmd) {
+	std::string out;
+	writeU8(out, static_cast<uint8_t>(MSG_TALK_CMD));
+	writeU8(out, cmd.cmd_type);
+	writeU32(out, cmd.npc_index);
+	writeU32(out, static_cast<uint32_t>(cmd.node_id));
+	return out;
+}
+
+bool decodeTalkCommand(const std::string& payload, MsgTalkCommand& out) {
+	size_t offset = 0;
+	uint8_t type;
+	if (!readU8(payload, offset, type) || type != MSG_TALK_CMD)
+		return false;
+
+	uint32_t node_id32;
+	if (!readU8(payload, offset, out.cmd_type)
+	    || !readU32(payload, offset, out.npc_index)
+	    || !readU32(payload, offset, node_id32))
+		return false;
+	out.node_id = static_cast<int32_t>(node_id32);
+
+	return out.cmd_type == TALK_CMD_START || out.cmd_type == TALK_CMD_CHOOSE
+	    || out.cmd_type == TALK_CMD_ADVANCE || out.cmd_type == TALK_CMD_END;
+}
+
+std::string encodeTalkState(const MsgTalkState& state) {
+	std::string out;
+	writeU8(out, static_cast<uint8_t>(MSG_TALK_STATE));
+	writeU8(out, state.player);
+	writeU32(out, static_cast<uint32_t>(state.npc_index));
+	writeU32(out, static_cast<uint32_t>(state.dialog_node));
+	writeU32(out, state.event_cursor);
+	return out;
+}
+
+bool decodeTalkState(const std::string& payload, MsgTalkState& out) {
+	size_t offset = 0;
+	uint8_t type;
+	if (!readU8(payload, offset, type) || type != MSG_TALK_STATE)
+		return false;
+
+	uint32_t npc_index32, dialog_node32;
+	if (!readU8(payload, offset, out.player)
+	    || !readU32(payload, offset, npc_index32)
+	    || !readU32(payload, offset, dialog_node32)
+	    || !readU32(payload, offset, out.event_cursor))
+		return false;
+	out.npc_index = static_cast<int32_t>(npc_index32);
+	out.dialog_node = static_cast<int32_t>(dialog_node32);
+
+	return true;
+}
+
 uint8_t peekMessageType(const std::string& payload) {
 	if (payload.empty())
 		return 0;

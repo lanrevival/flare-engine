@@ -786,7 +786,7 @@ bool NPC::processDialog(unsigned int dialog_node, unsigned int &event_cursor) {
 	return false;
 }
 
-void NPC::processEvent(unsigned int dialog_node, unsigned int cursor) {
+void NPC::processEvent(unsigned int dialog_node, unsigned int cursor, Avatar* triggered_by) {
 	if (dialog_node >= dialog.size())
 		return;
 
@@ -801,7 +801,7 @@ void NPC::processEvent(unsigned int dialog_node, unsigned int cursor) {
 		cursor++;
 	}
 
-	eventm->executeEvent(ev);
+	eventm->executeEvent(ev, triggered_by);
 }
 
 bool NPC::isDialogType(const int &event_type) {

@@ -35,6 +35,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuVendor.h"
 #include "MessageEngine.h"
 #include "NPC.h"
+#include "NPCManager.h"
 #include "RenderDevice.h"
 #include "SharedResources.h"
 #include "SharedGameResources.h"
@@ -72,6 +73,8 @@ MenuTalker::MenuTalker(Avatar* _player)
 	, closeButton(new WidgetButton(WidgetButton::CLOSE_FILE))
 	, npc_from_map(true)
 	, player(_player)
+	, mirror_mode(false)
+	, pending_commands()
 {
 	// Load config settings
 	FileParser infile;
@@ -152,6 +155,21 @@ void MenuTalker::align() {
 }
 
 void MenuTalker::chooseDialogNode(int request_dialog_node) {
+	if (mirror_mode) {
+		// P3.11c: dialog_node/event_cursor are server-authoritative on a mirror -- send the request
+		// and wait for MSG_TALK_STATE to come back (see applyTalkState()), same one-tick-latency
+		// shape P3.11b established for inventory commands. No local dialog_node/event_cursor write
+		// here at all -- that's exactly the kind of client-side-races-ahead-of-server mutation
+		// P3.11b's own version-counter bug taught this project to avoid.
+		Net::MsgTalkCommand cmd;
+		cmd.cmd_type = Net::TALK_CMD_CHOOSE;
+		cmd.npc_index = 0;
+		cmd.node_id = request_dialog_node;
+		pending_commands.push_back(cmd);
+		first_interaction = false;
+		return;
+	}
+
 	event_cursor = 0;
 
 	if(request_dialog_node == -1) {
@@ -446,6 +464,17 @@ void MenuTalker::setNPC(NPC* _npc) {
 	// state -> presentation direction every other move this phase has kept.
 	if (npc && npc != _npc) {
 		npc->stats.in_dialog = false;
+
+		// P3.11c: closing a conversation on a mirror -- tell the server. Guarded on the OLD npc
+		// being non-NULL (not on mirror_mode alone) so this fires exactly once per real close, same
+		// as the in_dialog write just above it.
+		if (mirror_mode && _npc == NULL) {
+			Net::MsgTalkCommand cmd;
+			cmd.cmd_type = Net::TALK_CMD_END;
+			cmd.npc_index = 0;
+			cmd.node_id = 0;
+			pending_commands.push_back(cmd);
+		}
 	}
 
 	npc = _npc;
@@ -459,6 +488,52 @@ void MenuTalker::setNPC(NPC* _npc) {
 
 	npc->stats.in_dialog = true;
 	visible = true;
+
+	// P3.11c: starting a conversation with a new NPC on a mirror -- tell the server which one.
+	// Safe to still run the two field writes above unmodified: unlike chooseDialogNode()/
+	// nextDialog(), setNPC() never calls npc->processEvent()/processDialog() itself, so there is
+	// nothing here that needs gating away, only a command to add.
+	if (mirror_mode) {
+		Net::MsgTalkCommand cmd;
+		cmd.cmd_type = Net::TALK_CMD_START;
+		cmd.npc_index = indexOfNpc(_npc);
+		cmd.node_id = 0;
+		pending_commands.push_back(cmd);
+	}
+}
+
+uint32_t MenuTalker::indexOfNpc(NPC* target) const {
+	for (size_t i = 0; i < npcs->npcs.size(); ++i) {
+		if (npcs->npcs[i] == target)
+			return static_cast<uint32_t>(i);
+	}
+	return 0; // defensive fallback -- target always comes from npcs->npcs itself, should never miss
+}
+
+void MenuTalker::applyTalkState(NPC* new_npc, int new_dialog_node, unsigned new_event_cursor) {
+	if (new_npc != npc) {
+		if (npc)
+			npc->stats.in_dialog = false;
+		first_interaction = false;
+	}
+	npc = new_npc;
+
+	if (!npc) {
+		visible = false;
+		tablist.defocus();
+		return;
+	}
+
+	npc->stats.in_dialog = true;
+	visible = true;
+
+	dialog_node = new_dialog_node;
+	event_cursor = new_event_cursor;
+
+	if (dialog_node == -1)
+		createActionBuffer();
+	else
+		createBuffer();
 }
 
 void MenuTalker::createActionButtons(int node_id) {
@@ -532,6 +607,15 @@ void MenuTalker::executeAction(size_t index) {
 }
 
 void MenuTalker::nextDialog() {
+	if (mirror_mode) {
+		Net::MsgTalkCommand cmd;
+		cmd.cmd_type = Net::TALK_CMD_ADVANCE;
+		cmd.npc_index = 0;
+		cmd.node_id = 0;
+		pending_commands.push_back(cmd);
+		return;
+	}
+
 	bool more = false;
 
 	if (dialog_node != -1) {

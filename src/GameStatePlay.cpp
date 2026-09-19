@@ -222,6 +222,10 @@ void GameStatePlay::netSyncPlayers() {
 	// accumulated, since (like snap above) every broadcast is already a full dump, not a delta.
 	Net::MsgInventorySnapshot inv_snap;
 	bool got_inv_snapshot = false;
+	// P3.11c: point-to-point like MSG_PLAYER_EVENT -- accumulated across the whole drain, same
+	// reasoning as player_events above (more than one update, e.g. START immediately followed by a
+	// CHOOSE reply, can legitimately land in the same local-tick drain).
+	std::vector<Net::MsgTalkState> talk_states;
 	while (netmgr->popPacket(&from, &payload)) {
 		uint8_t type = Net::peekMessageType(payload);
 		if (type == Net::MSG_PLAYER_SNAPSHOT && Net::decodePlayerSnapshot(payload, snap))
@@ -275,6 +279,11 @@ void GameStatePlay::netSyncPlayers() {
 		}
 		else if (type == Net::MSG_INVENTORY_SNAPSHOT && Net::decodeInventorySnapshot(payload, inv_snap))
 			got_inv_snapshot = true;
+		else if (type == Net::MSG_TALK_STATE) {
+			Net::MsgTalkState state;
+			if (Net::decodeTalkState(payload, state))
+				talk_states.push_back(state);
+		}
 		// Any other message type this tick is silently dropped -- nothing else is defined yet.
 	}
 	// Handled before the got_one early return below -- MSG_MAP_SYNC/MSG_ENTITY_*/MSG_HAZARD_*/
@@ -299,6 +308,8 @@ void GameStatePlay::netSyncPlayers() {
 		netApplyLootSnapshot(loot_snap);
 	for (size_t i = 0; i < player_events.size(); ++i)
 		netApplyPlayerEvent(player_events[i]);
+	for (size_t i = 0; i < talk_states.size(); ++i)
+		netApplyTalkState(talk_states[i]);
 	if (!got_one)
 		return;
 
@@ -760,6 +771,25 @@ void GameStatePlay::netApplyInventorySnapshot(const Net::MsgInventorySnapshot& s
 		inv->applyEquipment();
 		inv->version = entry.version;
 	}
+}
+
+// P3.11c. Point-to-point (unlike netApplyInventorySnapshot() above) -- state.player names one
+// specific connected player, and this client only ever cares about entries naming its own network
+// id (another player's live conversation is never sent to this client at all, but the guard costs
+// nothing and matches netApplyPlayerEvent()'s own defensive shape). npc_index is resolved against
+// this client's own npcs->npcs -- loaded independently from the same map file the server loaded,
+// mod_hash-guaranteed identical, the same trust EntitySpawnEntry::type_filename already relies on.
+// An out-of-range or NO_NPC index (conversation over, or this client raced ahead of a map change)
+// is handed through as NULL, which MenuTalker::applyTalkState() treats as "close the dialog".
+void GameStatePlay::netApplyTalkState(const Net::MsgTalkState& state) {
+	if (state.player != netmgr->localPlayerID())
+		return;
+
+	NPC* npc = NULL;
+	if (state.npc_index >= 0 && static_cast<size_t>(state.npc_index) < npcs->npcs.size())
+		npc = npcs->npcs[static_cast<size_t>(state.npc_index)];
+
+	menu->talker->applyTalkState(npc, state.dialog_node, state.event_cursor);
 }
 
 // P3.8b. This is a C++98 codebase (CMakeLists.txt: -std=c++98), so no std::to_string -- matches
@@ -1652,6 +1682,8 @@ void GameStatePlay::logic() {
 		loot->mirror_mode = is_mirror;
 		// P3.11b: same reasoning, for MenuInventory's own drag-and-drop/right-click mutations.
 		menu->inv->mirror_mode = is_mirror;
+		// P3.11c: same reasoning, for MenuTalker's own dialogue-node selection/advance/close.
+		menu->talker->mirror_mode = is_mirror;
 
 		if (!second_timer.isEnd())
 			second_timer.tick();
@@ -1775,6 +1807,14 @@ void GameStatePlay::logic() {
 			for (size_t i = 0; i < menu->inv->pending_commands.size(); ++i)
 				netmgr->sendToHost(Net::encodeInventoryCommand(menu->inv->pending_commands[i]));
 			menu->inv->pending_commands.clear();
+		}
+
+		// P3.11c: same shape as menu->inv->pending_commands above, for MenuTalker's own
+		// chooseDialogNode()/nextDialog()/setNPC() commands.
+		if (netmgr && netmgr->hasLocalPlayerID()) {
+			for (size_t i = 0; i < menu->talker->pending_commands.size(); ++i)
+				netmgr->sendToHost(Net::encodeTalkCommand(menu->talker->pending_commands[i]));
+			menu->talker->pending_commands.clear();
 		}
 
 		// update camera -- moved out of Avatar::logic() (P1.4d); the camera has no sim

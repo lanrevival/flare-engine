@@ -69,6 +69,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuManager.h"
 #include "MessageEngine.h"
 #include "ModManager.h"
+#include "NPC.h"
 #include "NPCManager.h"
 #include "net/NetProtocol.h"
 #include "net/NetworkManager.h"
@@ -1050,6 +1051,69 @@ static PlayerCommand serverNetCommandFor(PlayerID id) {
 	return PlayerCommand();
 }
 
+// P3.11c. Point-to-point send of one player's current TalkState -- called after every MSG_TALK_CMD
+// this player's own connection sends, unconditionally (simpler than tracking "did anything actually
+// change", and every command legitimately settles the state to *some* value worth confirming, even
+// a no-op one). A no-op for a disconnected/unbound id.
+static void serverTalkSendState(PlayerID id, TalkState* ts) {
+	if (!netmgr || !server_net_players.count(id))
+		return;
+	Net::MsgTalkState state;
+	state.player = id;
+	state.npc_index = ts->npc_index;
+	state.dialog_node = ts->dialog_node;
+	state.event_cursor = ts->event_cursor;
+	netmgr->sendTo(id, Net::encodeTalkState(state));
+}
+
+// P3.11c. Server-side counterpart of MenuTalker::chooseDialogNode() -- same state machine, minus
+// every UI concern (textbox/tablist/button rendering, none of which exist headless). Also skips
+// chooseDialogNode()'s own "auto-select the lone topic on first interaction" nicety: that needs
+// first_interaction, a UI-session concept TalkState has no equivalent of, and it's presentation UX,
+// not simulation -- a guest always sees an explicit topic list, even for a single-topic NPC. See
+// plans/phase3/P3.11c-npc-dialogue.md's Notes.
+static void serverTalkChoose(TalkState* ts, int32_t node_id, Avatar* triggered_by) {
+	if (ts->npc_index == TalkState::NO_NPC || static_cast<size_t>(ts->npc_index) >= npcs->npcs.size())
+		return;
+	NPC* npc = npcs->npcs[static_cast<size_t>(ts->npc_index)];
+	ts->event_cursor = 0;
+
+	if (node_id == -1) {
+		ts->dialog_node = -1;
+		std::vector<int> nodes;
+		npc->getDialogNodes(nodes, !NPC::GET_RESPONSE_NODES);
+		if (nodes.empty() && !npc->checkVendor())
+			ts->npc_index = TalkState::NO_NPC; // no topics at all -- mirrors setNPC(NULL)'s end-dialog path
+		return;
+	}
+
+	ts->dialog_node = node_id;
+	// Matches MenuTalker::chooseDialogNode()'s own call order and cursor threading exactly:
+	// processEvent() reads the cursor BEFORE processDialog() advances it (processDialog() takes
+	// event_cursor by reference and walks it forward to the next dialog boundary or NONE).
+	npc->processEvent(static_cast<unsigned>(node_id), ts->event_cursor, triggered_by);
+	unsigned cursor = ts->event_cursor;
+	if (npc->processDialog(static_cast<unsigned>(node_id), cursor))
+		ts->event_cursor = cursor;
+	else
+		ts->npc_index = TalkState::NO_NPC; // dialog ended
+}
+
+// P3.11c. Server-side counterpart of MenuTalker::nextDialog(), same UI-stripping as
+// serverTalkChoose() above.
+static void serverTalkAdvance(TalkState* ts, Avatar* triggered_by) {
+	if (ts->npc_index == TalkState::NO_NPC || ts->dialog_node == -1
+	    || static_cast<size_t>(ts->npc_index) >= npcs->npcs.size())
+		return;
+	NPC* npc = npcs->npcs[static_cast<size_t>(ts->npc_index)];
+	npc->processEvent(static_cast<unsigned>(ts->dialog_node), ts->event_cursor, triggered_by);
+	unsigned next_cursor = ts->event_cursor + 1;
+	if (npc->processDialog(static_cast<unsigned>(ts->dialog_node), next_cursor))
+		ts->event_cursor = next_cursor;
+	else
+		serverTalkChoose(ts, -1, triggered_by); // no more content -- return to the topic list, or end
+}
+
 // P3.3. --dedicated only (netmgr is NULL otherwise, and this is a no-op). Called first thing in
 // serverLogic(), before anything reads playerm->players -- a newly-connected peer must already be
 // a real player by the time this tick's kind-C loops (loot, title, death penalty, ...) run, and a
@@ -1097,11 +1161,11 @@ static void serverSyncNetworkPlayers() {
 	PlayerID from;
 	std::string payload;
 	while (netmgr->popPacket(&from, &payload)) {
-		// P3.11b: a connected client now sends two message types on this same channel --
-		// MSG_PLAYER_COMMAND (every tick) and MSG_INVENTORY_CMD (on demand, from MenuInventory's
-		// mirror-mode gate). peekMessageType() picks which decode* to try; anything else is
-		// dropped exactly like a malformed PLAYER_COMMAND used to be, same P3.2 fuzz-safety
-		// reasoning (AC4): a bad frame cannot corrupt state, only fail to decode.
+		// P3.11c: a connected client now sends three message types on this same channel --
+		// MSG_PLAYER_COMMAND (every tick), MSG_INVENTORY_CMD (P3.11b, on demand), and MSG_TALK_CMD
+		// (on demand, from MenuTalker's mirror-mode gate). peekMessageType() picks which decode* to
+		// try; anything else is dropped exactly like a malformed PLAYER_COMMAND used to be, same
+		// P3.2 fuzz-safety reasoning (AC4): a bad frame cannot corrupt state, only fail to decode.
 		uint8_t type = Net::peekMessageType(payload);
 		if (type == Net::MSG_INVENTORY_CMD) {
 			Net::MsgInventoryCommand inv_cmd;
@@ -1118,6 +1182,37 @@ static void serverSyncNetworkPlayers() {
 			}
 			else {
 				Utils::logError("main_server: dropped a malformed or unbound INVENTORY_CMD from player id=%u.", static_cast<unsigned>(from));
+			}
+		}
+		else if (type == Net::MSG_TALK_CMD) {
+			Net::MsgTalkCommand talk_cmd;
+			if (Net::decodeTalkCommand(payload, talk_cmd) && server_net_players.count(from)) {
+				TalkState* ts = playerm->talkstateFor(from);
+				Avatar* sender_av = playerm->get(from);
+				if (ts && sender_av) {
+					if (talk_cmd.cmd_type == Net::TALK_CMD_START) {
+						if (talk_cmd.npc_index < npcs->npcs.size()) {
+							ts->npc_index = static_cast<int32_t>(talk_cmd.npc_index);
+							ts->dialog_node = -1;
+							ts->event_cursor = 0;
+						}
+					}
+					else if (talk_cmd.cmd_type == Net::TALK_CMD_CHOOSE) {
+						serverTalkChoose(ts, talk_cmd.node_id, sender_av);
+					}
+					else if (talk_cmd.cmd_type == Net::TALK_CMD_ADVANCE) {
+						serverTalkAdvance(ts, sender_av);
+					}
+					else if (talk_cmd.cmd_type == Net::TALK_CMD_END) {
+						ts->npc_index = TalkState::NO_NPC;
+						ts->dialog_node = -1;
+						ts->event_cursor = 0;
+					}
+					serverTalkSendState(from, ts);
+				}
+			}
+			else {
+				Utils::logError("main_server: dropped a malformed or unbound TALK_CMD from player id=%u.", static_cast<unsigned>(from));
 			}
 		}
 		else {

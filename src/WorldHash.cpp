@@ -351,8 +351,17 @@ uint64_t WorldHash::computeReplicated(unsigned long tick, int exclude_id) {
 	// P3.9. Field set mirrors Net::EntitySnapshotEntry exactly (net/NetProtocol.h). Sorted by
 	// net_id for the same cross-process reason the player section above is -- see this function's
 	// own header comment and WorldHash.h's doc comment. NPCs (stats.npc) are excluded: they are not
-	// wire-replicated yet (P3.11c), same exclusion EntityManager::handleNewMap()'s own delete loop
-	// already applies to entities.
+	// wire-replicated at all, general position/hp/state included -- same exclusion
+	// EntityManager::handleNewMap()'s own delete loop already applies to entities. P3.11c added
+	// per-player TalkState (PlayerManager.h) so a dialogue node's REWARD_ITEM/SET_STATUS/etc. runs
+	// exactly once, server-side, correctly attributed -- it did NOT add general NPC entity
+	// replication (position/hp/animation), which remains this same open gap, unrelated in scope
+	// (NPCManager.h/.cpp are not in that plan's Files in scope). TalkState itself is deliberately
+	// NOT mixed into this digest -- see PlayerInventory's own inventory section below for the
+	// precedent this follows: which dialogue node is currently being rendered is presentation state
+	// two mirrors need not agree on bit-for-bit, only the node's *effects* (items/status/currency),
+	// which already flow through the already-digested channels just above (matches
+	// stats.powers_list/ActionBarState hotkeys' own exclusion reasoning, a few lines up).
 	h = mixI32(h, TAG_ENTITIES);
 	if (entitym) {
 		std::vector<Entity*> entities_by_net_id;

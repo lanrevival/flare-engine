@@ -58,6 +58,7 @@ namespace Net {
 	struct MsgPlayerEvent;
 	struct MsgInventoryCommand;
 	struct MsgInventorySnapshot;
+	struct MsgTalkState;
 }
 
 class ActionData;
@@ -156,6 +157,12 @@ private:
 	// time (netApplySnapshotEntry()'s own loadEquipmentData() call). See plans/phase3/
 	// P3.11b-inventory-mirror-and-commands.md.
 	void netApplyInventorySnapshot(const Net::MsgInventorySnapshot& snapshot);
+
+	// P3.11c. Point-to-point (unlike every other netApply* above, which are broadcasts) -- applies
+	// this client's own server-driven conversation state into menu->talker's rendering, ignoring any
+	// entry not addressed to this client's own network id. See plans/phase3/
+	// P3.11c-npc-dialogue.md.
+	void netApplyTalkState(const Net::MsgTalkState& state);
 
 	// This client's own local avatar always occupies playerm id 0 (playerm->create(0) in the
 	// constructor, unrelated to networking). A dedicated server ALWAYS has its own player 0 too

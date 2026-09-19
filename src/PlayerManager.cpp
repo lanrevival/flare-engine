@@ -27,11 +27,19 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "StatBlock.h"
 #include "Utils.h"
 
+TalkState::TalkState()
+	: npc_index(NO_NPC)
+	, dialog_node(-1)
+	, event_cursor(0)
+{
+}
+
 PlayerManager::PlayerManager()
 	: players()
 	, inventories()
 	, actionbars()
 	, powerbonuses()
+	, talkstates()
 	, local_id(0)
 {
 }
@@ -74,6 +82,7 @@ PlayerID PlayerManager::create(PlayerID id) {
 	PlayerInventory* inventory = new PlayerInventory();
 	ActionBarState* actionbar = new ActionBarState();
 	PowerBonusState* powerbonus = new PowerBonusState();
+	TalkState* talkstate = new TalkState();
 
 	// P2.3b. Wire each object to the sibling(s) its own methods need, so PlayerInventory/
 	// ActionBarState/PowerBonusState never have to guess which player they belong to by reaching
@@ -88,6 +97,7 @@ PlayerID PlayerManager::create(PlayerID id) {
 	inventories.insert(inventories.begin() + static_cast<std::vector<PlayerInventory*>::difference_type>(insert_at), inventory);
 	actionbars.insert(actionbars.begin() + static_cast<std::vector<ActionBarState*>::difference_type>(insert_at), actionbar);
 	powerbonuses.insert(powerbonuses.begin() + static_cast<std::vector<PowerBonusState*>::difference_type>(insert_at), powerbonus);
+	talkstates.insert(talkstates.begin() + static_cast<std::vector<TalkState*>::difference_type>(insert_at), talkstate);
 
 	return id;
 }
@@ -123,11 +133,13 @@ void PlayerManager::remove(PlayerID id) {
 	delete inventories[i];
 	delete actionbars[i];
 	delete powerbonuses[i];
+	delete talkstates[i];
 
 	players.erase(players.begin() + static_cast<std::vector<Avatar*>::difference_type>(i));
 	inventories.erase(inventories.begin() + static_cast<std::vector<PlayerInventory*>::difference_type>(i));
 	actionbars.erase(actionbars.begin() + static_cast<std::vector<ActionBarState*>::difference_type>(i));
 	powerbonuses.erase(powerbonuses.begin() + static_cast<std::vector<PowerBonusState*>::difference_type>(i));
+	talkstates.erase(talkstates.begin() + static_cast<std::vector<TalkState*>::difference_type>(i));
 }
 
 Avatar* PlayerManager::get(PlayerID id) {
@@ -148,6 +160,11 @@ ActionBarState* PlayerManager::actionbarFor(PlayerID id) {
 PowerBonusState* PlayerManager::powerbonusFor(PlayerID id) {
 	size_t i = indexOf(id);
 	return (i == players.size()) ? NULL : powerbonuses[i];
+}
+
+TalkState* PlayerManager::talkstateFor(PlayerID id) {
+	size_t i = indexOf(id);
+	return (i == players.size()) ? NULL : talkstates[i];
 }
 
 Avatar* PlayerManager::local() {

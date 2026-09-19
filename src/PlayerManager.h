@@ -52,6 +52,25 @@ class PowerBonusState;
 // 8 players max (D3) -- keeps the eventual wire format small.
 typedef uint8_t PlayerID;
 
+// P3.11c. Per-player "where am I in a conversation" state -- the same concept PlayerInventory was
+// for equipment/carried items before P3.11b, except no per-player predecessor existed here at all
+// (NPC::stats.in_dialog is one bool ON THE NPC, not per-player -- see this plan's own Why). Owned in
+// a parallel array alongside players/inventories/actionbars/powerbonuses below, not folded onto
+// Avatar itself, matching this class's own established shape.
+class TalkState {
+public:
+	static const int32_t NO_NPC = -1;
+
+	TalkState();
+
+	// Index into NPCManager::npcs (the global `npcs->npcs`), NOT a net_id -- see
+	// Net::MsgTalkCommand's own header comment (net/NetProtocol.h) for why NPCs have no net_id to
+	// look up by. NO_NPC means "not talking to anyone".
+	int32_t npc_index;
+	int32_t dialog_node;   // -1 = topic list, matching MenuTalker::dialog_node's own sentinel
+	unsigned event_cursor; // matches NPC::processEvent()/processDialog()'s own cursor parameter
+};
+
 class PlayerManager {
 public:
 	PlayerManager();
@@ -76,6 +95,7 @@ public:
 	PlayerInventory* inventoryFor(PlayerID id);
 	ActionBarState*  actionbarFor(PlayerID id);
 	PowerBonusState* powerbonusFor(PlayerID id);
+	TalkState*       talkstateFor(PlayerID id);
 
 	/** The client's own player; NULL on a server with no local player, or before setLocal(). */
 	Avatar* local();
@@ -103,14 +123,15 @@ public:
 	/** True if at least one *alive* player is within range of pos. */
 	bool anyAliveWithin(const FPoint& pos, float range);
 
-	// Parallel, kept in lockstep by id: players[i]/inventories[i]/actionbars[i]/powerbonuses[i]
-	// always describe the same player. Sorted by id -- iteration order must stay stable, since
-	// the replay hash walks player state and any consumer that iterates these arrays directly
-	// depends on it too.
+	// Parallel, kept in lockstep by id: players[i]/inventories[i]/actionbars[i]/powerbonuses[i]/
+	// talkstates[i] always describe the same player. Sorted by id -- iteration order must stay
+	// stable, since the replay hash walks player state and any consumer that iterates these arrays
+	// directly depends on it too.
 	std::vector<Avatar*>          players;
 	std::vector<PlayerInventory*> inventories;
 	std::vector<ActionBarState*>  actionbars;
 	std::vector<PowerBonusState*> powerbonuses;
+	std::vector<TalkState*>       talkstates;
 	PlayerID local_id;
 
 private:

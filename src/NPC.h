@@ -27,6 +27,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "Entity.h"
 #include "ItemStorage.h"
 
+class Avatar;
 class EventComponent;
 
 class NPC : public Entity {
@@ -77,7 +78,13 @@ public:
 	void moveMapEvents();
 	bool checkVendor();
 	bool processDialog(unsigned int dialog_node, unsigned int& event_cursor);
-	void processEvent(unsigned int dialog_node, unsigned int cursor);
+
+	// P3.11c: triggered_by defaults to NULL, which EventManager::executeEvent() itself resolves to
+	// playerm->local() -- the pre-P3.11c single-player/host behavior, unchanged for any caller that
+	// doesn't pass it. A connected guest's own dialogue commands pass their own Avatar* instead (see
+	// main_server.cpp's server-side TalkState driving), so a dialogue node's REWARD_ITEM/SET_STATUS/
+	// etc. components attribute to whichever player actually ran that dialogue -- see this plan's Why.
+	void processEvent(unsigned int dialog_node, unsigned int cursor, Avatar* triggered_by = NULL);
 
 	// general info
 	std::string name;

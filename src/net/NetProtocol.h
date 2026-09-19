@@ -48,6 +48,8 @@ class Mod;
 
 namespace Net {
 
+// Bumped to 6 by P3.11c (NPC dialogue as a server-side state machine): MSG_TALK_CMD/MSG_TALK_STATE
+// added, same reasoning as every bump before it.
 // Bumped to 5 by P3.11b (inventory mirror and commands): MSG_INVENTORY_CMD/MSG_INVENTORY_SNAPSHOT
 // added, same reasoning as every bump before it -- a stale binary would misparse the new message
 // types entirely, not just miss new fields.
@@ -55,7 +57,7 @@ namespace Net {
 // fields and MSG_PLAYER_EVENT was added, both incompatible with a stale binary, same reasoning as
 // the 3->4 bump before it (P3.10's hazard/loot messages) and the 1->2 bump before that
 // (MsgPlayerSnapshot::tick).
-const uint16_t PROTOCOL_VERSION = 5;
+const uint16_t PROTOCOL_VERSION = 6;
 
 enum MessageType {
 	MSG_HELLO = 1,
@@ -73,7 +75,9 @@ enum MessageType {
 	MSG_LOOT_SNAPSHOT = 13,
 	MSG_PLAYER_EVENT = 14,
 	MSG_INVENTORY_CMD = 15,
-	MSG_INVENTORY_SNAPSHOT = 16
+	MSG_INVENTORY_SNAPSHOT = 16,
+	MSG_TALK_CMD = 17,
+	MSG_TALK_STATE = 18
 };
 
 enum RefusalReason {
@@ -431,6 +435,53 @@ struct MsgInventorySnapshot {
 	std::vector<InventoryEntry> players;
 };
 
+// P3.11c. Client -> host: drives a connected player's own TalkState (PlayerManager.h) exactly like
+// MSG_INVENTORY_CMD drives their own PlayerInventory -- never any other player's.
+//
+// npc_index identifies the target NPC by its position in NPCManager::npcs, NOT by net_id: NPCs are
+// never given one (grep -rn "net_id" src/NPC.cpp src/NPCManager.cpp returns nothing -- EntityManager
+// never manages them at all), so the entitym->getEntityByNetId()-style lookup an earlier draft of
+// this plan assumed (matching P3.9's own convention for ordinary entities) does not apply here. An
+// index into npcs->npcs is what every other NPC-identifying call site in this codebase already uses
+// instead (EventComponent::NPC_ID's own ec.data[0].Int, GameStatePlay::npc_id/mapr->npc_id) --
+// npcs->npcs is rebuilt deterministically from the same map file's wmap->map_npcs on every process
+// (host and every connected client alike, same mod_hash-guaranteed-identical-data trust
+// EntitySpawnEntry::type_filename already relies on), so its index is already a stable,
+// cross-process identifier with nothing new to invent.
+enum TalkCommandType {
+	TALK_CMD_START = 1,   // begin/resume talking to npc_index -- resets to the topic list, matching
+	                      // MenuTalker::setNPC()+chooseDialogNode(-1)'s own combination
+	TALK_CMD_CHOOSE = 2,  // choose node_id (-1 = topic list) -- matches MenuTalker::chooseDialogNode()
+	TALK_CMD_ADVANCE = 3, // step the current dialog_node forward one line -- matches MenuTalker::nextDialog()
+	TALK_CMD_END = 4      // close the conversation -- matches MenuTalker::setNPC(NULL)
+};
+
+struct MsgTalkCommand {
+	uint8_t cmd_type;   // TalkCommandType
+	uint32_t npc_index; // TALK_CMD_START only; ignored on decode for every other cmd_type
+	int32_t node_id;    // TALK_CMD_CHOOSE only; ignored on decode for every other cmd_type
+};
+
+// P3.11c. Host -> the interacting client only (point-to-point via NetworkManager::sendTo, same as
+// MsgPlayerEvent -- another player's live conversation is not this client's business).
+//
+// Deliberately carries ONLY state (which NPC, which node, how far into it), never rendered text or
+// the topic list itself: unlike MsgPlayerEvent's log/combat text (server-resolved strings with no
+// client-side equivalent), a receiving client already has the exact same npc->dialog data this
+// entry refers to, loaded independently from the same map file (mod_hash guarantees it matches) --
+// the same "static per already-loaded data, sending it again would just restate what loading the
+// same file already produces" reasoning EntitySpawnEntry::type_filename's own header comment gives.
+// GameStatePlay::netApplyTalkState() hands (npc, dialog_node, event_cursor) to
+// MenuTalker::applyTalkState(), which rebuilds the on-screen buffer locally exactly the way
+// chooseDialogNode()/nextDialog() already do today, just fed server-derived state instead of
+// deriving it from a local processEvent()/processDialog() call of its own.
+struct MsgTalkState {
+	PlayerID player;      // whose TalkState this is -- a receiving client ignores any entry not its own
+	int32_t npc_index;    // -1 = not talking to anyone (TalkState::NO_NPC)
+	int32_t dialog_node;  // -1 = topic list, matching MenuTalker::dialog_node's own sentinel
+	uint32_t event_cursor;
+};
+
 std::string encodeHello(const std::string& display_name, uint32_t mod_hash);
 bool decodeHello(const std::string& payload, MsgHello& out);
 
@@ -478,6 +529,12 @@ bool decodeInventoryCommand(const std::string& payload, MsgInventoryCommand& out
 
 std::string encodeInventorySnapshot(const std::vector<InventoryEntry>& players);
 bool decodeInventorySnapshot(const std::string& payload, MsgInventorySnapshot& out);
+
+std::string encodeTalkCommand(const MsgTalkCommand& cmd);
+bool decodeTalkCommand(const std::string& payload, MsgTalkCommand& out);
+
+std::string encodeTalkState(const MsgTalkState& state);
+bool decodeTalkState(const std::string& payload, MsgTalkState& out);
 
 // Reads just the message-type byte, without decoding anything else -- callers switch on this
 // before picking a decode*(). Returns 0 (not a valid MessageType) if payload is empty.
