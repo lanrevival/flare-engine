@@ -1097,16 +1097,37 @@ static void serverSyncNetworkPlayers() {
 	PlayerID from;
 	std::string payload;
 	while (netmgr->popPacket(&from, &payload)) {
-		PlayerCommand cmd;
-		if (Net::decodePlayerCommand(payload, cmd)) {
-			server_net_cmd[from] = cmd;
+		// P3.11b: a connected client now sends two message types on this same channel --
+		// MSG_PLAYER_COMMAND (every tick) and MSG_INVENTORY_CMD (on demand, from MenuInventory's
+		// mirror-mode gate). peekMessageType() picks which decode* to try; anything else is
+		// dropped exactly like a malformed PLAYER_COMMAND used to be, same P3.2 fuzz-safety
+		// reasoning (AC4): a bad frame cannot corrupt state, only fail to decode.
+		uint8_t type = Net::peekMessageType(payload);
+		if (type == Net::MSG_INVENTORY_CMD) {
+			Net::MsgInventoryCommand inv_cmd;
+			if (Net::decodeInventoryCommand(payload, inv_cmd) && server_net_players.count(from)) {
+				PlayerInventory* inventory = playerm->inventoryFor(from);
+				if (inventory) {
+					if (inv_cmd.cmd_type == Net::INV_CMD_MOVE) {
+						inventory->moveItem(inv_cmd.src_area, inv_cmd.src_slot, inv_cmd.dst_area, inv_cmd.dst_slot, inv_cmd.quantity);
+					}
+					else if (inv_cmd.cmd_type == Net::INV_CMD_DROP) {
+						inventory->dropItem(inv_cmd.src_area, inv_cmd.src_slot, inv_cmd.quantity);
+					}
+				}
+			}
+			else {
+				Utils::logError("main_server: dropped a malformed or unbound INVENTORY_CMD from player id=%u.", static_cast<unsigned>(from));
+			}
 		}
 		else {
-			// P3.2's own fuzz-safety guarantee (AC4) is what makes this safe to just drop: a
-			// malformed payload cannot corrupt state, only fail to decode. One bad frame is not
-			// grounds to disconnect a peer over -- matches every other decode-failure path in this
-			// codebase.
-			Utils::logError("main_server: dropped a malformed PLAYER_COMMAND from player id=%u.", static_cast<unsigned>(from));
+			PlayerCommand cmd;
+			if (Net::decodePlayerCommand(payload, cmd)) {
+				server_net_cmd[from] = cmd;
+			}
+			else {
+				Utils::logError("main_server: dropped a malformed PLAYER_COMMAND from player id=%u.", static_cast<unsigned>(from));
+			}
 		}
 	}
 }
@@ -1126,10 +1147,37 @@ static void serverBroadcastSnapshot(unsigned long tick, bool no_local_player) {
 		return;
 
 	std::vector<Net::PlayerSnapshotEntry> entries;
+	// P3.11b. Built in the same pass as PlayerSnapshotEntry above (playerm->inventories[i] is
+	// parallel to playerm->players[i], kept in lockstep by id -- see PlayerManager.h) and broadcast
+	// separately below: a guest's own inventory mutations arrive via MSG_INVENTORY_CMD rather than
+	// player->logic(), so nothing else keeps a mirror's copy current.
+	std::vector<Net::InventoryEntry> inv_entries;
 	for (size_t i = 0; i < playerm->players.size(); ++i) {
 		Avatar* av = playerm->players[i];
 		if (no_local_player && av->id == playerm->local_id)
 			continue;
+
+		PlayerInventory* inv = playerm->inventories[i];
+		Net::InventoryEntry inv_entry;
+		inv_entry.id = av->id;
+		inv_entry.version = inv->version;
+		inv_entry.equipment.reserve(inv->MAX_EQUIPPED);
+		for (int s = 0; s < inv->MAX_EQUIPPED; ++s) {
+			Net::InventorySlotEntry slot;
+			slot.item = static_cast<uint32_t>(inv->inventory[PlayerInventory::EQUIPMENT][s].item);
+			slot.quantity = inv->inventory[PlayerInventory::EQUIPMENT][s].quantity;
+			inv_entry.equipment.push_back(slot);
+		}
+		inv_entry.carried.reserve(inv->MAX_CARRIED);
+		for (int s = 0; s < inv->MAX_CARRIED; ++s) {
+			Net::InventorySlotEntry slot;
+			slot.item = static_cast<uint32_t>(inv->inventory[PlayerInventory::CARRIED][s].item);
+			slot.quantity = inv->inventory[PlayerInventory::CARRIED][s].quantity;
+			inv_entry.carried.push_back(slot);
+		}
+		inv_entry.active_equipment_set = inv->active_equipment_set;
+		inv_entries.push_back(inv_entry);
+
 		Net::PlayerSnapshotEntry entry;
 		entry.id = av->id;
 		entry.pos_x = av->stats.pos.x;
@@ -1182,6 +1230,7 @@ static void serverBroadcastSnapshot(unsigned long tick, bool no_local_player) {
 		entries.push_back(entry);
 	}
 	netmgr->broadcast(Net::encodePlayerSnapshot(static_cast<uint32_t>(tick), entries));
+	netmgr->broadcast(Net::encodeInventorySnapshot(inv_entries));
 
 	// P3.9. NPCs (stats.npc) are excluded -- not wire-replicated yet, see P3.11c -- same exclusion
 	// WorldHash::computeReplicated() and EntityManager::handleNewMap()'s own delete loop apply.
@@ -2939,10 +2988,30 @@ int main(int argc, char *argv[]) {
 					++active_cooldowns;
 			}
 
-			printf("player id=%u xp=%lu level=%d mp=%.1f currency=%d alive=%d effects=%zu powers=%zu cooldowns_active=%zu\n",
+			// P3.11b: carried/equipped item counts and active_equipment_set -- diagnostic only,
+			// same "server-only info, not a wire-guaranteed value in itself" caveat as `powers`
+			// above (what IS guaranteed is that a connected client's own mirrored PlayerInventory,
+			// once applied, holds the identical item/quantity per slot -- see
+			// WorldHash::computeReplicated()'s own inventory mixing for the value that's actually
+			// checked).
+			PlayerInventory* inventory = playerm->inventoryFor(player->id);
+			int equipped_count = 0, carried_count = 0;
+			if (inventory) {
+				for (int s = 0; s < inventory->MAX_EQUIPPED; ++s) {
+					if (!inventory->inventory[PlayerInventory::EQUIPMENT][s].empty())
+						++equipped_count;
+				}
+				for (int s = 0; s < inventory->MAX_CARRIED; ++s) {
+					if (!inventory->inventory[PlayerInventory::CARRIED][s].empty())
+						++carried_count;
+				}
+			}
+
+			printf("player id=%u xp=%lu level=%d mp=%.1f currency=%d alive=%d effects=%zu powers=%zu cooldowns_active=%zu equipped=%d carried=%d equip_set=%u\n",
 			       static_cast<unsigned>(player->id), player->stats.xp, player->stats.level,
 			       static_cast<double>(player->stats.mp), player->stats.currency, player->stats.alive ? 1 : 0,
-			       player->stats.effects.effect_list.size(), player->stats.powers_list.size(), active_cooldowns);
+			       player->stats.effects.effect_list.size(), player->stats.powers_list.size(), active_cooldowns,
+			       equipped_count, carried_count, inventory ? inventory->active_equipment_set : 0u);
 		}
 	}
 

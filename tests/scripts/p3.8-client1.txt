@@ -7,4 +7,12 @@
 90 release right
 200 press up
 280 release up
+# P3.11b: equipment-set swap is the one PlayerInventory mutation ScriptedInputState can drive at
+# all (keyboard-bound, config key "equipment_swap" -- see src/InputState.cpp) -- everything else
+# (equip/move/split/drop) is mouse-gesture-driven in MenuInventory with no scriptable equivalent.
+# fantasycore/engine/equipment.txt defines two equipment sets, so this is a real state change:
+# active_equipment_set moves from 1 to 2, checked by tests/run-net.sh via --dump-players'
+# equip_set= field and covered by this scenario's own existing digest-equality check.
+400 press equipment_swap
+410 release equipment_swap
 3550 disconnect

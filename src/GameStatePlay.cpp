@@ -218,6 +218,10 @@ void GameStatePlay::netSyncPlayers() {
 	// MSG_ENTITY_SPAWN's own burst handling above (more than one one-shot event, e.g. two log
 	// messages, can legitimately land in the same local-tick drain).
 	std::vector<Net::MsgPlayerEvent> player_events;
+	// P3.11b: same "just resend everything" shape as MSG_PLAYER_SNAPSHOT -- overwritten, not
+	// accumulated, since (like snap above) every broadcast is already a full dump, not a delta.
+	Net::MsgInventorySnapshot inv_snap;
+	bool got_inv_snapshot = false;
 	while (netmgr->popPacket(&from, &payload)) {
 		uint8_t type = Net::peekMessageType(payload);
 		if (type == Net::MSG_PLAYER_SNAPSHOT && Net::decodePlayerSnapshot(payload, snap))
@@ -269,6 +273,8 @@ void GameStatePlay::netSyncPlayers() {
 			if (Net::decodePlayerEvent(payload, event))
 				player_events.push_back(event);
 		}
+		else if (type == Net::MSG_INVENTORY_SNAPSHOT && Net::decodeInventorySnapshot(payload, inv_snap))
+			got_inv_snapshot = true;
 		// Any other message type this tick is silently dropped -- nothing else is defined yet.
 	}
 	// Handled before the got_one early return below -- MSG_MAP_SYNC/MSG_ENTITY_*/MSG_HAZARD_*/
@@ -319,6 +325,12 @@ void GameStatePlay::netSyncPlayers() {
 		seen.push_back(snap.players[i].id);
 		netApplySnapshotEntry(snap.players[i]);
 	}
+
+	// P3.11b: applied after the loop above, not alongside the other got_*Snapshot applies before
+	// the got_one early return -- a brand-new remote player's PlayerInventory doesn't exist until
+	// netApplySnapshotEntry() (just above) has provisioned it this same tick.
+	if (got_inv_snapshot)
+		netApplyInventorySnapshot(inv_snap);
 
 	// A playerm id below REMOTE_PLAYER_ID_BASE is never one this function provisioned (it's always
 	// exactly {0}, this client's own local avatar) -- only ids at or above the base are candidates
@@ -699,6 +711,54 @@ void GameStatePlay::netApplyPlayerEvent(const Net::MsgPlayerEvent& event) {
 
 		default:
 			break;
+	}
+}
+
+// P3.11b. Every player entry -- including remote players, not just this client's own -- so
+// WorldHash::computeReplicated() can mix identical inventory content on every mirror; the local
+// player's own inventory mirrors too, in spite of MSG_INVENTORY_CMD's mutations already having
+// been applied server-side, for the same "server settles it, client only ever applies" reason
+// netApplySnapshotFields() re-applies position/hp/etc. to the local avatar rather than trusting
+// local state to already agree.
+void GameStatePlay::netApplyInventorySnapshot(const Net::MsgInventorySnapshot& snapshot) {
+	PlayerID local_id = netmgr->localPlayerID();
+	for (size_t i = 0; i < snapshot.players.size(); ++i) {
+		const Net::InventoryEntry& entry = snapshot.players[i];
+		uint8_t playerm_id = (entry.id == local_id) ? playerm->local_id : remotePlayerId(entry.id);
+		PlayerInventory* inv = playerm->inventoryFor(playerm_id);
+		if (!inv)
+			continue; // not yet provisioned locally -- next tick's full dump will catch up
+
+		// P3.11b: applied unconditionally, no version-based staleness guard -- found empirically
+		// (a 100% WorldHash::computeReplicated() digest mismatch in tests/run-net.sh's own combat
+		// scenario) that PlayerInventory::version is ALSO bumped by plenty of GameStatePlay.cpp
+		// call sites that have nothing to do with the network (applyDeathPenalty()'s own per-tick
+		// call site chief among them -- see that function's own comment), so a connected client's
+		// local counter can race ahead of the server's for reasons with no server round-trip at
+		// all, at which point this client would reject every subsequent, genuinely newer broadcast
+		// as "stale" forever. MSG_PLAYER_SNAPSHOT has never had this problem because it never had
+		// this guard -- it just applies whatever the latest decoded packet says, trusting this
+		// codebase's already-ordered, reliable per-connection transport, same as every other
+		// snapshot type. This does the same.
+		for (int s = 0; s < inv->MAX_EQUIPPED && s < static_cast<int>(entry.equipment.size()); ++s) {
+			inv->inventory[PlayerInventory::EQUIPMENT][s].item = static_cast<ItemID>(entry.equipment[s].item);
+			inv->inventory[PlayerInventory::EQUIPMENT][s].quantity = entry.equipment[s].quantity;
+		}
+		for (int s = 0; s < inv->MAX_CARRIED && s < static_cast<int>(entry.carried.size()); ++s) {
+			inv->inventory[PlayerInventory::CARRIED][s].item = static_cast<ItemID>(entry.carried[s].item);
+			inv->inventory[PlayerInventory::CARRIED][s].quantity = entry.carried[s].quantity;
+		}
+		inv->active_equipment_set = entry.active_equipment_set;
+
+		// Recomputes stat bonuses (attack/defense/resistances MenuCharacter shows) from the
+		// equipment content just written above -- nothing else does, on a mirror, since
+		// Avatar::logic() never runs. applyEquipment() bumps PlayerInventory::version itself (see
+		// its own comment) and also calls recomputeCurrency() internally; the explicit assignment
+		// below overwrites version with the server's own authoritative counter regardless, so a
+		// local call here can never make this client's version outrun the server's and start
+		// rejecting genuinely newer snapshots as stale.
+		inv->applyEquipment();
+		inv->version = entry.version;
 	}
 }
 
@@ -1590,6 +1650,8 @@ void GameStatePlay::logic() {
 		// own comment.
 		hazards->mirror_mode = is_mirror;
 		loot->mirror_mode = is_mirror;
+		// P3.11b: same reasoning, for MenuInventory's own drag-and-drop/right-click mutations.
+		menu->inv->mirror_mode = is_mirror;
 
 		if (!second_timer.isEnd())
 			second_timer.tick();
@@ -1664,8 +1726,26 @@ void GameStatePlay::logic() {
 		//                   matters, it will have to be found by hand.
 		//
 		// The lock is claimed here rather than in build(), which is const and claims nothing.
-		if (menu->inv->applyEquipmentSetDelta(player_cmd.equip_set_delta))
+		//
+		// P3.11b: on a mirror this no longer applies locally -- main_server.cpp already calls the
+		// same PlayerInventory::applyEquipmentSetDelta() against the server's own authoritative
+		// copy from this same forwarded player_cmd (see the sendToHost() call below), and the
+		// corrected active_equipment_set now arrives back via MSG_INVENTORY_SNAPSHOT. Applying it
+		// here too, unconditionally, was the exact gap this comment block used to flag ("Phase 3
+		// fills equip_set_delta from a network message and nothing below changes") -- a mirror's
+		// own keypress and the server's own copy of that same keypress mutated two independent
+		// PlayerInventory objects with nothing to reconcile them. The input lock still has to be
+		// claimed locally either way (it gates PlayerCommandBuilder::build(), not simulation state)
+		// -- max_equipment_set is static per-mod data, identical on both ends via the mod_hash
+		// handshake, so reading the mirror's own already-loaded copy is safe without waiting for a
+		// snapshot.
+		if (!is_mirror) {
+			if (menu->inv->applyEquipmentSetDelta(player_cmd.equip_set_delta))
+				inpt->lock[player_cmd.equip_set_delta > 0 ? Input::EQUIPMENT_SWAP : Input::EQUIPMENT_SWAP_PREV] = true;
+		}
+		else if (player_cmd.equip_set_delta != 0 && player_inventory->max_equipment_set > 0) {
 			inpt->lock[player_cmd.equip_set_delta > 0 ? Input::EQUIPMENT_SWAP : Input::EQUIPMENT_SWAP_PREV] = true;
+		}
 
 		if (!is_mirror) {
 			player->logic(player_cmd, player_locks);
@@ -1686,6 +1766,16 @@ void GameStatePlay::logic() {
 		// (nothing above reads or writes it again), so it is safe to serialize here unmodified.
 		if (netmgr && netmgr->hasLocalPlayerID())
 			netmgr->sendToHost(Net::encodePlayerCommand(player_cmd));
+
+		// P3.11b: menu->inv->pending_commands accumulates whatever click()/drop()/activate()
+		// deferred instead of applying locally this tick (mirror_mode's own gate, set just above
+		// alongside entitym/hazards/loot's) -- drained and sent here, same call site and same
+		// "only sent for a real connected client" guard as player_cmd's own forward above.
+		if (netmgr && netmgr->hasLocalPlayerID()) {
+			for (size_t i = 0; i < menu->inv->pending_commands.size(); ++i)
+				netmgr->sendToHost(Net::encodeInventoryCommand(menu->inv->pending_commands[i]));
+			menu->inv->pending_commands.clear();
+		}
 
 		// update camera -- moved out of Avatar::logic() (P1.4d); the camera has no sim
 		// consequence, only mapr->logic()'s later cam.logic() smoothing step needs the target.

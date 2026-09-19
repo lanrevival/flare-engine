@@ -31,6 +31,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 #include "MenuItemStorage.h"
 #include "Utils.h"
 #include "WidgetLabel.h"
+#include "net/NetProtocol.h" // P3.11b: MsgInventoryCommand, stored by value in pending_commands below
 
 class Avatar;
 class GameSlotPreview;
@@ -171,6 +172,20 @@ public:
 	 */
 	MenuItemStorage inventory[2];
 	int drag_prev_src;
+
+	// P3.11b. Set every tick by GameStatePlay::logic() (same pattern as EntityManager::mirror_mode/
+	// HazardManager::mirror_mode/LootManager::mirror_mode), never by this class itself. Gates
+	// click()'s storage removal, itemReturn()'s storage write, drop()'s storage writes, and
+	// activate()'s equip branch: on a mirror those push a command onto pending_commands below
+	// instead of mutating inventory[] -- the server applies the real mutation and the next
+	// MSG_INVENTORY_SNAPSHOT is what actually moves the item. See plans/phase3/
+	// P3.11b-inventory-mirror-and-commands.md.
+	bool mirror_mode;
+
+	// P3.11b. Drained every tick by GameStatePlay::logic() (same call site that already forwards
+	// player_cmd via netmgr->sendToHost()), one Net::encodeInventoryCommand() per entry, then
+	// cleared. Only ever populated when mirror_mode is true.
+	std::vector<Net::MsgInventoryCommand> pending_commands;
 
 	bool changed_equipment;
 

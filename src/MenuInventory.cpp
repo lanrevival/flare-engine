@@ -71,6 +71,8 @@ MenuInventory::MenuInventory(Avatar* _player, PlayerInventory* _player_inventory
 	, preview_enabled(false)
 	, sort_enabled(false)
 	, drag_prev_src(-1)
+	, mirror_mode(false)
+	, pending_commands()
 	, changed_equipment(true)
 	, inv_ctrl(CTRL_NONE)
 	, show_book("")
@@ -517,6 +519,16 @@ ItemStack MenuInventory::click(const Point& position) {
 
 	drag_prev_src = areaOver(position);
 	if (drag_prev_src > -1) {
+		// P3.11b: click_subtracts_item already exists for exactly this "return a copy, mutate
+		// nothing" need (MenuVendor sets it false permanently on its own craft-stock storage, a
+		// different ItemStorage entirely -- toggling it here on inventory[]'s own two storages is
+		// safe). On a mirror, PlayerInventory::inventory only ever changes by applying a versioned
+		// MSG_INVENTORY_SNAPSHOT; a real removal here, with nothing yet sent to the server, would
+		// silently diverge from that invariant with no way for the next snapshot to know to correct
+		// it (its version wouldn't have changed either). The drag-follow visual still works: the
+		// returned ItemStack is a full copy either way, only the source slot's own content is left
+		// untouched until the drop (below) sends a command and the next snapshot confirms it.
+		inventory[drag_prev_src].click_subtracts_item = !mirror_mode;
 		item = inventory[drag_prev_src].click(position);
 
 		if (inpt->usingTouchscreen()) {
@@ -548,6 +560,13 @@ ItemStack MenuInventory::click(const Point& position) {
  * Return dragged item to previous slot
  */
 void MenuInventory::itemReturn(ItemStack stack) {
+	if (mirror_mode) {
+		// click_subtracts_item(false) above already means click() never removed this stack from
+		// anywhere, so there is nothing to put back -- see click()'s own comment.
+		drag_prev_src = -1;
+		return;
+	}
+
 	if (drag_prev_src == -1) {
 		add(stack, CARRIED, ItemStorage::NO_SLOT, !ADD_PLAY_SOUND, !ADD_AUTO_EQUIP);
 	}
@@ -567,6 +586,35 @@ void MenuInventory::itemReturn(ItemStack stack) {
  * and equip items
  */
 bool MenuInventory::drop(const Point& position, ItemStack stack) {
+	if (mirror_mode) {
+		// P3.11b: the decision logic below (merge vs. swap vs. equip-check) is now
+		// PlayerInventory::moveItem()'s job, run server-side against the authoritative copy --
+		// this only has to report the gesture (where it came from, where it landed, how many),
+		// not decide what it means. drag_prev_src/drag_prev_slot are still tracked correctly by
+		// click() even though click() no longer removes anything locally (see its own comment).
+		int area = areaOver(position);
+		int slot = (area >= 0) ? inventory[area].slotOver(position) : -1;
+		int drag_prev_slot = (drag_prev_src != -1) ? inventory[drag_prev_src].drag_prev_slot : -1;
+
+		if (drag_prev_src != -1 && area >= 0 && slot != -1 && !(drag_prev_src == area && drag_prev_slot == slot)) {
+			Net::MsgInventoryCommand cmd;
+			cmd.cmd_type = Net::INV_CMD_MOVE;
+			cmd.src_area = static_cast<uint8_t>(drag_prev_src);
+			cmd.src_slot = drag_prev_slot;
+			cmd.dst_area = static_cast<uint8_t>(area);
+			cmd.dst_slot = slot;
+			cmd.quantity = stack.quantity;
+			pending_commands.push_back(cmd);
+		}
+		// else: dropped outside any slot, dropped back onto its own source slot, or the drag
+		// didn't originate from this menu's own storage (a cross-menu drag -- vendor/stash are
+		// out of scope, see this plan's own Out of scope). Nothing to send; click_subtracts_item
+		// already means there is nothing local to undo either.
+
+		drag_prev_src = -1;
+		return true;
+	}
+
 	items->playSound(stack.item);
 
 	bool success = true;
@@ -805,7 +853,20 @@ void MenuInventory::activate(const Point& position) {
 	else if (player->stats.humanoid && !items->getItemType(items->items[stack.item]->type).name.empty()) {
 		int equip_slot = player_inventory->getEquipSlotFromItem(inventory[CARRIED].data->storage[slot].item, !PlayerInventory::ONLY_EMPTY_SLOTS);
 
-		if (equip_slot >= 0) {
+		if (equip_slot >= 0 && mirror_mode) {
+			// P3.11b: same "report the gesture, let the server decide" reasoning as drop()'s own
+			// mirror_mode branch -- this right-click-to-equip is, structurally, the exact same
+			// move-from-CARRIED-to-EQUIPMENT PlayerInventory::moveItem() already handles.
+			Net::MsgInventoryCommand cmd;
+			cmd.cmd_type = Net::INV_CMD_MOVE;
+			cmd.src_area = static_cast<uint8_t>(CARRIED);
+			cmd.src_slot = slot;
+			cmd.dst_area = static_cast<uint8_t>(EQUIPMENT);
+			cmd.dst_slot = equip_slot;
+			cmd.quantity = stack.quantity;
+			pending_commands.push_back(cmd);
+		}
+		else if (equip_slot >= 0) {
 			ItemStack active_stack = click(position);
 
 			if (inventory[EQUIPMENT][equip_slot].item == active_stack.item) {
@@ -882,6 +943,13 @@ bool MenuInventory::remove(ItemID item, int quantity) {
 }
 
 void MenuInventory::removeFromPrevSlot(int quantity) {
+	// P3.11b: the split flow's own quantity-reduction step (MenuManager.cpp calls this after the
+	// NumberPicker resolves) -- gated for the same reason click()'s click_subtracts_item is: on a
+	// mirror this must stay a no-op so the eventual drop()'s own pending_commands entry (which
+	// already carries the chosen quantity) is the only thing that ever tells the server anything.
+	if (mirror_mode)
+		return;
+
 	if (drag_prev_src > -1 && inventory[drag_prev_src].drag_prev_slot > -1) {
 		int drag_prev_slot = inventory[drag_prev_src].drag_prev_slot;
 		inventory[drag_prev_src].subtract(drag_prev_slot, quantity);

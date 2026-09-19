@@ -48,11 +48,14 @@ class Mod;
 
 namespace Net {
 
+// Bumped to 5 by P3.11b (inventory mirror and commands): MSG_INVENTORY_CMD/MSG_INVENTORY_SNAPSHOT
+// added, same reasoning as every bump before it -- a stale binary would misparse the new message
+// types entirely, not just miss new fields.
 // Bumped to 4 by P3.11a (full player state and one-shot events): PlayerSnapshotEntry grew several
 // fields and MSG_PLAYER_EVENT was added, both incompatible with a stale binary, same reasoning as
 // the 3->4 bump before it (P3.10's hazard/loot messages) and the 1->2 bump before that
 // (MsgPlayerSnapshot::tick).
-const uint16_t PROTOCOL_VERSION = 4;
+const uint16_t PROTOCOL_VERSION = 5;
 
 enum MessageType {
 	MSG_HELLO = 1,
@@ -68,7 +71,9 @@ enum MessageType {
 	MSG_HAZARD_SNAPSHOT = 11,
 	MSG_LOOT_SPAWN = 12,
 	MSG_LOOT_SNAPSHOT = 13,
-	MSG_PLAYER_EVENT = 14
+	MSG_PLAYER_EVENT = 14,
+	MSG_INVENTORY_CMD = 15,
+	MSG_INVENTORY_SNAPSHOT = 16
 };
 
 enum RefusalReason {
@@ -361,6 +366,71 @@ struct MsgPlayerEvent {
 	bool use_pos;
 };
 
+// P3.11b. Client -> host, forwarded exactly like MSG_PLAYER_COMMAND: intent for one inventory
+// mutation, applied by the server against that sender's own PlayerInventory
+// (main_server.cpp's own MSG_INVENTORY_CMD decode looks the sender's id up in server_net_players,
+// same guard serverSendPlayerEvent() already uses). Never applied to any inventory but the
+// sender's own -- there is no field naming which player's inventory this is for, because there is
+// only ever one answer.
+enum InventoryCommandType {
+	INV_CMD_MOVE = 1, // move/swap/merge an item between two (area,slot) pairs; see PlayerInventory::moveItem()
+	INV_CMD_DROP = 2  // remove an item from (src_area,src_slot) and drop it on the ground; see PlayerInventory::dropItem()
+};
+
+struct MsgInventoryCommand {
+	uint8_t cmd_type; // InventoryCommandType
+
+	// INV_CMD_MOVE and INV_CMD_DROP both use src_area/src_slot/quantity; dst_area/dst_slot are
+	// INV_CMD_MOVE-only (PlayerInventory::EQUIPMENT or ::CARRIED) and are ignored on decode for
+	// INV_CMD_DROP, same "declare fields per-type, read only the relevant subset" shape as
+	// MsgPlayerEvent above.
+	uint8_t src_area;
+	int32_t src_slot;
+	uint8_t dst_area;
+	int32_t dst_slot;
+	int32_t quantity;
+};
+
+// P3.11b. One inventory slot on the wire: an ItemID (truncated to uint32_t, same convention
+// LootSpawnEntry::item already uses) plus how many. Extended/rolled item identity is fully
+// described by ItemID alone -- P3.10 already replicates whatever extended-item definitions a
+// guest needs to render a tooltip for dropped loot, so nothing else needs to travel here.
+struct InventorySlotEntry {
+	uint32_t item; // ItemID
+	int32_t quantity;
+};
+
+// P3.11b. Host -> all, broadcast every tick like MsgPlayerSnapshot/MsgLootSnapshot -- this
+// codebase has no delta-encoding infrastructure anywhere, and matching that existing "just resend
+// everything" convention is simpler than inventing versioned point-to-point delivery for one
+// subsystem. version increments on every PlayerInventory mutation (see PlayerInventory.h) --
+// diagnostic only (--dump-players prints it) and not otherwise load-bearing on receipt: an
+// earlier draft of this plan had a receiving client discard an entry whose version was not
+// strictly newer than its own copy's, on paper a defensive no-op given this codebase's already-
+// ordered, reliable per-connection transport. It was not one in practice -- PlayerInventory::
+// version is also bumped by several GameStatePlay.cpp call sites that have nothing to do with the
+// network (applyDeathPenalty()'s own per-tick call site chief among them), so a connected
+// client's own local counter could race ahead of the server's for reasons with no server
+// round-trip at all, then reject every subsequent genuinely-newer broadcast as stale forever --
+// found via a 100% WorldHash::computeReplicated() digest mismatch in tests/run-net.sh's own
+// combat scenario. GameStatePlay::netApplyInventorySnapshot() applies every entry unconditionally
+// instead, same as MSG_PLAYER_SNAPSHOT always has.
+//
+// currency is deliberately NOT included: PlayerSnapshotEntry::currency (P3.11a) already carries
+// it, sourced from the same StatBlock::currency PlayerInventory::recomputeCurrency() keeps in
+// sync -- a second copy here would just be two fields that can disagree.
+struct InventoryEntry {
+	PlayerID id;
+	uint32_t version;
+	std::vector<InventorySlotEntry> equipment;
+	std::vector<InventorySlotEntry> carried;
+	uint32_t active_equipment_set;
+};
+
+struct MsgInventorySnapshot {
+	std::vector<InventoryEntry> players;
+};
+
 std::string encodeHello(const std::string& display_name, uint32_t mod_hash);
 bool decodeHello(const std::string& payload, MsgHello& out);
 
@@ -402,6 +472,12 @@ bool decodeLootSnapshot(const std::string& payload, MsgLootSnapshot& out);
 
 std::string encodePlayerEvent(const MsgPlayerEvent& event);
 bool decodePlayerEvent(const std::string& payload, MsgPlayerEvent& out);
+
+std::string encodeInventoryCommand(const MsgInventoryCommand& cmd);
+bool decodeInventoryCommand(const std::string& payload, MsgInventoryCommand& out);
+
+std::string encodeInventorySnapshot(const std::vector<InventoryEntry>& players);
+bool decodeInventorySnapshot(const std::string& payload, MsgInventorySnapshot& out);
 
 // Reads just the message-type byte, without decoding anything else -- callers switch on this
 // before picking a decode*(). Returns 0 (not a valid MessageType) if payload is empty.

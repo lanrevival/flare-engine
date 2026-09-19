@@ -41,6 +41,7 @@ PlayerInventory::PlayerInventory()
 	: owner(NULL)
 	, actionbar(NULL)
 	, powerbonus(NULL)
+	, version(0)
 	, active_equipment_set(0)
 	, max_equipment_set(0)
 	, currency(0)
@@ -237,6 +238,7 @@ PowerID PlayerInventory::getPowerMod(PowerID meta_power) const {
 }
 
 void PlayerInventory::removeCurrency(int count) {
+	++version;
 	inventory[CARRIED].remove(eset->misc.currency_id, count);
 	recomputeCurrency();
 }
@@ -262,6 +264,8 @@ void PlayerInventory::recomputeCurrency() {
 // ActionBarState.h), so this is not a behaviour choice, just removing a layer that already forwarded
 // here.
 bool PlayerInventory::add(ItemStack stack, int area, int slot, bool play_sound, bool auto_equip) {
+	++version;
+
 	if (stack.empty())
 		return true;
 
@@ -375,6 +379,8 @@ bool PlayerInventory::add(ItemStack stack, int area, int slot, bool play_sound, 
 // targeted, UI interaction state with no meaning outside a live click. MenuInventory::remove() keeps
 // that check and falls through to this for the general case, unchanged in behaviour either way.
 bool PlayerInventory::remove(ItemID item, int quantity) {
+	++version;
+
 	if (!inventory[CARRIED].remove(item, quantity)) {
 		if (!inventory[EQUIPMENT].remove(item, quantity)) {
 			return false;
@@ -409,6 +415,8 @@ void PlayerInventory::addCurrency(int count) {
 // directly. clearBonusLevels() was menu->pow->clearBonusLevels() before P1.3g; it is powerbonus->
 // unconditionally now, same as every other caller in the tree.
 void PlayerInventory::applyEquipment() {
+	++version;
+
 	if (items->items.empty())
 		return;
 
@@ -569,6 +577,8 @@ bool PlayerInventory::applyEquipmentSetDelta(int delta) {
 	if (delta == 0 || max_equipment_set == 0)
 		return false;
 
+	++version;
+
 	if (delta > 0) {
 		if (active_equipment_set < max_equipment_set)
 			active_equipment_set++;
@@ -583,6 +593,109 @@ bool PlayerInventory::applyEquipmentSetDelta(int delta) {
 	}
 
 	applyEquipment();
+	return true;
+}
+
+// P3.11b. The data half of MenuInventory::drop()'s CARRIED/EQUIPMENT branches
+// (src/MenuInventory.cpp) -- merge, swap, plain move, or split, whichever `quantity` calls for.
+// UI-only concerns from the original (sound, GameSlotPreview refresh, action-bar auto-placement,
+// touchscreen tap-to-activate) do not come, same reasoning add()/remove() were split from
+// MenuInventory by in P1.3d-4b-3 -- see PlayerInventory.h's own accounting.
+bool PlayerInventory::moveItem(int src_area, int src_slot, int dst_area, int dst_slot, int quantity) {
+	++version;
+
+	if (src_area < 0 || src_area > CARRIED || dst_area < 0 || dst_area > CARRIED)
+		return false;
+	if (src_slot < 0 || src_slot >= inventory[src_area].getSlotNumber())
+		return false;
+	if (dst_slot < 0 || dst_slot >= inventory[dst_area].getSlotNumber())
+		return false;
+	if (src_area == dst_area && src_slot == dst_slot)
+		return false;
+
+	ItemStack& src_stack = inventory[src_area][src_slot];
+	if (src_stack.empty() || quantity <= 0 || quantity > src_stack.quantity)
+		return false;
+
+	if (dst_area == EQUIPMENT) {
+		// Same checks MenuInventory::drop()'s EQUIPMENT branch already makes: item type matches
+		// this slot, the character meets the item's requirements, is humanoid, and the slot isn't
+		// disabled by another equipped item (e.g. a two-handed weapon disabling the shield slot).
+		if (!items->isValid(src_stack.item) || slot_type[dst_slot] != items->items[src_stack.item]->type
+		    || !items->requirementsMet(&owner->stats, src_stack.item) || !owner->stats.humanoid
+		    || !isEquipSlotEnabled(dst_slot)) {
+			return false;
+		}
+	}
+
+	ItemStack& dst_stack = inventory[dst_area][dst_slot];
+	bool touches_equipment = (src_area == EQUIPMENT || dst_area == EQUIPMENT);
+
+	if (!dst_stack.empty() && dst_stack.item == src_stack.item) {
+		// Merge. Only defined for a full-stack move -- a partial merge into an existing stack has
+		// no equivalent gesture in the original UI either (drop() only ever merges a `stack` that
+		// click() took in its entirety).
+		if (quantity != src_stack.quantity)
+			return false;
+		dst_stack.quantity += src_stack.quantity;
+		src_stack.clear();
+	}
+	else if (!dst_stack.empty()) {
+		// Swap. Same "full stack only" restriction as merge, above.
+		if (quantity != src_stack.quantity)
+			return false;
+		ItemStack tmp = dst_stack;
+		dst_stack = src_stack;
+		src_stack = tmp;
+	}
+	else {
+		// Destination empty: a plain move (quantity == the whole stack) or a split (quantity is
+		// part of the stack; the source keeps the remainder).
+		dst_stack.item = src_stack.item;
+		dst_stack.quantity = quantity;
+		dst_stack.can_buyback = src_stack.can_buyback;
+		if (quantity == src_stack.quantity)
+			src_stack.clear();
+		else
+			src_stack.quantity -= quantity;
+	}
+
+	if (touches_equipment)
+		applyEquipment();
+
+	recomputeCurrency();
+	return true;
+}
+
+// P3.11b. Removes quantity from (area,slot) and feeds it to drop_stack, which
+// serverCheckLootDrop() (main_server.cpp) already drains into world loot.
+bool PlayerInventory::dropItem(int area, int slot, int quantity) {
+	++version;
+
+	if (area < 0 || area > CARRIED)
+		return false;
+	if (slot < 0 || slot >= inventory[area].getSlotNumber())
+		return false;
+
+	ItemStack& stack = inventory[area][slot];
+	if (stack.empty() || quantity <= 0 || quantity > stack.quantity)
+		return false;
+
+	ItemStack dropped;
+	dropped.item = stack.item;
+	dropped.quantity = quantity;
+	dropped.can_buyback = stack.can_buyback;
+	drop_stack.push(dropped);
+
+	if (quantity == stack.quantity)
+		stack.clear();
+	else
+		stack.quantity -= quantity;
+
+	if (area == EQUIPMENT)
+		applyEquipment();
+
+	recomputeCurrency();
 	return true;
 }
 
@@ -717,6 +830,8 @@ void PlayerInventory::disableEquipmentSlot(size_t disable_slot_type) {
 // Moved from MenuInventory::fillEquipmentSlots() in P1.3d-4b-3 unchanged -- no internal caller
 // anywhere in the tree except SaveLoad, and no widget touch in its body at all.
 void PlayerInventory::fillEquipmentSlots() {
+	++version;
+
 	// create temporary array
 	ItemStack *equip_stack = new ItemStack[MAX_EQUIPPED];
 
@@ -774,7 +889,20 @@ void PlayerInventory::fillEquipmentSlots() {
 // That call site is inventoryFor(id)->applyDeathPenalty() now; PlayerInventory ended up as the
 // owner it predicted.
 void PlayerInventory::applyDeathPenalty() {
+	// P3.11b: called unconditionally, every tick, from GameStatePlay.cpp's tick (a call site that
+	// predates is_mirror and stays that way -- see that call site's own comment on why it runs
+	// where it does) -- owner->stats.death_penalty is false on every tick except the one right
+	// after a real death, so this is a no-op almost every call. version must only bump on the
+	// ticks something actually happens: bumping it unconditionally here (this function's every
+	// other mutator bumps at the top) raced a connected client's own local counter ahead of the
+	// server's real one on every single tick, which made netApplyInventorySnapshot() treat every
+	// subsequent, genuinely newer server broadcast as stale and silently stop applying it forever
+	// -- found via a 100% WorldHash::computeReplicated() digest mismatch in tests/run-net.sh's own
+	// combat scenario (the quiet scenarios never called this with anything to hide, since nothing
+	// died).
 	if (owner->stats.death_penalty && eset->death_penalty.enabled) {
+		++version;
+
 		std::string death_message = "";
 
 		// remove a % of currency

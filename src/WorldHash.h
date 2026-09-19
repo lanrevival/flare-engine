@@ -57,16 +57,19 @@ public:
 	static uint64_t compute(unsigned long tick);
 
 	/** Digest of only the fields the network already replicates: PlayerSnapshotEntry's set
-	 * (id, pos, direction, animation, hp, hp_max, alive) for every player, (P3.9) EntitySnapshotEntry's
-	 * set (net_id, pos, direction, cur_state, animation, hp, hp_max, alive, corpse) for every non-NPC
-	 * entity, and (P3.10) HazardSnapshotEntry's set (net_id, pos, direction, lifespan, delay_frames)
-	 * for every hazard plus LootSnapshotEntry's set (net_id, pos, quantity, on_ground) for every
-	 * ground loot. Inventory/campaign are not wire-replicated yet (P3.11b/P3.12), so compute() still
-	 * cannot be compared between a client and server process -- this can, once the two processes
-	 * stop independently simulating (P3.8, D27) and the entity/hazard/loot sets themselves stop
-	 * being independently spawned per process (P3.9, P3.10). Before that, two processes fed the same
-	 * scripted input can still disagree here by a tick or two of network latency; this is
-	 * infrastructure for P3.8 onward, not an equality guarantee on its own.
+	 * (id, pos, direction, animation, hp, hp_max, alive, and, since P3.11a, mp, mp_max, xp, level,
+	 * currency, effects, power cooldown/cast ticks) plus, since P3.11b, InventoryEntry's set
+	 * (equipment/carried item+quantity per slot, active_equipment_set) for every player; (P3.9)
+	 * EntitySnapshotEntry's set (net_id, pos, direction, cur_state, animation, hp, hp_max, alive,
+	 * corpse) for every non-NPC entity; and (P3.10) HazardSnapshotEntry's set (net_id, pos,
+	 * direction, lifespan, delay_frames) for every hazard plus LootSnapshotEntry's set (net_id,
+	 * pos, quantity, on_ground) for every ground loot. Campaign status is not wire-replicated yet
+	 * (P3.12), so compute() still cannot be compared between a client and server process on that
+	 * one axis -- this can, once the two processes stop independently simulating (P3.8, D27) and
+	 * the entity/hazard/loot sets themselves stop being independently spawned per process (P3.9,
+	 * P3.10). Before that, two processes fed the same scripted input can still disagree here by a
+	 * tick or two of network latency; this is infrastructure for P3.8 onward, not an equality
+	 * guarantee on its own.
 	 *
 	 * P3.8b: exclude_id, when >= 0, skips the player whose Avatar::id equals it -- used only by
 	 * main_server.cpp's own --no-local-player runs, to leave the --load-slot clone template

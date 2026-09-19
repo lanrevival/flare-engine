@@ -233,13 +233,14 @@ uint64_t WorldHash::compute(unsigned long tick) {
 }
 
 // P3.7 (players), P3.9 (entities, appended below the player section), P3.11a (players extended
-// with mp/xp/level/currency/effects/power cooldown+cast ticks). Field set mirrors
-// Net::PlayerSnapshotEntry/Net::EntitySnapshotEntry exactly (net/NetProtocol.h) and the
-// construction in serverBroadcastSnapshot() (main_server.cpp) / GameStatePlay.cpp's own snapshot
-// build -- so a value that diverges here is, by construction, a value that would also diverge on
-// the wire. Still excludes hazards/loot/inventory/campaign, and now also stats.powers_list/
-// ActionBarState (see PlayerSnapshotEntry's own header comment for why) -- see WorldHash.h's doc
-// comment on this function for why the rest are excluded.
+// with mp/xp/level/currency/effects/power cooldown+cast ticks), P3.11b (players extended again
+// with inventory content). Field set mirrors Net::PlayerSnapshotEntry/Net::InventoryEntry/
+// Net::EntitySnapshotEntry exactly (net/NetProtocol.h) and the construction in
+// serverBroadcastSnapshot() (main_server.cpp) / GameStatePlay.cpp's own snapshot build -- so a
+// value that diverges here is, by construction, a value that would also diverge on the wire.
+// Still excludes hazards/loot/campaign, and also stats.powers_list/ActionBarState (see
+// PlayerSnapshotEntry's own header comment for why) -- see WorldHash.h's doc comment on this
+// function for why the rest are excluded.
 uint64_t WorldHash::computeReplicated(unsigned long tick, int exclude_id) {
 	uint64_t h = init();
 
@@ -326,6 +327,25 @@ uint64_t WorldHash::computeReplicated(unsigned long tick, int exclude_id) {
 		// PlayerSnapshotEntry's own header comment (net/NetProtocol.h) for the MenuPowers
 		// auto-unlock divergence this plan found (a 100% digest mismatch, bisected to exactly this
 		// field) and left as a follow-up rather than fix in this plan's own scope.
+
+		// P3.11b. Field set mirrors Net::InventoryEntry exactly (net/NetProtocol.h). Indexed by
+		// slot, not sorted -- both EQUIPMENT and CARRIED are plain arrays sized identically by mod
+		// data (mod_hash handshake) on every process, already a stable cross-process key, same
+		// reasoning as the cooldown/cast arrays just above (unlike effect_list, which needed a
+		// sort). currency is NOT mixed again here -- av->stats.currency, already mixed above, is
+		// the same value PlayerInventory::recomputeCurrency() keeps it in sync with.
+		PlayerInventory* inv = playerm->inventoryFor(av->id);
+		if (inv) {
+			for (int s = 0; s < inv->MAX_EQUIPPED; ++s) {
+				h = mixU64(h, static_cast<uint64_t>(inv->inventory[PlayerInventory::EQUIPMENT][s].item));
+				h = mixI32(h, inv->inventory[PlayerInventory::EQUIPMENT][s].quantity);
+			}
+			for (int s = 0; s < inv->MAX_CARRIED; ++s) {
+				h = mixU64(h, static_cast<uint64_t>(inv->inventory[PlayerInventory::CARRIED][s].item));
+				h = mixI32(h, inv->inventory[PlayerInventory::CARRIED][s].quantity);
+			}
+			h = mixI32(h, static_cast<int32_t>(inv->active_equipment_set));
+		}
 	}
 
 	// P3.9. Field set mirrors Net::EntitySnapshotEntry exactly (net/NetProtocol.h). Sorted by

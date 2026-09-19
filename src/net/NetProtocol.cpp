@@ -850,6 +850,111 @@ bool decodePlayerEvent(const std::string& payload, MsgPlayerEvent& out) {
 	}
 }
 
+std::string encodeInventoryCommand(const MsgInventoryCommand& cmd) {
+	std::string out;
+	writeU8(out, static_cast<uint8_t>(MSG_INVENTORY_CMD));
+	writeU8(out, cmd.cmd_type);
+	writeU8(out, cmd.src_area);
+	writeU32(out, static_cast<uint32_t>(cmd.src_slot));
+	writeU8(out, cmd.dst_area);
+	writeU32(out, static_cast<uint32_t>(cmd.dst_slot));
+	writeU32(out, static_cast<uint32_t>(cmd.quantity));
+	return out;
+}
+
+bool decodeInventoryCommand(const std::string& payload, MsgInventoryCommand& out) {
+	size_t offset = 0;
+	uint8_t type;
+	if (!readU8(payload, offset, type) || type != MSG_INVENTORY_CMD)
+		return false;
+
+	uint32_t src_slot32, dst_slot32, quantity32;
+	if (!readU8(payload, offset, out.cmd_type)
+	    || !readU8(payload, offset, out.src_area)
+	    || !readU32(payload, offset, src_slot32)
+	    || !readU8(payload, offset, out.dst_area)
+	    || !readU32(payload, offset, dst_slot32)
+	    || !readU32(payload, offset, quantity32))
+		return false;
+	out.src_slot = static_cast<int32_t>(src_slot32);
+	out.dst_slot = static_cast<int32_t>(dst_slot32);
+	out.quantity = static_cast<int32_t>(quantity32);
+
+	return out.cmd_type == INV_CMD_MOVE || out.cmd_type == INV_CMD_DROP;
+}
+
+std::string encodeInventorySnapshot(const std::vector<InventoryEntry>& players) {
+	std::string out;
+	writeU8(out, static_cast<uint8_t>(MSG_INVENTORY_SNAPSHOT));
+	writeU16(out, static_cast<uint16_t>(players.size()));
+	for (size_t i = 0; i < players.size(); ++i) {
+		const InventoryEntry& p = players[i];
+		writeU8(out, p.id);
+		writeU32(out, p.version);
+		writeU16(out, static_cast<uint16_t>(p.equipment.size()));
+		for (size_t j = 0; j < p.equipment.size(); ++j) {
+			writeU32(out, p.equipment[j].item);
+			writeU32(out, static_cast<uint32_t>(p.equipment[j].quantity));
+		}
+		writeU16(out, static_cast<uint16_t>(p.carried.size()));
+		for (size_t j = 0; j < p.carried.size(); ++j) {
+			writeU32(out, p.carried[j].item);
+			writeU32(out, static_cast<uint32_t>(p.carried[j].quantity));
+		}
+		writeU32(out, p.active_equipment_set);
+	}
+	return out;
+}
+
+bool decodeInventorySnapshot(const std::string& payload, MsgInventorySnapshot& out) {
+	size_t offset = 0;
+	uint8_t type;
+	if (!readU8(payload, offset, type) || type != MSG_INVENTORY_SNAPSHOT)
+		return false;
+
+	uint16_t player_count;
+	if (!readU16(payload, offset, player_count))
+		return false;
+
+	out.players.clear();
+	for (uint16_t i = 0; i < player_count; ++i) {
+		InventoryEntry p;
+		if (!readU8(payload, offset, p.id) || !readU32(payload, offset, p.version))
+			return false;
+
+		uint16_t equip_count;
+		if (!readU16(payload, offset, equip_count))
+			return false;
+		for (uint16_t j = 0; j < equip_count; ++j) {
+			InventorySlotEntry s;
+			uint32_t quantity32;
+			if (!readU32(payload, offset, s.item) || !readU32(payload, offset, quantity32))
+				return false;
+			s.quantity = static_cast<int32_t>(quantity32);
+			p.equipment.push_back(s);
+		}
+
+		uint16_t carried_count;
+		if (!readU16(payload, offset, carried_count))
+			return false;
+		for (uint16_t j = 0; j < carried_count; ++j) {
+			InventorySlotEntry s;
+			uint32_t quantity32;
+			if (!readU32(payload, offset, s.item) || !readU32(payload, offset, quantity32))
+				return false;
+			s.quantity = static_cast<int32_t>(quantity32);
+			p.carried.push_back(s);
+		}
+
+		if (!readU32(payload, offset, p.active_equipment_set))
+			return false;
+
+		out.players.push_back(p);
+	}
+
+	return true;
+}
+
 uint8_t peekMessageType(const std::string& payload) {
 	if (payload.empty())
 		return 0;

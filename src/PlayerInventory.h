@@ -190,10 +190,41 @@ public:
 	// contract as MenuInventory::applyEquipmentSetDelta().
 	bool applyEquipmentSetDelta(int delta);
 
+	// P3.11b. The data half of MenuInventory::drop()'s CARRIED/EQUIPMENT branches
+	// (src/MenuInventory.cpp): move an item from (src_area,src_slot) to (dst_area,dst_slot),
+	// merging if the destination holds the same item, swapping if it holds a different one, or a
+	// plain move if it is empty. A destination in EQUIPMENT is additionally checked against
+	// items->requirementsMet(), slot_type, owner->stats.humanoid and isEquipSlotEnabled() -- the
+	// same checks drop() already makes. UI-only concerns from the original (sound, GameSlotPreview
+	// refresh, action-bar auto-placement suggestion, touchscreen tap-to-activate) do not come --
+	// see PlayerInventory.h's own accounting further up for why those stayed on MenuInventory the
+	// first time mutators moved here (P1.3d-4b-3). Returns false (no mutation at all) for any
+	// invalid request: out-of-range area/slot, non-positive quantity, quantity exceeding the
+	// source stack, or a rejected equip.
+	bool moveItem(int src_area, int src_slot, int dst_area, int dst_slot, int quantity);
+
+	// P3.11b. Removes quantity from (area,slot) and pushes the resulting stack onto drop_stack
+	// below, which serverCheckLootDrop() (main_server.cpp) already drains into world loot for
+	// every connected player's own inventory -- that drain side needs no change, only this feed.
+	// Returns false (no mutation) if the slot is empty, out of range, or quantity is invalid.
+	bool dropItem(int area, int slot, int quantity);
+
 	// Argument names for add(), moved from MenuInventory alongside it. Deleted there, not aliased
 	// -- same reasoning as ONLY_EMPTY_SLOTS above.
 	static const bool ADD_PLAY_SOUND = true;
 	static const bool ADD_AUTO_EQUIP = true;
+
+	// P3.11b. Incremented at the top of every mutator in this class (add/remove/applyEquipment/
+	// applyDeathPenalty/fillEquipmentSlots/applyEquipmentSetDelta/addCurrency/removeCurrency/
+	// moveItem/dropItem) -- unconditionally, even for a call that turns out to be a no-op, because
+	// several of these call each other or disableEquipmentSlot() (which can itself move an item
+	// out of a slot it just disabled) and missing one of those paths would mean a slot content
+	// change that never gets resent, a PERMANENT WorldHash digest divergence rather than a
+	// one-tick delay. Read by main_server.cpp's serverBroadcastInventorySnapshot() and applied by
+	// GameStatePlay::netApplyInventorySnapshot(), which discards an incoming entry whose version is
+	// not strictly newer than this -- see MsgInventorySnapshot's own header comment
+	// (net/NetProtocol.h) for why that guard exists even though it should never fire.
+	uint32_t version;
 
 	std::queue<ItemStack> drop_stack;
 

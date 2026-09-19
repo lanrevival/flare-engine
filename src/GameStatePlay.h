@@ -56,6 +56,8 @@ namespace Net {
 	struct MsgLootSpawn;
 	struct MsgLootSnapshot;
 	struct MsgPlayerEvent;
+	struct MsgInventoryCommand;
+	struct MsgInventorySnapshot;
 }
 
 class ActionData;
@@ -147,6 +149,13 @@ private:
 	// messages/combat text/sound, everything Avatar::logic() used to trigger only for a local hero.
 	// See plans/phase3/P3.11a-player-state-and-events.md.
 	void netApplyPlayerEvent(const Net::MsgPlayerEvent& event);
+
+	// P3.11b. Applies a full per-player inventory dump (broadcast every tick alongside
+	// MSG_PLAYER_SNAPSHOT) into playerm->inventoryFor(...)'s already-existing PlayerInventory --
+	// every player this client knows about already has one, sized from mod data at provisioning
+	// time (netApplySnapshotEntry()'s own loadEquipmentData() call). See plans/phase3/
+	// P3.11b-inventory-mirror-and-commands.md.
+	void netApplyInventorySnapshot(const Net::MsgInventorySnapshot& snapshot);
 
 	// This client's own local avatar always occupies playerm id 0 (playerm->create(0) in the
 	// constructor, unrelated to networking). A dedicated server ALWAYS has its own player 0 too
